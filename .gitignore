@@ -1,0 +1,18 @@
+node_modules/
+
+# Python environments
+venv/
+.venv/
+
+# Python build/test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local databases and generated runtime data
+*.db
+backend/.rt-staging/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

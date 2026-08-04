@@ -1,0 +1,244 @@
+"""Password, session, demo-account seed and role authorization helpers."""
+import hashlib
+import os
+import secrets
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Optional
+
+import bcrypt
+from fastapi import Cookie, Depends, Header, HTTPException, Request, Response
+from sqlalchemy.orm import Session
+
+from database import get_db
+from models.auth import AuthAuditEvent, AuthSession, PortalUser
+
+ROLE_ADMIN = "ADMIN"
+ROLE_MONITOR = "MONITOR"
+ROLE_ADJUDICATOR = "ADJUDICATOR"
+ROLES = {ROLE_ADMIN, ROLE_MONITOR, ROLE_ADJUDICATOR}
+ACTIVE = "ACTIVE"
+INACTIVE = "INACTIVE"
+AUTH_COOKIE = "acrn_demo_session"
+SESSION_HOURS = int(os.getenv("SESSION_HOURS", "12"))
+LOCK_AFTER = int(os.getenv("LOGIN_LOCK_AFTER", "5"))
+LOCK_MINUTES = int(os.getenv("LOGIN_LOCK_MINUTES", "15"))
+DEFAULT_PASSWORD_ENV = "DEMO_DEFAULT_PASSWORD"
+AUTH_COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", "false").lower() == "true"
+AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE") or ("none" if AUTH_COOKIE_SECURE else "lax")
+
+DEMO_ACCOUNTS = [
+    ("admin@acrnhealth.com", "ACRN Demo Administrator", ROLE_ADMIN),
+    ("monitor1@acrnhealth.com", "ACRN Demo Monitor 1", ROLE_MONITOR),
+    ("monitor2@acrnhealth.com", "ACRN Demo Monitor 2", ROLE_MONITOR),
+    ("adjudicatora@acrnhealth.com", "ACRN Demo Adjudicator A", ROLE_ADJUDICATOR),
+    ("adjudicatorb@acrnhealth.com", "ACRN Demo Adjudicator B", ROLE_ADJUDICATOR),
+    ("adjudicatorc@acrnhealth.com", "ACRN Demo Adjudicator C", ROLE_ADJUDICATOR),
+]
+
+
+@dataclass(frozen=True)
+class AuthIdentity:
+    id: str
+    email: str
+    display_name: str
+    role: str
+    is_demo_account: bool = True
+
+    @property
+    def portal(self) -> str:
+        return {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator"}[self.role]
+
+
+def normalize_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def default_password() -> str:
+    return os.getenv(DEFAULT_PASSWORD_ENV, "ACRN@2026")
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def request_meta(request: Optional[Request]) -> dict:
+    if not request:
+        return {}
+    return {
+        "ip": request.client.host if request.client else None,
+        "user_agent": request.headers.get("user-agent", "")[:255],
+        "path": request.url.path,
+    }
+
+
+def audit_auth(db: Session, event_type: str, outcome: str = "SUCCESS", actor: Optional[PortalUser] = None,
+               affected: Optional[PortalUser] = None, request: Optional[Request] = None, reason: str = "",
+               details: Optional[dict] = None):
+    db.add(AuthAuditEvent(
+        actor_user_id=actor.id if actor else None,
+        actor_email=actor.email if actor else None,
+        actor_role=actor.role if actor else None,
+        affected_user_id=affected.id if affected else None,
+        affected_email=affected.email if affected else None,
+        event_type=event_type,
+        outcome=outcome,
+        request_metadata=request_meta(request),
+        details=details or {},
+        reason=reason,
+    ))
+
+
+def seed_demo_accounts(db: Session, force_password_reset: bool = False) -> int:
+    must_change = os.getenv("DEMO_FORCE_PASSWORD_CHANGE", "false").lower() == "true"
+    created = 0
+    for email, display_name, role in DEMO_ACCOUNTS:
+        normalized = normalize_email(email)
+        row = db.query(PortalUser).filter_by(email=normalized).first()
+        if not row:
+            row = PortalUser(
+                email=normalized,
+                display_name=display_name,
+                password_hash=hash_password(default_password()),
+                role=role,
+                status=ACTIVE,
+                is_demo_account=True,
+                must_change_password=must_change,
+            )
+            db.add(row)
+            created += 1
+        else:
+            row.display_name = display_name
+            row.role = role
+            row.status = row.status or ACTIVE
+            row.is_demo_account = True
+            if force_password_reset:
+                row.password_hash = hash_password(default_password())
+                row.must_change_password = must_change
+                row.failed_login_count = 0
+                row.locked_until = None
+    db.commit()
+    return created
+
+
+def maybe_seed_demo_accounts(db: Session):
+    if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true":
+        seed_demo_accounts(db)
+
+
+def _public_user(user: PortalUser) -> dict:
+    return {
+        "id": user.id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "name": user.display_name,
+        "role": user.role.title(),
+        "roleCode": user.role,
+        "portal": {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator"}[user.role],
+        "status": user.status,
+        "is_demo_account": user.is_demo_account,
+        "demo": user.is_demo_account,
+        "must_change_password": user.must_change_password,
+        "last_login_at": user.last_login_at,
+    }
+
+
+def login(db: Session, email: str, password: str, response: Response, request: Request) -> dict:
+    normalized = normalize_email(email)
+    generic = HTTPException(401, "Invalid email or password.")
+    user = db.query(PortalUser).filter_by(email=normalized).first()
+    now = datetime.utcnow()
+    if not user:
+        audit_auth(db, "LOGIN_FAILURE", "FAILURE", request=request, details={"email_hash": hashlib.sha256(normalized.encode()).hexdigest()})
+        db.commit()
+        raise generic
+    if user.status != ACTIVE or (user.locked_until and user.locked_until > now):
+        audit_auth(db, "LOGIN_FAILURE", "FAILURE", affected=user, request=request, reason="Account inactive or locked")
+        db.commit()
+        raise generic
+    if not verify_password(password, user.password_hash):
+        user.failed_login_count = (user.failed_login_count or 0) + 1
+        if user.failed_login_count >= LOCK_AFTER:
+            user.locked_until = now + timedelta(minutes=LOCK_MINUTES)
+            audit_auth(db, "ACCOUNT_LOCK", "SUCCESS", affected=user, request=request, reason="Repeated failed login attempts")
+        audit_auth(db, "LOGIN_FAILURE", "FAILURE", affected=user, request=request)
+        db.commit()
+        raise generic
+    user.failed_login_count = 0
+    user.locked_until = None
+    user.last_login_at = now
+    raw_token = secrets.token_urlsafe(32)
+    db.add(AuthSession(
+        token_hash=_hash_token(raw_token),
+        user_id=user.id,
+        expires_at=now + timedelta(hours=SESSION_HOURS),
+        user_agent=(request.headers.get("user-agent", "")[:255] if request else ""),
+        ip_address=(request.client.host if request and request.client else ""),
+    ))
+    audit_auth(db, "LOGIN_SUCCESS", "SUCCESS", actor=user, affected=user, request=request)
+    db.commit()
+    response.set_cookie(
+        AUTH_COOKIE,
+        raw_token,
+        httponly=True,
+        secure=AUTH_COOKIE_SECURE,
+        samesite=AUTH_COOKIE_SAMESITE,
+        max_age=SESSION_HOURS * 3600,
+        path="/",
+    )
+    return _public_user(user)
+
+
+def logout(db: Session, token: Optional[str], response: Response, request: Request, user: Optional[PortalUser] = None):
+    if token:
+        session = db.query(AuthSession).filter_by(token_hash=_hash_token(token), revoked_at=None).first()
+        if session:
+            session.revoked_at = datetime.utcnow()
+    audit_auth(db, "LOGOUT", "SUCCESS", actor=user, affected=user, request=request)
+    db.commit()
+    response.delete_cookie(AUTH_COOKIE, path="/", secure=AUTH_COOKIE_SECURE, samesite=AUTH_COOKIE_SAMESITE)
+
+
+def current_user(acrn_demo_session: Optional[str] = Cookie(None), db: Session = Depends(get_db)) -> PortalUser:
+    if not acrn_demo_session:
+        raise HTTPException(401, "Authentication required")
+    session = db.query(AuthSession).filter_by(token_hash=_hash_token(acrn_demo_session), revoked_at=None).first()
+    if not session or session.expires_at <= datetime.utcnow():
+        raise HTTPException(401, "Authentication required")
+    user = db.get(PortalUser, session.user_id)
+    if not user or user.status != ACTIVE or (user.locked_until and user.locked_until > datetime.utcnow()):
+        raise HTTPException(401, "Authentication required")
+    return user
+
+
+def identity(user: PortalUser = Depends(current_user)) -> AuthIdentity:
+    return AuthIdentity(user.id, user.email, user.display_name, user.role, user.is_demo_account)
+
+
+def require_role(*roles: str):
+    allowed = {r.upper() for r in roles}
+
+    def dep(user: PortalUser = Depends(current_user), db: Session = Depends(get_db), request: Request = None):
+        if user.role not in allowed:
+            audit_auth(db, "UNAUTHORIZED_ACCESS_ATTEMPT", "FAILURE", actor=user, affected=user, request=request, details={"required": sorted(allowed)})
+            db.commit()
+            raise HTTPException(403, "Access denied")
+        return user
+    return dep
+
+
+def identity_from_user(user: PortalUser) -> AuthIdentity:
+    return AuthIdentity(user.id, user.email, user.display_name, user.role, user.is_demo_account)
+
+
+def header_or_session_identity(x_demo_user: Optional[str] = Header(None), x_demo_role: Optional[str] = Header(None),
+                               user: Optional[PortalUser] = Depends(current_user)):
+    return identity_from_user(user)

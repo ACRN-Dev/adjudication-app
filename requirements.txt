@@ -1,0 +1,37 @@
+# ACRN PROTECT-Africa Adjudication Platform — Python Dependencies
+# Fast-API Backend & Clinical Derivation Engine
+
+# Web Framework & Async Server
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+watchfiles==0.22.0
+python-multipart==0.0.9
+
+# Database & Migrations
+sqlalchemy==2.0.31
+alembic==1.13.2
+psycopg2-binary==2.9.9
+
+# Validation & Settings
+pydantic==2.7.4
+pydantic-settings==2.3.4
+
+# Security & Authentication (21 CFR Part 11 Audit & MFA)
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Data Processing & Analytics
+pandas==2.2.2
+numpy==2.0.0
+
+# Document & Report Generation (FORM-ADJ PDF & DOCX Templates)
+reportlab==4.2.2
+python-docx==1.1.2
+
+# HTTP & External Integration
+httpx==0.27.0
+openai==1.35.14
+
+# Testing & Quality Assurance
+pytest==8.2.2
+pytest-asyncio==0.23.7
