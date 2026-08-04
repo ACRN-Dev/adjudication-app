@@ -102,7 +102,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi import HTTPException
 
-dist_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist")
+# Resolve dist/ relative to the repo root regardless of --app-dir or CWD
+_here = os.path.dirname(os.path.abspath(__file__))  # .../backend
+dist_path = os.path.join(os.path.dirname(_here), "dist")
 if os.path.exists(dist_path):
     assets_path = os.path.join(dist_path, "assets")
     if os.path.exists(assets_path):

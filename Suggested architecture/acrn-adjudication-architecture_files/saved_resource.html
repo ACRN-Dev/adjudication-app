@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<!-- saved from url=(0038)https://app.clickup-embedded-html.com/ -->
+<html lang="en-US" dir="ltr"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><!--<base href="/">--><base href="."><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><link rel="icon" type="image/png" href="https://app-cdn.clickup.com/assets/favicons/favicon-16x16.png" sizes="16x16"><link rel="icon" type="image/png" href="https://app-cdn.clickup.com/assets/favicons/favicon-32x32.png" sizes="32x32"><link rel="stylesheet" href="./styles-EUJ4CZUO.css" crossorigin="anonymous"><style>.cu-embedded-html__container[_ngcontent-ng-c94272347]{display:flow-root;width:100%}</style><style>undefined</style></head><body data-git-sha="c0cd57df579d61a80426ffe15198827282d5b325" data-build-version="4.16.3" data-build-time="2026-07-30T23:50:43.244Z" class="artifact-editable"><cu-root ng-version="21.2.17" _nghost-ng-c94272347=""><div _ngcontent-ng-c94272347="" class="cu-embedded-html__container">
+
+
+<!-- skill:chrome -->
+<style>
+/* Credit line — bottom-right */
+.design-ui-credit {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  font: 11px/1 system-ui, sans-serif;
+  color: rgba(128,128,128,0.5);
+  pointer-events: none;
+  z-index: 2147483647;
+  transition: opacity 0.4s ease;
+  user-select: none;
+  letter-spacing: 0.02em;
+}
+
+/* Hide chrome on touch devices */
+@media (hover: none) {
+  .design-ui-credit { display: none; }
+}
+
+/* Print fixes */
+@media print {
+  * {
+    transition: none !important;
+    animation: none !important;
+    box-shadow: none !important;
+  }
+  body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .design-ui-credit { display: none !important; }
+}
+
+</style>
+<script data-activated="true">
+(function () {
+    // Design-ui pages are single compositions, so the whole body is editable.
+    function markEditable() {
+        document.body.classList.add('artifact-editable');
+    }
+
+    // Credit badge with idle-fade. Hover devices only.
+    function initChromeUI() {
+        if (!matchMedia('(hover: hover)').matches) return;
+
+        var credit = document.createElement('div');
+        credit.className = 'design-ui-credit';
+        credit.setAttribute('aria-hidden', 'true');
+        credit.innerHTML = '\u{1F49C} by ClickUp Brain';
+        document.body.appendChild(credit);
+
+        var timer = null;
+        var fade = function (out) { credit.style.opacity = out ? '0' : ''; };
+        fade(true);
+        var show = function () {
+            fade(false);
+            clearTimeout(timer);
+            timer = setTimeout(function () { fade(true); }, 3000);
+        };
+        document.addEventListener('mousemove', show);
+        show();
+    }
+
+    function init() {
+        markEditable();
+        initChromeUI();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
+
+</script>
+<!-- /skill:chrome -->
+<!-- skill:libraries -->
+<script src="./lucide.min.js.download" integrity="sha384-wHFvAtjmgnkA2PJcMsDaCgdipf7X7YV44X/igbLHpvGiq6T5/PvFKl93grpvtbQT" crossorigin="anonymous" data-activated="true"></script>
+<script data-activated="true">document.addEventListener("DOMContentLoaded",()=>lucide.createIcons())</script>
+<!-- /skill:libraries -->
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACRN Adjudicate · Architecture Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com/">
+<link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="">
+<link href="./css2" rel="stylesheet">
+<style>
+:root{
+  --paper: oklch(97.4% 0.007 78);
+  --paper-2: oklch(94.8% 0.009 78);
+  --paper-3: oklch(91.8% 0.011 78);
+  --ink: oklch(23% 0.018 45);
+  --ink-2: oklch(44% 0.015 50);
+  --ink-3: oklch(60% 0.012 60);
+  --rule: oklch(88% 0.01 75);
+  --rule-2: oklch(80% 0.013 75);
+  --ox: oklch(44% 0.145 24);
+  --ox-soft: oklch(93.5% 0.032 24);
+  --ochre: oklch(58% 0.115 68);
+  --ochre-soft: oklch(94.5% 0.05 78);
+  --moss: oklch(46% 0.088 148);
+  --moss-soft: oklch(94% 0.042 148);
+  --ind: oklch(44% 0.095 265);
+  --ind-soft: oklch(94% 0.032 265);
+
+  --sans: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --serif: "Instrument Serif", Georgia, serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
+  --s6: 32px; --s7: 48px; --s8: 72px; --s9: 112px;
+
+  --eo: cubic-bezier(.22,1,.36,1);
+}
+*{box-sizing:border-box}
+html{ -webkit-text-size-adjust:100% }
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--sans); font-size:17px; line-height:1.62;
+  font-optical-sizing:auto; -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{text-wrap:balance; margin:0}
+p{margin:0; text-wrap:pretty}
+a{color:var(--ox); text-underline-offset:3px; text-decoration-thickness:1px}
+a:hover{color:var(--ink)}
+::selection{background:var(--ox-soft)}
+
+/* ---------- shell ---------- */
+.shell{display:grid; grid-template-columns:246px minmax(0,1fr); align-items:start; max-width:1420px; margin:0 auto}
+
+/* ---------- sidebar ---------- */
+.rail{
+  position:sticky; top:0; height:100vh; padding:var(--s7) var(--s5) var(--s5) var(--s6);
+  border-right:1px solid var(--rule); display:flex; flex-direction:column; gap:var(--s5);
+  background:linear-gradient(180deg, var(--paper) 0%, var(--paper) 100%);
+}
+.mark{font-family:var(--serif); font-size:26px; line-height:1.05; letter-spacing:-.01em}
+.mark em{font-style:italic; color:var(--ox)}
+.rail .kicker{font-family:var(--mono); font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); margin-top:6px}
+nav.toc{display:flex; flex-direction:column; gap:1px; overflow-y:auto; flex:1; margin-left:-8px}
+nav.toc a{
+  display:grid; grid-template-columns:26px 1fr; gap:2px; align-items:baseline;
+  font-size:13.5px; line-height:1.3; color:var(--ink-2); text-decoration:none;
+  padding:7px 8px; border-radius:5px; transition:background .16s var(--eo), color .16s var(--eo);
+}
+nav.toc a span{font-family:var(--mono); font-size:10.5px; color:var(--ink-3); letter-spacing:.04em}
+nav.toc a:hover{background:var(--paper-2); color:var(--ink)}
+nav.toc a.on{background:var(--ink); color:var(--paper)}
+nav.toc a.on span{color:oklch(78% 0.06 40)}
+.rail footer{font-family:var(--mono); font-size:10.5px; line-height:1.7; color:var(--ink-3); border-top:1px solid var(--rule); padding-top:var(--s3)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--ochre);display:inline-block;margin-right:6px;vertical-align:1px}
+
+/* ---------- main ---------- */
+main{padding:var(--s7) var(--s8) var(--s9) var(--s8); min-width:0}
+.col{max-width:74ch; position:relative}
+.bleed{max-width:min(1000px, 100%); width:calc(100% + 240px)}
+@media (max-width:1300px){ .bleed{width:100%} }
+
+/* masthead */
+.masthead{border-bottom:2px solid var(--ink); padding-bottom:var(--s5); margin-bottom:var(--s5)}
+.masthead h1{font-family:var(--serif); font-size:clamp(2.7rem,4.4vw,4.1rem); line-height:.98; letter-spacing:-.02em; margin-bottom:var(--s4)}
+.masthead h1 em{font-style:italic; color:var(--ox)}
+.lede{font-size:19px; line-height:1.55; color:var(--ink-2); max-width:62ch}
+.meta{display:flex; flex-wrap:wrap; gap:var(--s2) var(--s6); margin-top:var(--s6); font-family:var(--mono); font-size:11px; letter-spacing:.04em; color:var(--ink-3); text-transform:uppercase}
+.meta b{display:block; color:var(--ink); font-weight:500; text-transform:none; letter-spacing:0; font-size:12.5px; margin-top:2px}
+
+/* sections */
+section{padding-top:var(--s8); scroll-margin-top:var(--s5)}
+.shead{display:flex; align-items:baseline; gap:var(--s4); margin-bottom:var(--s5)}
+.shead .num{font-family:var(--mono); font-size:12px; color:var(--ox); letter-spacing:.08em; padding-top:8px}
+.shead h2{font-family:var(--serif); font-size:2.35rem; line-height:1.08; letter-spacing:-.015em}
+section > .col > p + p{margin-top:var(--s4)}
+h3{font-size:1.0625rem; font-weight:700; letter-spacing:-.005em; margin:var(--s7) 0 var(--s3)}
+h4{font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.11em; color:var(--ink-3); margin:var(--s5) 0 var(--s2); font-weight:500}
+
+/* sidenote */
+.hasnote{position:relative}
+.note{font-size:12.5px; line-height:1.5; color:var(--ink-2); font-family:var(--sans)}
+@media (min-width:1301px){
+  .note{position:absolute; left:calc(100% + 44px); top:2px; width:196px; border-top:1px solid var(--rule-2); padding-top:8px}
+}
+@media (max-width:1300px){
+  .note{margin-top:var(--s3); padding-left:var(--s4); border-top:1px solid var(--rule-2); padding-top:8px; max-width:52ch}
+}
+.note b{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ox); display:block; margin-bottom:2px; font-weight:500}
+
+/* lists */
+ul.tight{margin:var(--s3) 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:var(--s2)}
+ul.tight li{display:grid; grid-template-columns:16px 1fr; gap:var(--s2); font-size:16px; line-height:1.5}
+ul.tight li::before{content:""; width:5px; height:5px; background:var(--ink-3); border-radius:50%; margin-top:9px}
+ul.tight li b{font-weight:600}
+
+ol.steps{counter-reset:st; margin:var(--s4) 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:var(--s3)}
+ol.steps li{counter-increment:st; display:grid; grid-template-columns:28px 1fr; gap:var(--s3); align-items:start}
+ol.steps li::before{content:counter(st,decimal-leading-zero); font-family:var(--mono); font-size:11px; color:var(--ox); padding-top:5px; letter-spacing:.05em}
+
+/* callout */
+.callout{background:var(--ox-soft); border:1px solid oklch(84% 0.06 24); border-radius:8px; padding:var(--s4) var(--s5); margin-top:var(--s5)}
+.callout p{font-size:16px}
+.callout .lbl{font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ox); margin-bottom:6px; font-weight:600}
+.callout.neutral{background:var(--paper-2); border-color:var(--rule-2)}
+.callout.neutral .lbl{color:var(--ink-3)}
+
+/* tables */
+.tbl{width:100%; border-collapse:collapse; margin-top:var(--s5); font-size:14px; font-variant-numeric:tabular-nums}
+.tbl th{text-align:left; font-family:var(--mono); font-size:10px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3); font-weight:500; padding:0 var(--s4) var(--s2) 0; border-bottom:1px solid var(--ink)}
+.tbl td{padding:var(--s3) var(--s4) var(--s3) 0; border-bottom:1px solid var(--rule); vertical-align:top; line-height:1.45}
+.tbl tr:hover td{background:var(--paper-2)}
+.tbl td:last-child, .tbl th:last-child{padding-right:0}
+.tbl code{font-family:var(--mono); font-size:12.5px; background:var(--paper-3); padding:1px 5px; border-radius:3px}
+.tbl .k{font-weight:600; white-space:nowrap}
+
+code{font-family:var(--mono); font-size:.88em}
+.inline{background:var(--paper-3); padding:1px 5px; border-radius:3px}
+
+/* diagram */
+.diagram{margin-top:var(--s6); border:1px solid var(--rule-2); border-radius:10px; background:var(--paper-2); overflow:hidden}
+.diagram .dhead{display:flex; justify-content:space-between; align-items:center; padding:10px var(--s4); border-bottom:1px solid var(--rule-2); font-family:var(--mono); font-size:10px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3)}
+.band{display:grid; grid-template-columns:96px 1fr; border-bottom:1px solid var(--rule); }
+.band:last-child{border-bottom:0}
+.band .blabel{font-family:var(--mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); padding:var(--s4) var(--s2) var(--s4) var(--s4); border-right:1px solid var(--rule); writing-mode:horizontal-tb; line-height:1.4}
+.nodes{display:flex; flex-wrap:wrap; gap:var(--s2); padding:var(--s4)}
+.node{background:var(--paper); border:1px solid var(--rule-2); border-radius:6px; padding:9px 12px; font-size:13px; font-weight:500; line-height:1.25; transition:border-color .16s var(--eo), transform .16s var(--eo)}
+.node:hover{border-color:var(--ink); transform:translateY(-1px)}
+.node small{display:block; font-family:var(--mono); font-size:9.5px; color:var(--ink-3); letter-spacing:.05em; margin-top:3px; font-weight:400}
+.node.core{border-color:var(--ox); background:var(--ox-soft)}
+.node.core small{color:var(--ox)}
+.node.ai{border-color:oklch(78% 0.06 265); background:var(--ind-soft)}
+.node.ai small{color:var(--ind)}
+.node.grow{flex:1; min-width:150px}
+.band.spine{background:var(--ink); color:var(--paper)}
+.band.spine .blabel{color:oklch(72% 0.03 60); border-right-color:oklch(35% 0.02 45)}
+.band.spine .nodes{padding:var(--s3) var(--s4)}
+.band.spine .bus{font-family:var(--mono); font-size:11.5px; letter-spacing:.06em; display:flex; gap:var(--s5); flex-wrap:wrap; color:oklch(88% 0.02 60)}
+.band.spine .bus i{font-style:normal; color:oklch(78% 0.09 60)}
+
+/* flow svg */
+.flowwrap{margin-top:var(--s6); border:1px solid var(--rule-2); border-radius:10px; padding:var(--s5) var(--s4); background:var(--paper-2); overflow-x:auto}
+.flowwrap svg{display:block; min-width:640px; margin:0 auto}
+
+/* schema */
+.schema{display:grid; grid-template-columns:repeat(auto-fill,minmax(228px,1fr)); gap:var(--s3); margin-top:var(--s5)}
+.ent{border:1px solid var(--rule-2); border-radius:7px; background:var(--paper); overflow:hidden}
+.ent h5{margin:0; font-family:var(--mono); font-size:11.5px; letter-spacing:.05em; padding:8px 11px; background:var(--paper-3); border-bottom:1px solid var(--rule); font-weight:600}
+.ent.pk h5{background:var(--ink); color:var(--paper)}
+.ent.imm h5{background:var(--moss-soft); color:var(--moss)}
+.ent ul{margin:0; padding:8px 11px; list-style:none; display:flex; flex-direction:column; gap:3px}
+.ent li{font-family:var(--mono); font-size:11px; color:var(--ink-2); line-height:1.4; display:flex; justify-content:space-between; gap:8px}
+.ent li i{font-style:normal; color:var(--ink-3); font-size:9.5px; letter-spacing:.05em; text-transform:uppercase}
+.ent li.fk{color:var(--ox)}
+
+/* pills */
+.pill{display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:10px; letter-spacing:.07em; text-transform:uppercase; padding:3px 7px; border-radius:4px; border:1px solid var(--rule-2); background:var(--paper); color:var(--ink-2); white-space:nowrap}
+.pill.ok{background:var(--moss-soft); border-color:oklch(82% 0.06 148); color:var(--moss)}
+.pill.warn{background:var(--ochre-soft); border-color:oklch(83% 0.08 78); color:var(--ochre)}
+.pill.crit{background:var(--ox-soft); border-color:oklch(84% 0.06 24); color:var(--ox)}
+.pill.ai{background:var(--ind-soft); border-color:oklch(84% 0.05 265); color:var(--ind)}
+
+/* ---------- mockups ---------- */
+.screens{margin-top:var(--s6)}
+.tabs{display:flex; gap:2px; border-bottom:1px solid var(--rule-2); flex-wrap:wrap}
+.tabs button{
+  appearance:none; background:none; border:1px solid transparent; border-bottom:0; cursor:pointer;
+  font-family:var(--mono); font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3);
+  padding:9px 14px; border-radius:6px 6px 0 0; margin-bottom:-1px; transition:color .15s var(--eo), background .15s var(--eo);
+}
+.tabs button:hover{color:var(--ink); background:var(--paper-2)}
+.tabs button.on{color:var(--ink); background:var(--paper-2); border-color:var(--rule-2); font-weight:600}
+.tabs button:focus-visible{outline:2px solid var(--ox); outline-offset:2px}
+.frame{border:1px solid var(--rule-2); border-top:0; border-radius:0 0 10px 10px; background:var(--paper-2); padding:var(--s4); overflow-x:auto}
+.app{background:var(--paper); border:1px solid var(--rule); border-radius:7px; min-width:900px; overflow:hidden; box-shadow:0 1px 2px oklch(23% 0.018 45 / .05), 0 8px 24px oklch(23% 0.018 45 / .05)}
+.screen{display:none}
+.screen.on{display:block; animation:fade .34s var(--eo)}
+@keyframes fade{from{opacity:0; transform:translateY(5px)} to{opacity:1; transform:none}}
+
+.chrome{display:flex; align-items:center; justify-content:space-between; padding:9px 14px; border-bottom:1px solid var(--rule); background:var(--paper-2)}
+.chrome .brand{font-family:var(--mono); font-size:11px; letter-spacing:.09em; font-weight:600}
+.chrome .brand i{color:var(--ox); font-style:normal}
+.chrome .who{display:flex; align-items:center; gap:10px; font-size:11.5px; color:var(--ink-3); font-family:var(--mono)}
+.avatar{width:22px;height:22px;border-radius:50%;background:var(--ink);color:var(--paper);display:grid;place-items:center;font-size:9px;font-family:var(--mono);letter-spacing:.02em}
+
+.appnav{display:flex; gap:2px; padding:0 10px; border-bottom:1px solid var(--rule); background:var(--paper)}
+.appnav a{font-size:12.5px; padding:9px 11px; color:var(--ink-3); text-decoration:none; border-bottom:2px solid transparent}
+.appnav a.on{color:var(--ink); font-weight:600; border-bottom-color:var(--ox)}
+
+.qtoolbar{display:flex; align-items:center; gap:var(--s2); padding:11px 14px; border-bottom:1px solid var(--rule); flex-wrap:wrap}
+.chip{font-size:11.5px; padding:4px 10px; border-radius:20px; border:1px solid var(--rule-2); color:var(--ink-2); background:var(--paper); cursor:default}
+.chip.on{background:var(--ink); color:var(--paper); border-color:var(--ink)}
+.qtoolbar .spacer{flex:1}
+.qtoolbar .count{font-family:var(--mono); font-size:11px; color:var(--ink-3)}
+
+table.q{width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums}
+table.q th{text-align:left; font-family:var(--mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); font-weight:500; padding:9px 14px; border-bottom:1px solid var(--rule); background:var(--paper-2)}
+table.q td{padding:11px 14px; border-bottom:1px solid var(--rule); vertical-align:middle}
+table.q tr:last-child td{border-bottom:0}
+table.q tbody tr{cursor:default; transition:background .14s var(--eo)}
+table.q tbody tr:hover{background:var(--paper-2)}
+table.q .id{font-family:var(--mono); font-size:12px; font-weight:600}
+table.q .sub{display:block; font-size:11px; color:var(--ink-3); margin-top:2px}
+.stack{display:flex; gap:-6px}
+.rv{display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; font-size:9px; font-family:var(--mono); border:1.5px solid var(--paper); background:var(--paper-3); color:var(--ink-2)}
+.rv + .rv{margin-left:-7px}
+.rv.done{background:var(--moss-soft); color:var(--moss)}
+.rv.pend{background:var(--ochre-soft); color:var(--ochre)}
+.rv.none{background:var(--paper-2); color:var(--ink-3); border-style:dashed; border-color:var(--rule-2)}
+.skel{height:9px; border-radius:3px; background:linear-gradient(90deg,var(--paper-2),var(--paper-3),var(--paper-2)); background-size:200% 100%; animation:sh 1.5s linear infinite}
+@keyframes sh{to{background-position:-200% 0}}
+
+/* review screen */
+.review{display:grid; grid-template-columns:250px minmax(0,1fr) 268px}
+.pane{padding:14px; border-right:1px solid var(--rule)}
+.pane:last-child{border-right:0}
+.pane h6{margin:0 0 10px; font-family:var(--mono); font-size:9.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3); font-weight:500; display:flex; justify-content:space-between; align-items:center}
+.tl{position:relative; padding-left:16px; display:flex; flex-direction:column; gap:12px}
+.tl::before{content:""; position:absolute; left:3.5px; top:5px; bottom:6px; width:1px; background:var(--rule-2)}
+.tl li{list-style:none; position:relative; font-size:12.5px; line-height:1.4}
+.tl li::before{content:""; position:absolute; left:-16px; top:5px; width:8px; height:8px; border-radius:50%; background:var(--paper); border:1.5px solid var(--rule-2)}
+.tl li.hit::before{background:var(--ox); border-color:var(--ox)}
+.tl li .ga{font-family:var(--mono); font-size:10px; letter-spacing:.06em; color:var(--ink-3); display:block}
+.tl li .val{font-family:var(--mono); font-weight:600; font-size:12.5px}
+.tl li .src{font-family:var(--mono); font-size:9px; color:var(--ink-3); letter-spacing:.05em; text-transform:uppercase}
+.banner{display:flex; gap:9px; align-items:flex-start; border:1px solid oklch(83% 0.08 78); background:var(--ochre-soft); border-radius:6px; padding:9px 11px; font-size:12px; line-height:1.45; margin-bottom:12px; color:oklch(38% 0.07 68)}
+.narr{border:1px solid var(--rule-2); border-radius:7px; background:var(--paper); padding:14px 16px; font-size:14px; line-height:1.65}
+.narr p + p{margin-top:10px}
+.narr .edit{background:var(--ind-soft); border-bottom:1px solid oklch(78% 0.06 265); padding:0 2px}
+.narrbar{display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap}
+.factcheck{font-family:var(--mono); font-size:10.5px; color:var(--moss); display:flex; align-items:center; gap:5px}
+.docs{display:flex; flex-direction:column; gap:6px; margin-top:16px}
+.docrow{display:flex; align-items:center; gap:9px; font-size:12.5px; padding:7px 10px; border:1px solid var(--rule); border-radius:6px; background:var(--paper); transition:border-color .15s var(--eo)}
+.docrow:hover{border-color:var(--ink-3)}
+.docrow .nm{flex:1}
+.docrow .mt{font-family:var(--mono); font-size:9.5px; color:var(--ink-3); letter-spacing:.05em}
+.crit{display:flex; flex-direction:column; gap:1px}
+.crit li{list-style:none; display:grid; grid-template-columns:18px 1fr auto; gap:8px; align-items:baseline; padding:7px 6px; border-radius:5px; font-size:12.5px}
+.crit li:hover{background:var(--paper-2)}
+.crit .mk{font-size:12px; line-height:1.2}
+.crit .true .mk{color:var(--moss)}
+.crit .false .mk{color:var(--ink-3)}
+.crit .why{display:block; font-family:var(--mono); font-size:9.5px; color:var(--ink-3); letter-spacing:.03em; margin-top:2px}
+.crit .rid{font-family:var(--mono); font-size:9px; color:var(--ink-3)}
+.verdict{margin-top:12px; border:1px solid var(--rule-2); border-radius:7px; padding:11px; background:var(--paper-2)}
+.verdict .big{font-family:var(--serif); font-size:22px; line-height:1.1; margin-top:3px}
+
+/* decision form */
+.form{padding:18px 20px; display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:28px}
+.fgroup{margin-bottom:18px}
+.fgroup > label{display:block; font-size:13px; font-weight:600; margin-bottom:7px}
+.fgroup .hint{font-size:11.5px; color:var(--ink-3); font-weight:400; margin-left:6px}
+.radios{display:flex; gap:6px; flex-wrap:wrap}
+.radio{display:inline-flex; align-items:center; gap:7px; border:1px solid var(--rule-2); border-radius:6px; padding:7px 12px; font-size:13px; cursor:pointer; background:var(--paper); transition:border-color .15s var(--eo), background .15s var(--eo)}
+.radio:hover{border-color:var(--ink-3)}
+.radio .rd{width:12px; height:12px; border-radius:50%; border:1.5px solid var(--rule-2)}
+.radio.sel{border-color:var(--ink); background:var(--paper-2); font-weight:600}
+.radio.sel .rd{border-color:var(--ox); border-width:4px}
+.radio.dis{opacity:.45; cursor:not-allowed}
+.ta{width:100%; border:1px solid var(--rule-2); border-radius:6px; padding:10px 12px; font-family:var(--sans); font-size:13px; line-height:1.55; min-height:76px; background:var(--paper); color:var(--ink); resize:vertical}
+.ta:focus-visible{outline:2px solid var(--ox); outline-offset:1px; border-color:var(--ox)}
+.sigbox{border:1px solid var(--ink); border-radius:8px; padding:15px; background:var(--paper-2); position:sticky; top:14px}
+.sigbox h6{margin:0 0 9px; font-family:var(--mono); font-size:9.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--ox); font-weight:600}
+.sigstate{font-size:12px; line-height:1.55; color:var(--ink-2)}
+.field{margin-top:10px}
+.field label{display:block; font-family:var(--mono); font-size:9.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3); margin-bottom:4px}
+.field .inp{border:1px solid var(--rule-2); border-radius:5px; background:var(--paper); padding:8px 10px; font-family:var(--mono); font-size:12px; color:var(--ink-3)}
+.btn{margin-top:14px; width:100%; appearance:none; border:0; border-radius:6px; background:var(--ox); color:var(--paper); font-family:var(--sans); font-size:13.5px; font-weight:600; padding:11px 14px; cursor:pointer; transition:background .15s var(--eo), transform .1s var(--eo)}
+.btn:hover{background:oklch(38% 0.14 24)}
+.btn:active{transform:translateY(1px)}
+.btn:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
+.btn.ghost{background:transparent; color:var(--ink-2); border:1px solid var(--rule-2)}
+.btn.ghost:hover{background:var(--paper-3); color:var(--ink)}
+.legal{font-size:10.5px; line-height:1.5; color:var(--ink-3); margin-top:10px}
+
+/* committee */
+.cmt{padding:0}
+.cmthead{padding:14px 18px; border-bottom:1px solid var(--rule); display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap}
+.cmthead .t{font-family:var(--serif); font-size:24px; line-height:1.1}
+.cmthead .s{font-size:12px; color:var(--ink-3); font-family:var(--mono); margin-top:4px; letter-spacing:.04em}
+.compare{display:grid; grid-template-columns:150px 1fr 1fr}
+.compare > div{padding:10px 14px; border-bottom:1px solid var(--rule); font-size:13px}
+.compare .hd{font-family:var(--mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); background:var(--paper-2); font-weight:500}
+.compare .lb{font-family:var(--mono); font-size:11px; color:var(--ink-3); letter-spacing:.03em}
+.compare .diff{background:var(--ochre-soft); font-weight:600}
+.compare .agree{color:var(--ink-2)}
+.cmtfoot{display:grid; grid-template-columns:minmax(0,1fr) 290px; gap:24px; padding:18px}
+.votes{display:flex; gap:6px; margin-top:8px; flex-wrap:wrap}
+.vote{border:1px solid var(--rule-2); border-radius:6px; padding:8px 11px; font-size:12px; background:var(--paper); display:flex; align-items:center; gap:8px}
+.vote b{font-family:var(--mono); font-size:11px}
+.empty{padding:40px 20px; text-align:center; border:1px dashed var(--rule-2); border-radius:8px; margin:14px}
+.empty .t{font-family:var(--serif); font-size:19px; margin-bottom:4px}
+.empty .d{font-size:12.5px; color:var(--ink-3)}
+
+/* phasing */
+.phase{display:grid; grid-template-columns:96px 1fr; gap:var(--s4); padding:var(--s4) 0; border-bottom:1px solid var(--rule)}
+.phase:first-of-type{border-top:1px solid var(--ink)}
+.phase .p{font-family:var(--mono); font-size:11px; letter-spacing:.06em; color:var(--ox); padding-top:3px}
+.phase h4{margin:0 0 4px; font-family:var(--sans); font-size:15px; text-transform:none; letter-spacing:0; color:var(--ink); font-weight:600}
+.phase p{font-size:14px; color:var(--ink-2); line-height:1.5}
+
+.qs{margin-top:var(--s5); display:flex; flex-direction:column; gap:var(--s3)}
+.q-item{display:grid; grid-template-columns:auto 1fr; gap:var(--s3); font-size:15px; line-height:1.5; padding-bottom:var(--s3); border-bottom:1px dotted var(--rule-2)}
+.q-item .who{font-family:var(--mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ox); padding-top:4px; white-space:nowrap}
+
+footer.end{margin-top:var(--s9); padding-top:var(--s5); border-top:2px solid var(--ink); font-family:var(--mono); font-size:11px; color:var(--ink-3); letter-spacing:.04em; line-height:1.9}
+
+/* responsive */
+@media (max-width:1000px){
+  .shell{grid-template-columns:1fr}
+  .rail{position:static; height:auto; border-right:0; border-bottom:1px solid var(--rule); padding:var(--s5) var(--s5) var(--s3)}
+  nav.toc{flex-direction:row; overflow-x:auto; gap:4px; padding-bottom:6px; margin-left:0}
+  nav.toc a{grid-template-columns:1fr; white-space:nowrap; border:1px solid var(--rule); padding:6px 11px}
+  nav.toc a span{display:none}
+  .rail footer{display:none}
+  main{padding:var(--s6) var(--s5) var(--s8)}
+  .form, .cmtfoot{grid-template-columns:1fr}
+  .review{grid-template-columns:1fr}
+  .pane{border-right:0; border-bottom:1px solid var(--rule)}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none !important; transition:none !important}}
+</style>
+
+
+<div class="shell">
+
+<aside class="rail">
+  <div>
+    <div class="mark">ACRN <em>Adjudicate</em></div>
+    <div class="kicker">Architecture Prototype · v0.1</div>
+  </div>
+  <nav class="toc" id="toc">
+    <a href="https://app.clickup-embedded-html.com/#intent" class="on"><span>00</span>Design intent</a>
+    <a href="https://app.clickup-embedded-html.com/#arch"><span>01</span>System architecture</a>
+    <a href="https://app.clickup-embedded-html.com/#integration"><span>02</span>Data integration</a>
+    <a href="https://app.clickup-embedded-html.com/#ai"><span>03</span>Rules engine &amp; AI</a>
+    <a href="https://app.clickup-embedded-html.com/#model"><span>04</span>Data model</a>
+    <a href="https://app.clickup-embedded-html.com/#security"><span>05</span>Security &amp; Part 11</a>
+    <a href="https://app.clickup-embedded-html.com/#stack"><span>06</span>Technology stack</a>
+    <a href="https://app.clickup-embedded-html.com/#screens"><span>07</span>Screens</a>
+    <a href="https://app.clickup-embedded-html.com/#plan"><span>08</span>Phasing &amp; risks</a>
+  </nav>
+  <footer>
+    <span class="dot"></span>Draft for review<br>
+    Source: Adjudication Committee<br>
+    31 Jul 2026
+  </footer>
+</aside>
+
+<main>
+
+<div class="col masthead">
+  <h1>A clinical adjudication platform that <em>assembles the case for you</em>.</h1>
+  <p class="lede">Target architecture for pre-eclampsia endpoint adjudication in ZWE001: source data in, a locked and signed adjudication out, with the reviewer spending their time on judgement rather than transcription.</p>
+  <div class="meta">
+    <div>Study<b>ZWE001 · EOPE</b></div>
+    <div>Endpoint<b>Pre-eclampsia (EOPE / LOPE)</b></div>
+    <div>Basis<b>OAC workflow proposal</b></div>
+    <div>Status<b>Architecture draft</b></div>
+    <div>Supersedes<b>SharePoint OAC portal (interim)</b></div>
+  </div>
+</div>
+
+<!-- 00 -->
+<section id="intent">
+  <div class="col">
+    <div class="shead"><div class="num">00</div><h2>Design intent</h2></div>
+    <p>Three decisions shape everything below, and they are worth arguing about before any code is written.</p>
+    <div class="callout">
+      <div class="lbl">Non-negotiable</div>
+      <p><b>The rules engine decides. The language model writes.</b> No AI output ever sets a diagnostic flag, a severity grade, or a classification. Criteria are computed deterministically from coded source facts and are reproducible years later. The model only turns those facts into readable prose that a clinician then edits and signs.</p>
+    </div>
+    <div class="hasnote">
+      <p style="margin-top:var(--s5)">Second: <b>facts are immutable, decisions are versioned.</b> Every clinical value carries provenance back to the system and record it came from. Nothing is overwritten. A late lab result creates a new fact and a case-reopen event, not a silent edit.</p>
+      <div class="note"><b>Why it matters</b>Part 11 and GCP inspections ask "what did the reviewer see at the moment they signed?" You can only answer that if the fact set is point-in-time reconstructable.</div>
+    </div>
+    <div class="hasnote">
+      <p style="margin-top:var(--s4)">Third: <b>build for the endpoint, not for pre-eclampsia.</b> Triggers, criteria, form fields, and narrative templates are configuration, not code. Adding a cardiovascular or neonatal endpoint later should mean authoring a new rule set, not forking the application.</p>
+      <div class="note"><b>Scope discipline</b>Configurable does not mean generic. Ship the PE rule set hard-coded in config, prove it, then generalise.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 01 -->
+<section id="arch">
+  <div class="col">
+    <div class="shead"><div class="num">01</div><h2>System architecture</h2></div>
+    <p>Event-driven core inside a <b>modular monolith</b>. Not microservices. The workload is a few hundred adjudications per year across a handful of sites, and every service boundary you add is another validation artefact, another deployment to qualify, and another place where the audit trail can fork. One deployable, clean internal module boundaries, one transactional database.</p>
+    <p style="margin-top:var(--s4)">The event bus is what makes the workflow feel automatic: triggers, ingestion completions, rule evaluations, and signatures are all facts published to a durable log that other modules subscribe to.</p>
+  </div>
+
+  <div class="diagram bleed">
+    <div class="dhead"><span>Logical tiers</span><span>Event-driven · single deployable</span></div>
+
+    <div class="band">
+      <div class="blabel">Source<br>systems</div>
+      <div class="nodes">
+        <div class="node">eSource / EDC<small>ODM-XML · REST</small></div>
+        <div class="node">Laboratory (LIS)<small>HL7 v2 ORU^R01</small></div>
+        <div class="node">Ultrasound<small>Structured report · PDF</small></div>
+        <div class="node">Delivery / EHR<small>FHIR R4</small></div>
+        <div class="node">Medication log<small>FHIR · CSV</small></div>
+      </div>
+    </div>
+
+    <div class="band">
+      <div class="blabel">Ingestion<br>&amp; canon</div>
+      <div class="nodes">
+        <div class="node grow">Connector adapters<small>Per-source, idempotent, replayable</small></div>
+        <div class="node grow">Terminology mapper<small>LOINC · SNOMED CT · RxNorm · UCUM</small></div>
+        <div class="node grow">Canonical fact store<small>FHIR R4 profile · append-only</small></div>
+      </div>
+    </div>
+
+    <div class="band spine">
+      <div class="blabel">Event bus</div>
+      <div class="nodes"><div class="bus">
+        <span><i>▸</i> trigger.detected</span>
+        <span><i>▸</i> case.assembled</span>
+        <span><i>▸</i> criteria.evaluated</span>
+        <span><i>▸</i> narrative.drafted</span>
+        <span><i>▸</i> review.submitted</span>
+        <span><i>▸</i> case.locked</span>
+      </div></div>
+    </div>
+
+    <div class="band">
+      <div class="blabel">Application<br>services</div>
+      <div class="nodes">
+        <div class="node">Trigger detector<small>Standing queries on facts</small></div>
+        <div class="node">Case assembler<small>Windowing · completeness</small></div>
+        <div class="node core">Criteria engine<small>Deterministic · versioned</small></div>
+        <div class="node ai">Narrative service<small>LLM · constrained</small></div>
+        <div class="node core">Workflow state machine<small>A → B → committee</small></div>
+        <div class="node">Signature &amp; lock<small>21 CFR Part 11</small></div>
+        <div class="node">Report renderer<small>PDF/A · TMF filing</small></div>
+        <div class="node">Audit ledger<small>Hash-chained, append-only</small></div>
+      </div>
+    </div>
+
+    <div class="band">
+      <div class="blabel">Presentation</div>
+      <div class="nodes">
+        <div class="node grow">Adjudicator workbench<small>Queue · review · decision</small></div>
+        <div class="node grow">Committee dashboard<small>Discordance · resolution</small></div>
+        <div class="node grow">Data manager console<small>Ingestion health · manual abstraction</small></div>
+        <div class="node grow">Auditor view<small>Read-only, full history</small></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <h3>Case lifecycle</h3>
+    <ol class="steps">
+      <li><b>Detect.</b> A standing query over the canonical fact store matches a trigger definition (BP threshold, PE suspicion form, hypertensive delivery, maternal SAE, fetal or neonatal SAE) and emits <code class="inline">trigger.detected</code>.</li>
+      <li><b>Assemble.</b> The assembler opens a case, defines the clinical window (typically index event minus 14 days through delivery plus 42 days), and pulls every fact in scope. It computes a <b>completeness score</b> and blocks narrative generation until required facts land or are explicitly waived.</li>
+      <li><b>Evaluate.</b> The criteria engine runs the pinned rule-set version and writes derived flags with the exact facts that fired each one.</li>
+      <li><b>Draft.</b> The narrative service renders prose from the structured timeline plus derived flags, then validates it against the fact set before it is ever shown.</li>
+      <li><b>Review.</b> Reviewer A works the case, signs. Workflow routes to Reviewer B blinded to A's answers.</li>
+      <li><b>Resolve.</b> Concordant means final. Discordant means committee session, side-by-side, chair records outcome.</li>
+      <li><b>Lock.</b> Record frozen, PDF/A rendered, audit chain sealed, artefact filed to the TMF path.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- 02 -->
+<section id="integration">
+  <div class="col">
+    <div class="shead"><div class="num">02</div><h2>Data integration &amp; aggregation</h2></div>
+    <p>One canonical model, many dumb adapters. Every connector's only job is to fetch, map to FHIR R4 resources with coded terminology, attach provenance, and hand off. No business logic lives in a connector, ever, because connectors get rewritten when vendors change and rules must not.</p>
+  </div>
+
+  <div class="col bleed">
+    <table class="tbl">
+      <thead><tr><th>Source</th><th>Transport</th><th>Cadence</th><th>Canonical target</th><th>Degraded mode</th></tr></thead>
+      <tbody>
+        <tr><td class="k">eSource / EDC</td><td>REST + CDISC ODM-XML export</td><td>Webhook, 15-min poll fallback</td><td><code>Observation</code>, <code>Condition</code>, <code>Encounter</code></td><td>Scheduled export drop to secure share</td></tr>
+        <tr><td class="k">Laboratory (LIS)</td><td>HL7 v2.5 ORU^R01 over MLLP/TLS</td><td>Real time on result release</td><td><code>Observation</code> + LOINC + UCUM</td><td>Signed CSV batch, quarantined until reconciled</td></tr>
+        <tr><td class="k">Ultrasound / imaging</td><td>DICOM SR where available, else PDF + structured entry</td><td>On study finalisation</td><td><code>Observation</code> (EFW, UA Doppler), <code>DocumentReference</code></td><td>Manual abstraction of 6 core measures</td></tr>
+        <tr><td class="k">Delivery / EHR</td><td>FHIR R4 REST, bulk export for backfill</td><td>Daily plus on-demand</td><td><code>Encounter</code>, <code>Procedure</code>, <code>Condition</code></td><td>Site delivery form in EDC</td></tr>
+        <tr><td class="k">Medication</td><td>FHIR <code>MedicationAdministration</code></td><td>Real time</td><td>RxNorm / ATC coded administrations</td><td>Free-text with coder review queue</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <div class="hasnote">
+      <h3>Rules the pipeline must obey</h3>
+      <ul class="tight">
+        <li><b>Idempotency by natural key.</b> <code class="inline">source_system + source_record_id + version</code>. Re-delivery is a no-op, never a duplicate fact.</li>
+        <li><b>Provenance on every datum.</b> System, record ID, retrieval timestamp, payload hash, and mapping version. This is what powers the "show me the source" click in the review screen.</li>
+        <li><b>Units and baselines are computed, not trusted.</b> Convert to UCUM at ingest. Creatinine "doubling from baseline" needs a defined baseline fact, so the assembler resolves and pins it explicitly.</li>
+        <li><b>Late data reopens or amends.</b> Unsigned case: reopen, re-evaluate, notify assignee of what changed. Signed case: create an amendment record, never mutate the locked one.</li>
+        <li><b>Manual abstraction is a first-class channel.</b> Flagged visually, attributed to a person, and counted so you can see which source is failing you.</li>
+      </ul>
+      <div class="note"><b>Watch item</b>The completeness score is the difference between "automated" and "automatically wrong." Tune it with the data managers before go-live.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 03 -->
+<section id="ai">
+  <div class="col">
+    <div class="shead"><div class="num">03</div><h2>Rules engine &amp; AI orchestration</h2></div>
+    <p>Two components, strictly separated, running in a fixed order. The criteria engine is a pure function: canonical facts plus a pinned rule-set version go in, derived flags with evidence pointers come out. Same input, same version, same output, forever. That reproducibility is the entire regulatory argument.</p>
+
+    <h3>Criteria engine</h3>
+    <p>Rules are authored declaratively (JSON predicates over coded facts) so a clinician can read and approve them without reading code. Each rule carries an ID, a criteria-set citation, an effective date, and an author signature. Rule sets are versioned like protocol amendments: <code class="inline">PE-ISSHP-2021.v3</code>. Every adjudication stores the version it was evaluated under.</p>
+
+    <div class="col bleed">
+      <table class="tbl">
+        <thead><tr><th>Rule</th><th>Predicate (plain language)</th><th>Evidence emitted</th></tr></thead>
+        <tbody>
+          <tr><td class="k">PE-HTN-01</td><td>2 BP readings ≥140/90, ≥4 h apart, after GA 20+0</td><td>Both Observation IDs, GA at each</td></tr>
+          <tr><td class="k">PE-HTN-02</td><td>Any BP ≥160/110 confirmed on repeat</td><td>Reading pair, interval</td></tr>
+          <tr><td class="k">PE-PROT-01</td><td>UPCR ≥0.3, or dipstick ≥2+ if quantitative unavailable</td><td>Lab Observation, method flag</td></tr>
+          <tr><td class="k">PE-RENAL-01</td><td>Creatinine &gt;1.1 mg/dL or doubling from pinned baseline</td><td>Index + baseline values</td></tr>
+          <tr><td class="k">PE-HEP-01</td><td>AST or ALT ≥2× upper limit of normal</td><td>Value, lab-specific ULN</td></tr>
+          <tr><td class="k">PE-HAEM-01</td><td>Platelets &lt;100 ×10⁹/L</td><td>Value, collection time</td></tr>
+          <tr><td class="k">PE-FGR-01</td><td>EFW &lt;10th centile, or absent/reversed end-diastolic flow</td><td>Scan ID, centile chart used</td></tr>
+          <tr><td class="k">PE-ONSET-01</td><td>First qualifying event before GA 34+0 → EOPE, else LOPE</td><td>Qualifying event reference</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Narrative service</h3>
+    <p>The model receives a compact JSON payload: the structured timeline, the derived flags, and the evidence that fired them. It never receives raw documents, free-text notes, or identifiers. It returns prose only, against a study-specific template with a fixed section order.</p>
+
+    <div class="hasnote">
+      <h4>Three gates before a clinician sees a word</h4>
+      <ul class="tight">
+        <li><b>Numeric echo check.</b> Every number, gestational age, and unit in the draft must exist verbatim in the fact payload. One mismatch, one automatic regeneration, then it fails to a "narrative unavailable" state and the reviewer works from the timeline.</li>
+        <li><b>Claim containment.</b> The draft may not assert a criterion the engine did not derive. Detected by matching narrative claims to flag IDs.</li>
+        <li><b>Determinism budget.</b> Temperature near zero, prompt and model version recorded, output hashed into the audit trail alongside the input payload.</li>
+      </ul>
+      <div class="note"><b>Failure is fine</b>A blank narrative is a mild inconvenience. A confidently wrong one is a data integrity finding. Design the fallback first.</div>
+    </div>
+
+    <div class="callout neutral">
+      <div class="lbl">Orchestration order</div>
+      <p style="font-family:var(--mono); font-size:13.5px; line-height:1.9">assemble → <b>evaluate criteria</b> → validate completeness → draft narrative → gate → present → human edit → sign → lock</p>
+      <p style="margin-top:8px; font-size:14px">Criteria always run before the narrative. If the engine cannot evaluate, the narrative never generates. The clinician's edits to the narrative are tracked as diffs against the AI draft, so you can report the human edit rate as a quality signal on the model.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 04 -->
+<section id="model">
+  <div class="col">
+    <div class="shead"><div class="num">04</div><h2>Data model</h2></div>
+    <p>Relational core in PostgreSQL, with FHIR resources stored as validated <code class="inline">jsonb</code> alongside extracted typed columns for the values the rules engine queries hot. Dark headers mark aggregate roots; green marks append-only tables where <code class="inline">UPDATE</code> and <code class="inline">DELETE</code> are revoked at the role level.</p>
+  </div>
+
+  <div class="col bleed">
+    <div class="schema">
+      <div class="ent pk"><h5>participant</h5><ul>
+        <li>participant_id <i>pk</i></li><li>study_subject_no <i>ZWE001-0292</i></li>
+        <li>age_at_enrolment <i>int</i></li><li>gravidity / parity <i>int</i></li>
+        <li>site_code <i>maskable</i></li>
+      </ul></div>
+      <div class="ent pk"><h5>pregnancy</h5><ul>
+        <li class="fk">participant_id <i>fk</i></li><li>lmp_date / edd <i>date</i></li>
+        <li>ga_method <i>enum</i></li><li>delivery_datetime <i>ts</i></li>
+      </ul></div>
+      <div class="ent imm"><h5>clinical_fact</h5><ul>
+        <li class="fk">pregnancy_id <i>fk</i></li><li>code <i>loinc/snomed</i></li>
+        <li>value_num / value_code <i>ucum</i></li><li>effective_at <i>ts</i></li>
+        <li>ga_at_event <i>weeks+days</i></li><li>fhir_resource <i>jsonb</i></li>
+        <li>superseded_by <i>self-fk</i></li>
+      </ul></div>
+      <div class="ent imm"><h5>fact_provenance</h5><ul>
+        <li class="fk">fact_id <i>fk</i></li><li>source_system <i>enum</i></li>
+        <li>source_record_id <i>text</i></li><li>payload_hash <i>sha256</i></li>
+        <li>retrieved_at <i>ts</i></li><li>entry_mode <i>auto/manual</i></li>
+      </ul></div>
+      <div class="ent"><h5>case_trigger</h5><ul>
+        <li class="fk">pregnancy_id <i>fk</i></li><li>trigger_type <i>enum ×5</i></li>
+        <li class="fk">detected_from_fact <i>fk</i></li><li>detected_at <i>ts</i></li>
+      </ul></div>
+      <div class="ent pk"><h5>adjudication_case</h5><ul>
+        <li class="fk">trigger_id <i>fk</i></li><li>window_start / end <i>ts</i></li>
+        <li>state <i>state machine</i></li><li>completeness_pct <i>num</i></li>
+        <li class="fk">rule_set_version <i>fk</i></li><li>locked_at <i>ts null</i></li>
+      </ul></div>
+      <div class="ent"><h5>rule_set_version</h5><ul>
+        <li>label <i>PE-ISSHP-2021.v3</i></li><li>definition <i>jsonb</i></li>
+        <li>effective_from <i>date</i></li><li>approved_by <i>user</i></li>
+      </ul></div>
+      <div class="ent imm"><h5>derived_criterion</h5><ul>
+        <li class="fk">case_id <i>fk</i></li><li>rule_id <i>PE-HTN-01</i></li>
+        <li>result <i>bool / null</i></li><li class="fk">evidence_fact_ids <i>fk[]</i></li>
+        <li>evaluated_at <i>ts</i></li>
+      </ul></div>
+      <div class="ent"><h5>narrative_draft</h5><ul>
+        <li class="fk">case_id <i>fk</i></li><li>body_md <i>text</i></li>
+        <li>model / prompt_version <i>text</i></li><li>gate_result <i>enum</i></li>
+        <li>edited_by_human <i>bool</i></li>
+      </ul></div>
+      <div class="ent"><h5>review</h5><ul>
+        <li class="fk">case_id <i>fk</i></li><li>reviewer_role <i>A / B / chair</i></li>
+        <li>meets_criteria <i>bool</i></li><li>diagnosis <i>enum</i></li>
+        <li>onset_class <i>EOPE / LOPE</i></li><li>severity / certainty <i>enum</i></li>
+        <li>alt_diagnosis <i>text</i></li><li>comments <i>text</i></li>
+      </ul></div>
+      <div class="ent imm"><h5>signature</h5><ul>
+        <li class="fk">review_id <i>fk</i></li><li>signer_id <i>fk</i></li>
+        <li>signed_at <i>ts + tz</i></li><li>meaning <i>text</i></li>
+        <li>auth_method <i>sso + mfa</i></li><li>record_hash <i>sha256</i></li>
+      </ul></div>
+      <div class="ent"><h5>committee_session</h5><ul>
+        <li class="fk">case_id <i>fk</i></li><li>convened_at <i>ts</i></li>
+        <li>attendees <i>fk[]</i></li><li>outcome <i>enum</i></li>
+        <li class="fk">chair_signature <i>fk</i></li>
+      </ul></div>
+      <div class="ent imm"><h5>audit_event</h5><ul>
+        <li>actor_id <i>fk / system</i></li><li>entity / entity_id <i>text</i></li>
+        <li>action <i>enum</i></li><li>before / after <i>jsonb</i></li>
+        <li>prev_hash / hash <i>chain</i></li>
+      </ul></div>
+      <div class="ent"><h5>export_artifact</h5><ul>
+        <li class="fk">case_id <i>fk</i></li><li>format <i>PDF/A-3</i></li>
+        <li>storage_uri <i>WORM blob</i></li><li>tmf_path <i>text</i></li>
+      </ul></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="hasnote">
+      <h4>Relationships worth stating out loud</h4>
+      <ul class="tight">
+        <li>A pregnancy has many triggers; a trigger opens at most one case, and the assembler <b>merges</b> triggers that fall inside an open window rather than spawning duplicate cases.</li>
+        <li><code class="inline">derived_criterion</code> is written once per evaluation run, never updated. Re-evaluation appends a new set and the case points at the current run.</li>
+        <li>A case has one review per reviewer role. Concordance is computed, not stored as a flag, so the definition can change without a data migration.</li>
+        <li>Everything hangs off <code class="inline">audit_event</code> by <code class="inline">entity_id</code>, including reads of source documents where regulators expect access logging.</li>
+      </ul>
+      <div class="note"><b>Reconstruction test</b>You should be able to rebuild the exact review screen a signer saw from <code>case_id</code> plus <code>signed_at</code>. If you can't, the model is wrong.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 05 -->
+<section id="security">
+  <div class="col">
+    <div class="shead"><div class="num">05</div><h2>Security, privacy &amp; Part 11</h2></div>
+
+    <h3>Minimise the PHI you hold</h3>
+    <p>The application never stores names, national IDs, addresses, or dates of birth. Participants are the study subject number only. Ages are derived at ingest and stored as integers; dates are stored as gestational age plus study-relative offsets wherever a rule does not need a calendar date. The linkage back to identity stays in the EDC, under existing study controls.</p>
+    <p style="margin-top:var(--s4)">Source documents are the exception, since scanned ultrasound and delivery records carry identifiers. These go to a separate encrypted store with tighter roles, automatic redaction on upload where a template is known, and access logged per view.</p>
+
+    <h3>21 CFR Part 11 electronic signatures</h3>
+    <ul class="tight">
+      <li><b>Unique attribution.</b> Entra ID SSO, MFA enforced, no shared accounts, no delegated signing. Ever.</li>
+      <li><b>Step-up authentication at signing.</b> Re-authenticate at the moment of signature, not just at session start.</li>
+      <li><b>Signature manifest.</b> Printed name, signed date-time with timezone, and the explicit meaning of the signature, rendered on screen and in the PDF.</li>
+      <li><b>Record locking.</b> On signature the review becomes immutable and its content hash is bound into the signature row. Any later change is an amendment with its own signature.</li>
+      <li><b>Hash-chained audit.</b> Each audit event stores the previous event's hash. Tampering breaks the chain and is detectable by a scheduled verifier job.</li>
+      <li><b>Validation.</b> IQ/OQ/PQ with traceability from user requirements to test cases, plus a CSV summary report filed to the TMF. The rules engine gets its own test suite of adjudicated reference cases as PQ evidence.</li>
+    </ul>
+
+    <div class="hasnote">
+      <h3>Blinding &amp; independence</h3>
+      <p>Reviewer B must not see Reviewer A's answers, identity, or narrative edits until both are submitted. Enforce this at the query layer, not the UI layer, so an API call cannot leak what the screen hides. Treatment arm and, where the committee charter requires it, site are masked throughout.</p>
+      <div class="note"><b>Common failure</b>Blinding implemented as a hidden <code>div</code>. Test it with the network tab open.</div>
+    </div>
+
+    <h4>Roles</h4>
+    <div class="col bleed">
+      <table class="tbl">
+        <thead><tr><th>Role</th><th>Can</th><th>Cannot</th></tr></thead>
+        <tbody>
+          <tr><td class="k">Coordinator</td><td>Open cases, manual abstraction, assign reviewers</td><td>Adjudicate, sign, edit narratives</td></tr>
+          <tr><td class="k">Reviewer</td><td>Review assigned cases, edit narrative, sign own review</td><td>See the other reviewer's answers pre-submission</td></tr>
+          <tr><td class="k">Committee chair</td><td>Convene sessions, record outcome, sign final</td><td>Alter reviewer submissions</td></tr>
+          <tr><td class="k">Data manager</td><td>Ingestion health, reconcile quarantine, waive facts</td><td>Touch adjudication records</td></tr>
+          <tr><td class="k">Auditor / monitor</td><td>Read everything including full history</td><td>Write anything</td></tr>
+          <tr><td class="k">Administrator</td><td>Users, roles, configuration</td><td>Read or write clinical or adjudication data</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p style="margin-top:var(--s5)">Data residency follows the study agreement and Zimbabwe's Data Protection Act alongside GDPR for EU-linked processing: a DPIA before go-live, documented lawful basis, and retention aligned to the trial's 25-year archive obligation. The AI endpoint must be contractually zero-retention with no training on submitted content, and deployed in the same region as the primary data store.</p>
+  </div>
+</section>
+
+<!-- 06 -->
+<section id="stack">
+  <div class="col">
+    <div class="shead"><div class="num">06</div><h2>Technology stack</h2></div>
+    <p>Opinionated and biased toward what ACRN already runs, because the fastest validated system is the one your IT function already knows how to operate. You are on Microsoft 365 with SharePoint. Stay on Azure.</p>
+  </div>
+
+  <div class="col bleed">
+    <table class="tbl">
+      <thead><tr><th>Layer</th><th>Recommendation</th><th>Reasoning</th></tr></thead>
+      <tbody>
+        <tr><td class="k">Frontend</td><td>React 19 + TypeScript, Vite, TanStack Query, Radix primitives</td><td>Dense clinical UI needs real state management and accessible primitives, not a form builder</td></tr>
+        <tr><td class="k">Backend</td><td>Python 3.12 + FastAPI, Pydantic, <code>fhir.resources</code></td><td>Best health-informatics library ecosystem; typed contracts keep validation documentation honest</td></tr>
+        <tr><td class="k">Rules engine</td><td>In-process JSON predicate evaluator, rule sets in Git, approved via PR</td><td>Drools-class engines are overkill and add a validation burden nobody wants to own</td></tr>
+        <tr><td class="k">Database</td><td>Azure Database for PostgreSQL 16, <code>jsonb</code> + typed columns, PITR</td><td>One transactional store, no eventual-consistency arguments during an inspection</td></tr>
+        <tr><td class="k">Object storage</td><td>Azure Blob with immutability (WORM) policy</td><td>Locked PDFs and source documents need write-once by policy, not by convention</td></tr>
+        <tr><td class="k">Messaging</td><td>Azure Service Bus, or Postgres <code>LISTEN/NOTIFY</code> for phase one</td><td>Start with the database; add the broker when volume justifies it</td></tr>
+        <tr><td class="k">AI</td><td>Azure OpenAI, GPT-4-class, zero data retention, in-region</td><td>Keeps the model inside the existing tenancy, DPA, and network boundary</td></tr>
+        <tr><td class="k">Identity</td><td>Entra ID, SSO + MFA, conditional access, step-up at signing</td><td>Reuses the controls already documented for the study</td></tr>
+        <tr><td class="k">PDF rendering</td><td>Server-side headless Chromium to PDF/A-3, embedded JSON</td><td>Client rendering is unreproducible; PDF/A-3 carries the structured data inside the archive file</td></tr>
+        <tr><td class="k">Hosting / ops</td><td>Azure Container Apps, OpenTelemetry, infra as code</td><td>Reproducible environments are IQ evidence, not just good practice</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <div class="callout">
+      <div class="lbl">On the existing SharePoint portal</div>
+      <p>The OAC SharePoint portal in configuration today is the right interim answer and should still go to UAT: it gets adjudications flowing and teaches you the real field list. It is not the target. SharePoint lists cannot give you deterministic rule versioning, hash-chained audit, or point-in-time reconstruction. Treat it as the phase-zero data source and plan a one-way migration of its adjudications into this schema.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 07 -->
+<section id="screens">
+  <div class="col">
+    <div class="shead"><div class="num">07</div><h2>Screens</h2></div>
+    <p>Four surfaces cover the whole workflow. The organising principle: the reviewer answers seven questions and signs. Everything else on screen exists to justify those seven answers, and every value is one click from its source.</p>
+  </div>
+
+  <div class="screens bleed">
+    <div class="tabs" role="tablist">
+      <button class="on" data-s="s1" role="tab">01 · Case queue</button>
+      <button data-s="s2" role="tab">02 · Case review</button>
+      <button data-s="s3" role="tab">03 · Adjudication decision</button>
+      <button data-s="s4" role="tab">04 · Committee dashboard</button>
+    </div>
+    <div class="frame">
+
+      <!-- SCREEN 1 -->
+      <div class="app screen on" id="s1">
+        <div class="chrome">
+          <div class="brand">ACRN <i>ADJUDICATE</i> · ZWE001</div>
+          <div class="who"><span>Reviewer</span><div class="avatar">TC</div></div>
+        </div>
+        <div class="appnav">
+          <a href="https://app.clickup-embedded-html.com/#" class="on">Queue</a><a href="https://app.clickup-embedded-html.com/#">Committee</a><a href="https://app.clickup-embedded-html.com/#">Ingestion</a><a href="https://app.clickup-embedded-html.com/#">Rule sets</a><a href="https://app.clickup-embedded-html.com/#">Audit</a>
+        </div>
+        <div class="qtoolbar">
+          <span class="chip on">Assigned to me</span>
+          <span class="chip">All open</span>
+          <span class="chip">Discordant</span>
+          <span class="chip">Blocked on data</span>
+          <span class="chip">Signed</span>
+          <span class="spacer"></span>
+          <span class="count">6 of 41 cases</span>
+        </div>
+        <table class="q">
+          <thead><tr><th>Case</th><th>Trigger</th><th>GA at index</th><th>Assembly</th><th>Reviewers</th><th>Status</th><th>Waiting</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="id">ADJ-0412</span><span class="sub">ZWE001-0292</span></td>
+              <td>Severe hypertension<span class="sub">BP 162/112</span></td>
+              <td>31+2</td>
+              <td><span class="pill ok">100% complete</span></td>
+              <td><span class="rv done">A</span><span class="rv none">B</span></td>
+              <td><span class="pill crit">Awaiting review A</span></td>
+              <td>2 d</td>
+            </tr>
+            <tr>
+              <td><span class="id">ADJ-0409</span><span class="sub">ZWE001-0415</span></td>
+              <td>Hypertensive delivery<span class="sub">Caesarean, 36+0</span></td>
+              <td>35+4</td>
+              <td><span class="pill ok">100% complete</span></td>
+              <td><span class="rv done">A</span><span class="rv pend">B</span></td>
+              <td><span class="pill warn">Awaiting review B</span></td>
+              <td>19 h</td>
+            </tr>
+            <tr>
+              <td><span class="id">ADJ-0404</span><span class="sub">ZWE001-0443</span></td>
+              <td>Maternal SAE<span class="sub">Eclamptic seizure</span></td>
+              <td>29+6</td>
+              <td><span class="pill ok">100% complete</span></td>
+              <td><span class="rv done">A</span><span class="rv done">B</span></td>
+              <td><span class="pill crit">Discordant · committee</span></td>
+              <td>4 d</td>
+            </tr>
+            <tr>
+              <td><span class="id">ADJ-0401</span><span class="sub">ZWE001-0414</span></td>
+              <td>Suspected pre-eclampsia<span class="sub">Site-reported</span></td>
+              <td>33+1</td>
+              <td><span class="pill warn">82% · 2 labs pending</span></td>
+              <td><span class="rv none">A</span><span class="rv none">B</span></td>
+              <td><span class="pill warn">Blocked on data</span></td>
+              <td>6 d</td>
+            </tr>
+            <tr>
+              <td><span class="id">ADJ-0398</span><span class="sub">ZWE001-0421</span></td>
+              <td>Fetal SAE<span class="sub">Stillbirth</span></td>
+              <td>27+3</td>
+              <td><div class="skel" style="width:110px"></div></td>
+              <td><span class="rv none">A</span><span class="rv none">B</span></td>
+              <td><span class="pill">Assembling…</span></td>
+              <td>3 m</td>
+            </tr>
+            <tr>
+              <td><span class="id">ADJ-0390</span><span class="sub">ZWE001-0377</span></td>
+              <td>Elevated BP<span class="sub">148/96 ×2</span></td>
+              <td>38+2</td>
+              <td><span class="pill ok">100% complete</span></td>
+              <td><span class="rv done">A</span><span class="rv done">B</span></td>
+              <td><span class="pill ok">Locked · LOPE</span></td>
+              <td>—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- SCREEN 2 -->
+      <div class="app screen" id="s2">
+        <div class="chrome">
+          <div class="brand">ADJ-0412 · <i>ZWE001-0292</i> · blinded review A</div>
+          <div class="who"><span class="pill">Rule set PE-ISSHP-2021.v3</span><div class="avatar">TC</div></div>
+        </div>
+        <div class="review">
+
+          <div class="pane">
+            <h6>Case timeline <span class="pill">auto</span></h6>
+            <ul class="tl">
+              <li><span class="ga">GA 28+0 · baseline</span>Creatinine <span class="val">0.62</span> mg/dL<span class="src">LIS · 12 Jun</span></li>
+              <li class="hit"><span class="ga">GA 31+2 · 08:14</span>BP <span class="val">162/112</span><span class="src">eSource · vitals</span></li>
+              <li class="hit"><span class="ga">GA 31+2 · 12:40</span>Repeat BP <span class="val">168/114</span><span class="src">eSource · vitals</span></li>
+              <li class="hit"><span class="ga">GA 31+2 · 14:05</span>UPCR <span class="val">1.84</span><span class="src">LIS · LOINC 2889-4</span></li>
+              <li class="hit"><span class="ga">GA 31+2 · 14:05</span>Platelets <span class="val">92</span> ×10⁹/L<span class="src">LIS</span></li>
+              <li class="hit"><span class="ga">GA 31+2 · 14:05</span>Creatinine <span class="val">1.31</span> mg/dL<span class="src">LIS</span></li>
+              <li class="hit"><span class="ga">GA 31+2 · 14:05</span>AST <span class="val">96</span> U/L<span class="src">LIS</span></li>
+              <li class="hit"><span class="ga">GA 31+2 · 16:20</span>EFW 6th centile, AEDF<span class="src">Ultrasound SR</span></li>
+              <li><span class="ga">GA 31+2 · 17:00</span>Magnesium sulphate started<span class="src">MedAdmin</span></li>
+              <li><span class="ga">GA 31+3 · 09:22</span>Delivered, caesarean<span class="src">Delivery record</span></li>
+            </ul>
+          </div>
+
+          <div class="pane">
+            <div class="banner">
+              <i data-lucide="alert-triangle" width="15" height="15" style="flex:none;margin-top:1px"></i>
+              <div>Uric acid result from 31+2 is quarantined pending unit reconciliation. It is not used by any criterion. <b>Review can proceed.</b></div>
+            </div>
+            <h6>Adjudication narrative <span class="pill ai">AI draft · v2</span></h6>
+            <div class="narr">
+              <p>A 27-year-old G2P0 presented at 31+2 weeks with new-onset severe hypertension (162/112), confirmed on repeat measurement four hours later (168/114).</p>
+              <p>Proteinuria was present with a urine protein-creatinine ratio of 1.84. Laboratory investigations demonstrated thrombocytopenia (platelets 92 ×10⁹/L), elevated creatinine at 1.31 mg/dL against a baseline of 0.62 mg/dL, and transaminitis (AST 96 U/L). Ultrasound demonstrated fetal growth restriction at the 6th centile with absent end-diastolic flow.</p>
+              <p>Magnesium sulphate was commenced for seizure prophylaxis and the participant was delivered by caesarean section at 31+3. <span class="edit">Antenatal corticosteroids were documented as given prior to delivery.</span></p>
+              <p>The findings fulfil diagnostic criteria for early-onset pre-eclampsia with severe features.</p>
+            </div>
+            <div class="narrbar">
+              <span class="factcheck"><i data-lucide="shield-check" width="13" height="13"></i>11 of 11 values matched to source</span>
+              <span class="pill ai">1 clinician edit</span>
+              <span class="pill">Edit history</span>
+            </div>
+
+            <h6 style="margin-top:18px">Source documents</h6>
+            <div class="docs">
+              <div class="docrow"><i data-lucide="file-text" width="14" height="14" color="oklch(44% .015 50)"></i><span class="nm">Ultrasound report, 31+2</span><span class="mt">PDF · auto</span></div>
+              <div class="docrow"><i data-lucide="flask-conical" width="14" height="14" color="oklch(44% .015 50)"></i><span class="nm">Laboratory panel, 31+2</span><span class="mt">HL7 · auto</span></div>
+              <div class="docrow"><i data-lucide="baby" width="14" height="14" color="oklch(44% .015 50)"></i><span class="nm">Delivery summary, 31+3</span><span class="mt">FHIR · auto</span></div>
+              <div class="docrow"><i data-lucide="pen-line" width="14" height="14" color="oklch(58% .115 68)"></i><span class="nm">Antenatal card, transcribed</span><span class="mt">Manual · K. Minga</span></div>
+            </div>
+          </div>
+
+          <div class="pane">
+            <h6>Derived criteria <span class="pill">PE-ISSHP-2021.v3</span></h6>
+            <ul class="crit">
+              <li class="true"><span class="mk">✔</span><span>Hypertension<span class="why">140/90 ×2, ≥4 h apart</span></span><span class="rid">HTN-01</span></li>
+              <li class="true"><span class="mk">✔</span><span>Severe-range BP<span class="why">168/114 confirmed</span></span><span class="rid">HTN-02</span></li>
+              <li class="true"><span class="mk">✔</span><span>Proteinuria<span class="why">UPCR 1.84 ≥ 0.3</span></span><span class="rid">PROT-01</span></li>
+              <li class="true"><span class="mk">✔</span><span>Renal dysfunction<span class="why">1.31 vs baseline 0.62</span></span><span class="rid">RENAL-01</span></li>
+              <li class="true"><span class="mk">✔</span><span>Liver dysfunction<span class="why">AST 96 ≥ 2× ULN 40</span></span><span class="rid">HEP-01</span></li>
+              <li class="true"><span class="mk">✔</span><span>Thrombocytopenia<span class="why">Platelets 92 &lt; 100</span></span><span class="rid">HAEM-01</span></li>
+              <li class="true"><span class="mk">✔</span><span>Fetal growth restriction<span class="why">EFW 6th centile, AEDF</span></span><span class="rid">FGR-01</span></li>
+              <li class="false"><span class="mk">○</span><span>Pulmonary oedema<span class="why">No qualifying facts</span></span><span class="rid">RESP-01</span></li>
+              <li class="false"><span class="mk">○</span><span>Neurological features<span class="why">No qualifying facts</span></span><span class="rid">NEURO-01</span></li>
+            </ul>
+            <div class="verdict">
+              <span class="pill crit">Engine classification</span>
+              <div class="big">EOPE, severe features</div>
+              <div style="font-family:var(--mono); font-size:10px; color:var(--ink-3); letter-spacing:.05em; margin-top:6px">Onset 31+2 &lt; 34+0 · ONSET-01</div>
+            </div>
+            <button class="btn" style="margin-top:14px">Continue to decision</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SCREEN 3 -->
+      <div class="app screen" id="s3">
+        <div class="chrome">
+          <div class="brand">ADJ-0412 · <i>adjudication decision</i></div>
+          <div class="who"><span class="pill warn">Unsaved</span><div class="avatar">TC</div></div>
+        </div>
+        <div class="form">
+          <div>
+            <div class="fgroup">
+              <label>Does this participant meet criteria for pre-eclampsia? <span class="hint">Engine derived: yes</span></label>
+              <div class="radios">
+                <span class="radio sel"><span class="rd"></span>Yes</span>
+                <span class="radio"><span class="rd"></span>No</span>
+                <span class="radio"><span class="rd"></span>Cannot determine</span>
+              </div>
+            </div>
+            <div class="fgroup">
+              <label>Diagnosis</label>
+              <div class="radios">
+                <span class="radio sel"><span class="rd"></span>Pre-eclampsia</span>
+                <span class="radio"><span class="rd"></span>Gestational hypertension</span>
+                <span class="radio"><span class="rd"></span>Chronic HTN</span>
+                <span class="radio"><span class="rd"></span>Superimposed PE</span>
+                <span class="radio"><span class="rd"></span>Eclampsia</span>
+                <span class="radio"><span class="rd"></span>HELLP</span>
+              </div>
+            </div>
+            <div class="fgroup">
+              <label>Onset classification <span class="hint">derived from first qualifying event</span></label>
+              <div class="radios">
+                <span class="radio sel"><span class="rd"></span>EOPE &lt; 34+0</span>
+                <span class="radio"><span class="rd"></span>LOPE ≥ 34+0</span>
+              </div>
+            </div>
+            <div class="fgroup">
+              <label>Severity</label>
+              <div class="radios">
+                <span class="radio"><span class="rd"></span>Without severe features</span>
+                <span class="radio sel"><span class="rd"></span>With severe features</span>
+              </div>
+            </div>
+            <div class="fgroup">
+              <label>Certainty</label>
+              <div class="radios">
+                <span class="radio sel"><span class="rd"></span>Definite</span>
+                <span class="radio"><span class="rd"></span>Probable</span>
+                <span class="radio"><span class="rd"></span>Possible</span>
+                <span class="radio dis"><span class="rd"></span>Insufficient data</span>
+              </div>
+            </div>
+            <div class="fgroup">
+              <label>Alternative diagnosis considered</label>
+              <div class="radios">
+                <span class="radio"><span class="rd"></span>Yes</span>
+                <span class="radio sel"><span class="rd"></span>No</span>
+              </div>
+            </div>
+            <div class="fgroup">
+              <label>Comments <span class="hint">required if you disagree with any derived criterion</span></label>
+              <textarea class="ta" rows="3">Agree with automated interpretation. Severe features supported by BP, thrombocytopenia, transaminitis and renal impairment against a documented baseline. FGR with AEDF consistent with placental aetiology.</textarea>
+            </div>
+          </div>
+
+          <div>
+            <div class="sigbox">
+              <h6>Electronic signature</h6>
+              <p class="sigstate">You are signing as <b>Reviewer A</b> for case <b>ADJ-0412</b>. The record and the narrative shown to you will be hashed and locked.</p>
+              <div class="field"><label>Signer</label><div class="inp">tinotenda.chibongore@acrnhealth.com</div></div>
+              <div class="field"><label>Meaning of signature</label><div class="inp">I have reviewed the source evidence and approve this adjudication.</div></div>
+              <div class="field"><label>Timestamp (auto)</label><div class="inp">2026-07-31 10:28 SAST (UTC+2)</div></div>
+              <div class="field"><label>Re-authentication</label><div class="inp">Entra ID · MFA required at signing</div></div>
+              <button class="btn">Authenticate &amp; sign</button>
+              <button class="btn ghost">Save draft</button>
+              <p class="legal">Signed records cannot be edited. Corrections are captured as a new amendment with its own signature and reason. All actions are written to the audit chain.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SCREEN 4 -->
+      <div class="app screen" id="s4">
+        <div class="chrome">
+          <div class="brand">Committee review · <i>ADJ-0404</i></div>
+          <div class="who"><span class="pill crit">Discordant</span><div class="avatar">TM</div></div>
+        </div>
+        <div class="cmthead">
+          <div>
+            <div class="t">ZWE001-0443 · maternal SAE at 29+6</div>
+            <div class="s">Reviews submitted 27 Jul · unblinded to committee only · session convened 31 Jul</div>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center">
+            <span class="pill">3 of 5 members present</span>
+            <span class="pill warn">Quorum met</span>
+          </div>
+        </div>
+        <div class="compare">
+          <div class="hd">Field</div><div class="hd">Reviewer A</div><div class="hd">Reviewer B</div>
+          <div class="lb">Meets criteria</div><div class="agree">Yes</div><div class="agree">Yes</div>
+          <div class="lb">Diagnosis</div><div class="diff">Eclampsia</div><div class="diff">Pre-eclampsia, severe</div>
+          <div class="lb">Onset class</div><div class="agree">EOPE</div><div class="agree">EOPE</div>
+          <div class="lb">Severity</div><div class="agree">With severe features</div><div class="agree">With severe features</div>
+          <div class="lb">Certainty</div><div class="diff">Definite</div><div class="diff">Probable</div>
+          <div class="lb">Alternative dx</div><div class="agree">No</div><div class="agree">No</div>
+          <div class="lb">Comment</div>
+          <div class="agree" style="font-size:12px">Witnessed generalised seizure documented by midwife; no prior epilepsy history.</div>
+          <div class="agree" style="font-size:12px">Seizure description is second-hand and duration undocumented. Cannot exclude syncope.</div>
+        </div>
+        <div class="cmtfoot">
+          <div>
+            <h6 style="margin:0 0 4px; font-family:var(--mono); font-size:9.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3)">Committee outcome</h6>
+            <div class="radios">
+              <span class="radio sel"><span class="rd"></span>Adopt Reviewer A</span>
+              <span class="radio"><span class="rd"></span>Adopt Reviewer B</span>
+              <span class="radio"><span class="rd"></span>Third classification</span>
+              <span class="radio"><span class="rd"></span>Defer, request data</span>
+            </div>
+            <div class="votes">
+              <div class="vote"><span class="rv done">TM</span><b>Adopt A</b></div>
+              <div class="vote"><span class="rv done">JB</span><b>Adopt A</b></div>
+              <div class="vote"><span class="rv pend">FT</span><b>Abstain</b></div>
+            </div>
+            <textarea class="ta" style="margin-top:12px" rows="2">Committee accepts eclampsia. Midwife contemporaneous note is adequate documentation; certainty downgraded to probable by majority.</textarea>
+          </div>
+          <div>
+            <div class="sigbox" style="position:static">
+              <h6>Chair signature &amp; lock</h6>
+              <p class="sigstate">Signing finalises ADJ-0404, renders the PDF/A report, and files it to the TMF adjudication path. Both reviewer submissions remain visible in the archive.</p>
+              <div class="field"><label>Final classification</label><div class="inp" style="color:var(--ink); font-weight:600">Eclampsia · EOPE · probable</div></div>
+              <button class="btn">Sign &amp; lock case</button>
+            </div>
+          </div>
+        </div>
+        <div class="empty" style="display:none">
+          <div class="t">No discordant cases</div>
+          <div class="d">Every dual review this cycle agreed. The committee queue fills automatically when reviewers diverge.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- 08 -->
+<section id="plan">
+  <div class="col">
+    <div class="shead"><div class="num">08</div><h2>Phasing &amp; open risks</h2></div>
+
+    <div class="phase"><div class="p">Phase 0<br>now</div><div><h4>Ship the SharePoint portal to UAT</h4><p>Get adjudications flowing and lock the real field list. Everything learned here becomes the requirements baseline, and its records migrate in later.</p></div></div>
+    <div class="phase"><div class="p">Phase 1<br>~10 wks</div><div><h4>Canonical store, LIS and EDC connectors, criteria engine</h4><p>No UI beyond a data manager console. Prove the engine against 30 already-adjudicated reference cases and measure agreement. If the engine cannot beat the reference set, nothing downstream matters.</p></div></div>
+    <div class="phase"><div class="p">Phase 2<br>~8 wks</div><div><h4>Adjudicator workbench, dual review, signatures</h4><p>Queue, review, decision, Part 11 signing, PDF export. Run in parallel with the existing process for one cohort before cutting over.</p></div></div>
+    <div class="phase"><div class="p">Phase 3<br>~6 wks</div><div><h4>Narrative generation and committee dashboard</h4><p>AI comes last on purpose. It is the least essential component and the one that needs the most trust already banked.</p></div></div>
+    <div class="phase"><div class="p">Phase 4</div><div><h4>Validation package and second endpoint</h4><p>IQ/OQ/PQ, CSV report to the TMF, then prove extensibility by authoring a neonatal outcome rule set with no code changes.</p></div></div>
+
+    <h3>What could sink this</h3>
+    <div class="qs">
+      <div class="q-item"><span class="who">Data</span><span><b>Source coverage is unknown.</b> If the LIS cannot push HL7 and ultrasound reports are scanned PDFs, "automatic aggregation" quietly becomes "manual abstraction with extra steps." Audit actual availability per site before committing to phase 1 scope.</span></div>
+      <div class="q-item"><span class="who">Clinical</span><span><b>The criteria set needs formal sign-off.</b> ISSHP 2021 versus ACOG differ on proteinuria and on what counts as severe. The committee must ratify one, in writing, with a version label, before a single rule is coded.</span></div>
+      <div class="q-item"><span class="who">Regulatory</span><span><b>AI in a regulated workflow needs a documented position.</b> Even as draft-only prose, expect to justify it. Write the risk assessment now, not during an inspection.</span></div>
+      <div class="q-item"><span class="who">Process</span><span><b>Blinding and reviewer independence are a charter question, not a software question.</b> Confirm whether B sees the same AI narrative A edited, or a fresh one. It changes the schema.</span></div>
+      <div class="q-item"><span class="who">Ops</span><span><b>Baselines are the silent failure.</b> Renal and hepatic criteria depend on pre-pregnancy or early-pregnancy values that are often missing. Define the fallback rule explicitly rather than letting the engine return null.</span></div>
+    </div>
+
+    <div class="callout">
+      <div class="lbl">Next decision</div>
+      <p>Pick the criteria set and confirm source availability per site. Both are prerequisites for phase 1 and neither needs an engineer.</p>
+    </div>
+  </div>
+
+  <div class="col">
+    <footer class="end">
+      ACRN Adjudicate · architecture prototype v0.1<br>
+      Derived from the OAC adjudication workflow proposal, Adjudication Committee channel, 31 Jul 2026<br>
+      Draft for review. Not a validated specification.
+    </footer>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script data-activated="true">
+// tabs
+const tabs = document.querySelectorAll('.tabs button');
+tabs.forEach(b => b.addEventListener('click', () => {
+  tabs.forEach(x => x.classList.remove('on'));
+  b.classList.add('on');
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('on'));
+  document.getElementById(b.dataset.s).classList.add('on');
+  if (window.lucide) window.lucide.createIcons();
+}));
+
+// scrollspy
+const links = [...document.querySelectorAll('#toc a')];
+const map = new Map(links.map(a => [a.getAttribute('href').slice(1), a]));
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      links.forEach(a => a.classList.remove('on'));
+      map.get(e.target.id)?.classList.add('on');
+    }
+  });
+}, { rootMargin: '-12% 0px -70% 0px', threshold: 0 });
+document.querySelectorAll('section').forEach(s => obs.observe(s));
+
+links.forEach(a => a.addEventListener('click', ev => {
+  ev.preventDefault();
+  document.getElementById(a.getAttribute('href').slice(1))
+    .scrollIntoView({ behavior: 'smooth', block: 'start' });
+}));
+</script>
+
+
+</div><!----><!----></cu-root><script type="importmap">{ "imports": {"./common.js":"./common-d3922b1f91.js","./main.js":"./main-6e3769ccbf.js","./artifact-editor-runtime.js":"./artifact-editor-runtime-0ab7da45be.js","./startRecording.js":"./startRecording-ebbf3a8f30.js","./artifact-editor-chrome.component.js":"./artifact-editor-chrome.component-3690d457f6.js","./profiler.js":"./profiler-d4b5719e1e.js","./rolldown-runtime.js":"./rolldown-runtime-2681143a8f.js"} }</script><script src="./polyfills-23SERSAN.js.download" type="module" crossorigin="anonymous"></script><script src="./main-6e3769ccbf.js.download" type="module" crossorigin="anonymous"></script><div class="design-ui-credit" aria-hidden="true" style="">💜 by ClickUp Brain</div></body></html>
