@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend ./backend
 COPY --from=frontend /build/dist ./dist
 
-RUN mkdir -p /app/uploads && chown -R acrn:acrn /app
+RUN mkdir -p /app/backend/.rt-staging && chown -R acrn:acrn /app
 
 USER acrn
 EXPOSE 8000
