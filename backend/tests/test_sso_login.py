@@ -34,6 +34,12 @@ def test_sso_login_redirects_to_microsoft_with_state_cookie(mock_sso_app):
     assert "login.microsoftonline.com" in r.headers["location"]
     assert "acrn_sso_state" in r.cookies
 
+    mock_client.get_authorization_request_url.assert_called_once()
+    call_args = mock_client.get_authorization_request_url.call_args
+    assert call_args.args[0] == ["User.Read"]
+    assert call_args.kwargs["state"] == r.cookies["acrn_sso_state"]
+    assert call_args.kwargs["redirect_uri"] == "https://adjudication-test.acrncloud.com/api/auth/sso/callback"
+
 
 def test_sso_callback_rejects_state_mismatch():
     _set_sso_env()
