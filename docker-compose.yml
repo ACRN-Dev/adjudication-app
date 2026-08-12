@@ -1,34 +1,19 @@
-version: "3.9"
-
 services:
-  db:
-    image: postgres:16-alpine
-    restart: always
-    environment:
-      POSTGRES_DB: acrn_adjudication
-      POSTGRES_USER: acrn_user
-      POSTGRES_PASSWORD: acrn_dev_password
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
-      - "5432:5432"
+      - "${APP_PORT:-8005}:8000"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-
-  api:
-    build: ./backend
-    restart: always
-    environment:
-      DATABASE_URL: postgresql://acrn_user:acrn_dev_password@db:5432/acrn_adjudication
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
-      ENVIRONMENT: development
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./backend:/app
-      - ./uploads:/app/uploads
-    depends_on:
-      - db
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      - uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
 volumes:
-  pgdata:
+  uploads:
