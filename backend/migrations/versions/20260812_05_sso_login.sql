@@ -1,0 +1,3 @@
+ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS portal_role VARCHAR(40);
+ALTER TABLE portal_users ADD COLUMN IF NOT EXISTS study_scope VARCHAR(500) DEFAULT '*';
+ALTER TABLE portal_users ALTER COLUMN password_hash DROP NOT NULL;
