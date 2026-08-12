@@ -1,4 +1,5 @@
 """Login, logout and demo account management endpoints."""
+import os
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Cookie, Query
@@ -14,6 +15,11 @@ from services.auth_service import (
 )
 
 router = APIRouter()
+
+
+@router.get("/config")
+def auth_config():
+    return {"demo_enabled": os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true"}
 
 
 class LoginRequest(BaseModel):
