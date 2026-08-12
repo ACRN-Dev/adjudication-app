@@ -17,6 +17,8 @@ from services.auth_service import (
     current_user, default_password, hash_password, identity_from_user, issue_session,
     login as auth_login, logout as auth_logout, require_role, seed_demo_accounts, normalize_email,
 )
+from services.admin_security import ADMIN_ROLES
+from services.monitor_security import ROLES as MONITOR_ROLES
 
 router = APIRouter()
 
@@ -109,6 +111,22 @@ class RoleRequest(ReasonRequest):
     role: str
 
 
+class CreateUserRequest(ReasonRequest):
+    email: str
+    display_name: str
+    role: str
+    portal_role: Optional[str] = None
+    study_scope: str = "*"
+
+
+class PortalRoleRequest(ReasonRequest):
+    portal_role: Optional[str] = None
+
+
+class StudyScopeRequest(ReasonRequest):
+    study_scope: str
+
+
 def public_user(user: PortalUser) -> dict:
     return {
         "id": user.id,
@@ -117,6 +135,8 @@ def public_user(user: PortalUser) -> dict:
         "name": user.display_name,
         "role": user.role.title(),
         "roleCode": user.role,
+        "portal_role": user.portal_role,
+        "study_scope": user.study_scope,
         "portal": {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator"}[user.role],
         "status": user.status,
         "is_demo_account": user.is_demo_account,
@@ -223,6 +243,71 @@ def set_role(user_id: str, req: RoleRequest, request: Request, admin: PortalUser
     previous = row.role
     row.role = role
     audit_auth(db, "ROLE_CHANGE", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason, details={"previous_role": previous, "role": role})
+    db.commit()
+    return public_user(row)
+
+
+def _validate_portal_role(role: str, portal_role: Optional[str]):
+    if role == "ADMIN" and portal_role not in ADMIN_ROLES:
+        raise HTTPException(422, f"portal_role must be one of: {', '.join(sorted(ADMIN_ROLES))}")
+    if role == "MONITOR" and portal_role not in MONITOR_ROLES:
+        raise HTTPException(422, f"portal_role must be one of: {', '.join(sorted(MONITOR_ROLES))}")
+
+
+@router.post("/users", status_code=201)
+def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
+                 db: Session = Depends(get_db)):
+    role = req.role.upper()
+    if role not in {"ADMIN", "MONITOR", "ADJUDICATOR"}:
+        raise HTTPException(422, "Unsupported role")
+    normalized = normalize_email(req.email)
+    if db.query(PortalUser).filter_by(email=normalized).first():
+        raise HTTPException(409, "A user with this email already exists")
+    portal_role = (req.portal_role or "").upper() or None
+    _validate_portal_role(role, portal_role)
+    row = PortalUser(
+        email=normalized,
+        display_name=req.display_name,
+        password_hash=None,
+        role=role,
+        portal_role=portal_role,
+        study_scope=req.study_scope or "*",
+        status=ACTIVE,
+        is_demo_account=False,
+    )
+    db.add(row)
+    audit_auth(db, "USER_CREATED", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
+               details={"role": role, "portal_role": portal_role})
+    db.commit()
+    return public_user(row)
+
+
+@router.post("/users/{user_id}/portal-role")
+def set_portal_role(user_id: str, req: PortalRoleRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
+                     db: Session = Depends(get_db)):
+    row = db.get(PortalUser, user_id)
+    if not row:
+        raise HTTPException(404, "User not found")
+    portal_role = (req.portal_role or "").upper() or None
+    _validate_portal_role(row.role, portal_role)
+    previous = row.portal_role
+    row.portal_role = portal_role
+    audit_auth(db, "PORTAL_ROLE_CHANGE", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
+               details={"previous_portal_role": previous, "portal_role": portal_role})
+    db.commit()
+    return public_user(row)
+
+
+@router.post("/users/{user_id}/study-scope")
+def set_study_scope(user_id: str, req: StudyScopeRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
+                     db: Session = Depends(get_db)):
+    row = db.get(PortalUser, user_id)
+    if not row:
+        raise HTTPException(404, "User not found")
+    previous = row.study_scope
+    row.study_scope = req.study_scope
+    audit_auth(db, "STUDY_SCOPE_CHANGE", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
+               details={"previous_study_scope": previous, "study_scope": req.study_scope})
     db.commit()
     return public_user(row)
 
