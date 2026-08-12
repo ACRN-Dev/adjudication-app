@@ -9,13 +9,20 @@ if (-not (Test-Path ".env.prod")) {
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 Write-Host "Deployed. Waiting for health check..."
+$healthy = $false
 for ($i = 0; $i -lt 20; $i++) {
     $status = docker compose -f docker-compose.yml -f docker-compose.prod.yml ps app
     if ($status -match "healthy") {
         Write-Host "app is healthy."
+        $healthy = $true
         break
     }
     Start-Sleep -Seconds 3
+}
+
+if (-not $healthy) {
+    Write-Error "app did not become healthy within the timeout. Check 'docker compose -f docker-compose.yml -f docker-compose.prod.yml logs app'."
+    exit 1
 }
 
 $portLine = Select-String -Path ".env.prod" -Pattern "^APP_PORT=" | Select-Object -First 1

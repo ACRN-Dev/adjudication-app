@@ -10,14 +10,21 @@ fi
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 echo "Deployed. Waiting for health check..."
+healthy=false
 for i in $(seq 1 20); do
   if docker compose -f docker-compose.yml -f docker-compose.prod.yml ps app | grep -q "healthy"; then
     echo "app is healthy."
+    healthy=true
     break
   fi
   sleep 3
 done
 
-PORT=$(grep -E '^APP_PORT=' .env.prod | cut -d= -f2)
+if [ "$healthy" != "true" ]; then
+  echo "Error: app did not become healthy within the timeout. Check 'docker compose -f docker-compose.yml -f docker-compose.prod.yml logs app'." >&2
+  exit 1
+fi
+
+PORT=$(grep -E '^APP_PORT=' .env.prod | cut -d= -f2 || true)
 PORT=${PORT:-8005}
 echo "Prod deployment is live on port ${PORT} (edge routes https://adjudication.acrncloud.com/ here)."
