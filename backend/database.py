@@ -7,16 +7,25 @@ the inline derivation engine and demo endpoints to operate without a live databa
 
 import os
 import logging
+from urllib.parse import quote_plus
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 logger = logging.getLogger("acrn.database")
 
-_POSTGRES_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://acrn_user:acrn_dev_password@localhost:5432/acrn_adjudication"
-)
+
+def _build_postgres_url():
+    """Assembles the Postgres URL from discrete DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT vars."""
+    user = os.getenv("DB_USER", "acrn_user")
+    password = os.getenv("DB_PASSWORD", "acrn_dev_password")
+    host = os.getenv("DB_HOST", "localhost")
+    port = os.getenv("DB_PORT", "5432")
+    name = os.getenv("DB_NAME", "acrn_adjudication")
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{name}"
+
+
+_POSTGRES_URL = _build_postgres_url()
 _SQLITE_PATH = os.path.join(os.path.dirname(__file__), "acrn_demo.db")
 _SQLITE_URL = f"sqlite:///{_SQLITE_PATH}"
 _DB_SSL_MODE = os.getenv("DB_SSL_MODE")

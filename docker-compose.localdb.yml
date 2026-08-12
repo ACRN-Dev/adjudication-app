@@ -19,7 +19,12 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://acrn_user:acrn_local_password@db:5432/acrn_adjudication
+      DB_NAME: acrn_adjudication
+      DB_USER: acrn_user
+      DB_PASSWORD: acrn_local_password
+      DB_HOST: db
+      DB_PORT: "5432"
+      # SSL between Docker containers is unnecessary (same internal network)
       DB_SSL_MODE: disable
       ENVIRONMENT: development
       ENABLE_DEMO_ACCOUNTS: "true"

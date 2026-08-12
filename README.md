@@ -119,7 +119,7 @@ On Windows, use the `.ps1` equivalents (`scripts/deploy-dev.ps1`, `scripts/deplo
 
 ```bash
 cp .env.dev.example .env.dev     # (or .env.prod.example .env.prod on the prod server)
-# edit .env.dev / .env.prod with real DATABASE_URL, SECRET_KEY, OPENAI_API_KEY, etc.
+# edit .env.dev / .env.prod with real DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT, SECRET_KEY, OPENAI_API_KEY, etc.
 ```
 
 Then deploy:
@@ -144,7 +144,11 @@ Starts `app` plus a throwaway `postgres:16-alpine` container (`docker-compose.lo
 | Variable | Required | Purpose |
 |---|---|---|
 | `APP_PORT` | no (default `8005`) | Host port the app is published on. |
-| `DATABASE_URL` | yes | External Postgres connection string (`postgresql://user:pass@host:5432/db`). |
+| `DB_NAME` | yes | External Postgres database name. |
+| `DB_USER` | yes | External Postgres user. |
+| `DB_PASSWORD` | yes | External Postgres password. |
+| `DB_HOST` | yes | External Postgres host. |
+| `DB_PORT` | no (default `5432`) | External Postgres port. |
 | `DB_SSL_MODE` | yes in dev/prod | Postgres SSL mode, e.g. `require`. Passed through to `psycopg2` as `connect_args={"sslmode": ...}`. |
 | `SECRET_KEY` | no | Reserved for future use — not currently read by the backend. |
 | `OPENAI_API_KEY` | no | Enables AI-assisted narrative generation; falls back to the local rule-based generator when unset. |

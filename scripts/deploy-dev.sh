@@ -30,7 +30,7 @@ if [ "$healthy" != "true" ]; then
 fi
 
 if docker compose -f docker-compose.yml -f docker-compose.dev.yml logs app 2>&1 | grep -qi "PostgreSQL unavailable"; then
-  echo "Error: app fell back to local SQLite — check DATABASE_URL / DB_SSL_MODE in .env.dev." >&2
+  echo "Error: app fell back to local SQLite — check DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT / DB_SSL_MODE in .env.dev." >&2
   exit 1
 fi
 
