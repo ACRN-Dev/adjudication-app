@@ -16,6 +16,7 @@ backend/.rt-staging/
 # OS/editor noise
 .DS_Store
 Thumbs.db
+.idea/
 
 # Superpowers scratch workspace (plan ledgers, briefs, review packages)
 .superpowers/
