@@ -1,25 +1,95 @@
 """Login, logout and demo account management endpoints."""
+import hashlib
 import os
+import secrets
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Cookie, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+import msal
 
 from database import get_db
 from models.auth import PortalUser, AuthAuditEvent
 from services.auth_service import (
-    ACTIVE, AUTH_COOKIE, INACTIVE, ROLE_ADMIN, audit_auth, current_user, default_password,
-    hash_password, identity_from_user, login as auth_login, logout as auth_logout,
-    require_role, seed_demo_accounts, normalize_email,
+    ACTIVE, AUTH_COOKIE, AUTH_COOKIE_SECURE, AUTH_COOKIE_SAMESITE, INACTIVE, ROLE_ADMIN, audit_auth,
+    current_user, default_password, hash_password, identity_from_user, issue_session,
+    login as auth_login, logout as auth_logout, require_role, seed_demo_accounts, normalize_email,
 )
 
 router = APIRouter()
+
+SSO_STATE_COOKIE = "acrn_sso_state"
+SSO_SCOPES = ["User.Read"]
+
+
+def _sso_app() -> msal.ConfidentialClientApplication:
+    return msal.ConfidentialClientApplication(
+        client_id=os.environ["ENTRA_CLIENT_ID"],
+        client_credential=os.environ["ENTRA_CLIENT_SECRET"],
+        authority=f"https://login.microsoftonline.com/{os.environ['ENTRA_TENANT_ID']}",
+    )
+
+
+def _sso_redirect_uri() -> str:
+    return f"{os.environ['APP_BASE_URL'].rstrip('/')}/api/auth/sso/callback"
 
 
 @router.get("/config")
 def auth_config():
     return {"demo_enabled": os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true"}
+
+
+@router.get("/sso/login")
+def sso_login():
+    state = secrets.token_urlsafe(24)
+    auth_url = _sso_app().get_authorization_request_url(SSO_SCOPES, state=state, redirect_uri=_sso_redirect_uri())
+    resp = RedirectResponse(auth_url)
+    resp.set_cookie(SSO_STATE_COOKIE, state, httponly=True, secure=AUTH_COOKIE_SECURE, samesite=AUTH_COOKIE_SAMESITE, max_age=600, path="/")
+    return resp
+
+
+@router.get("/sso/callback")
+def sso_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None,
+                  acrn_sso_state: Optional[str] = Cookie(None), db: Session = Depends(get_db)):
+    base = os.environ.get("APP_BASE_URL", "").rstrip("/")
+
+    def redirect(path: str) -> RedirectResponse:
+        r = RedirectResponse(f"{base}{path}")
+        r.delete_cookie(SSO_STATE_COOKIE, path="/")
+        return r
+
+    if error or not code:
+        audit_auth(db, "SSO_LOGIN_FAILURE", "FAILURE", request=request, reason=error or "No authorization code returned")
+        db.commit()
+        return redirect("/?sso_error=cancelled")
+
+    if not state or not acrn_sso_state or state != acrn_sso_state:
+        audit_auth(db, "SSO_LOGIN_FAILURE", "FAILURE", request=request, reason="State mismatch")
+        db.commit()
+        raise HTTPException(400, "Invalid SSO state")
+
+    result = _sso_app().acquire_token_by_authorization_code(code, scopes=SSO_SCOPES, redirect_uri=_sso_redirect_uri())
+    if "error" in result:
+        audit_auth(db, "SSO_LOGIN_FAILURE", "FAILURE", request=request, reason=result.get("error_description", "Token exchange failed"))
+        db.commit()
+        return redirect("/?sso_error=auth_failed")
+
+    claims = result.get("id_token_claims", {})
+    email = normalize_email(claims.get("preferred_username") or claims.get("email") or "")
+    user = db.query(PortalUser).filter_by(email=email).first() if email else None
+    if not user or user.status != ACTIVE:
+        audit_auth(
+            db, "SSO_LOGIN_FAILURE", "FAILURE", request=request, reason="Email not registered",
+            details={"email_hash": hashlib.sha256(email.encode()).hexdigest()} if email else {},
+        )
+        db.commit()
+        return redirect("/?sso_error=not_registered")
+
+    resp = redirect("/")
+    issue_session(db, user, resp, request, "SSO_LOGIN_SUCCESS")
+    return resp
 
 
 class LoginRequest(BaseModel):

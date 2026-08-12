@@ -151,6 +151,33 @@ def _public_user(user: PortalUser) -> dict:
     }
 
 
+def issue_session(db: Session, user: PortalUser, response: Response, request: Optional[Request], event_type: str = "LOGIN_SUCCESS") -> dict:
+    now = datetime.utcnow()
+    user.failed_login_count = 0
+    user.locked_until = None
+    user.last_login_at = now
+    raw_token = secrets.token_urlsafe(32)
+    db.add(AuthSession(
+        token_hash=_hash_token(raw_token),
+        user_id=user.id,
+        expires_at=now + timedelta(hours=SESSION_HOURS),
+        user_agent=(request.headers.get("user-agent", "")[:255] if request else ""),
+        ip_address=(request.client.host if request and request.client else ""),
+    ))
+    audit_auth(db, event_type, "SUCCESS", actor=user, affected=user, request=request)
+    db.commit()
+    response.set_cookie(
+        AUTH_COOKIE,
+        raw_token,
+        httponly=True,
+        secure=AUTH_COOKIE_SECURE,
+        samesite=AUTH_COOKIE_SAMESITE,
+        max_age=SESSION_HOURS * 3600,
+        path="/",
+    )
+    return _public_user(user)
+
+
 def login(db: Session, email: str, password: str, response: Response, request: Request) -> dict:
     normalized = normalize_email(email)
     generic = HTTPException(401, "Invalid email or password.")
@@ -164,7 +191,7 @@ def login(db: Session, email: str, password: str, response: Response, request: R
         audit_auth(db, "LOGIN_FAILURE", "FAILURE", affected=user, request=request, reason="Account inactive or locked")
         db.commit()
         raise generic
-    if not verify_password(password, user.password_hash):
+    if not user.password_hash or not verify_password(password, user.password_hash):
         user.failed_login_count = (user.failed_login_count or 0) + 1
         if user.failed_login_count >= LOCK_AFTER:
             user.locked_until = now + timedelta(minutes=LOCK_MINUTES)
@@ -172,29 +199,7 @@ def login(db: Session, email: str, password: str, response: Response, request: R
         audit_auth(db, "LOGIN_FAILURE", "FAILURE", affected=user, request=request)
         db.commit()
         raise generic
-    user.failed_login_count = 0
-    user.locked_until = None
-    user.last_login_at = now
-    raw_token = secrets.token_urlsafe(32)
-    db.add(AuthSession(
-        token_hash=_hash_token(raw_token),
-        user_id=user.id,
-        expires_at=now + timedelta(hours=SESSION_HOURS),
-        user_agent=(request.headers.get("user-agent", "")[:255] if request else ""),
-        ip_address=(request.client.host if request and request.client else ""),
-    ))
-    audit_auth(db, "LOGIN_SUCCESS", "SUCCESS", actor=user, affected=user, request=request)
-    db.commit()
-    response.set_cookie(
-        AUTH_COOKIE,
-        raw_token,
-        httponly=True,
-        secure=AUTH_COOKIE_SECURE,
-        samesite=AUTH_COOKIE_SAMESITE,
-        max_age=SESSION_HOURS * 3600,
-        path="/",
-    )
-    return _public_user(user)
+    return issue_session(db, user, response, request, "LOGIN_SUCCESS")
 
 
 def logout(db: Session, token: Optional[str], response: Response, request: Request, user: Optional[PortalUser] = None):
