@@ -4,25 +4,13 @@ import os, sys
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from database import Base, get_db
 from main import app
 from models.admin import AdminUser, ControlledVersion, AdminAuditEvent
 from services.admin_security import Identity, validate_mapping, validate_workflow_definition, risk_warnings
+from conftest import TestingSession
 
-engine = create_engine("sqlite://", connect_args={"check_same_thread":False}, poolclass=StaticPool)
-TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-Base.metadata.create_all(engine)
-
-def override_db():
-    db=TestingSession()
-    try: yield db
-    finally: db.close()
-app.dependency_overrides[get_db]=override_db
 client=TestClient(app)
 CLIN={"X-Demo-User":"clinical.ops.demo@acrnhealth.com","X-Demo-Role":"CLINICAL_OPS_ADMIN","X-Study-Scope":"PROTECT-Africa,LOPE-Nigeria"}
 TECH={"X-Demo-User":"tech.admin.demo@acrnhealth.com","X-Demo-Role":"TECHNICAL_ADMIN","X-Study-Scope":"*"}

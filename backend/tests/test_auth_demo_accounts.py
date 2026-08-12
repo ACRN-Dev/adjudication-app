@@ -1,19 +1,13 @@
 import os, sys
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database import Base, get_db
 from main import app
 from models.auth import PortalUser, AuthAuditEvent
 from services.auth_service import DEMO_ACCOUNTS, default_password, seed_demo_accounts, verify_password
-
-engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-Base.metadata.create_all(engine)
+from conftest import TestingSession
 
 
 def override_db():
