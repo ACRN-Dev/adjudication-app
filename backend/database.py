@@ -19,13 +19,20 @@ _POSTGRES_URL = os.getenv(
 )
 _SQLITE_PATH = os.path.join(os.path.dirname(__file__), "acrn_demo.db")
 _SQLITE_URL = f"sqlite:///{_SQLITE_PATH}"
+_DB_SSL_MODE = os.getenv("DB_SSL_MODE")
 
 DB_OFFLINE = False
+
+
+def _build_postgres_connect_args():
+    """Optional psycopg2 sslmode, e.g. DB_SSL_MODE=require for an external managed Postgres."""
+    return {"sslmode": _DB_SSL_MODE} if _DB_SSL_MODE else {}
+
 
 def _create_engine_with_fallback():
     global DB_OFFLINE
     try:
-        eng = create_engine(_POSTGRES_URL, pool_pre_ping=True, connect_args={})
+        eng = create_engine(_POSTGRES_URL, pool_pre_ping=True, connect_args=_build_postgres_connect_args())
         with eng.connect() as conn:
             conn.execute(text("SELECT 1"))
         logger.info("✅ PostgreSQL connection established.")
