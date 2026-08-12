@@ -6,9 +6,12 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+os.environ["ENABLE_DEMO_ACCOUNTS"] = "true"
 from main import app
 from models.admin import AdminUser, ControlledVersion, AdminAuditEvent
+from models.auth import PortalUser
 from services.admin_security import Identity, validate_mapping, validate_workflow_definition, risk_warnings
+from services.auth_service import ACTIVE, hash_password
 from conftest import TestingSession
 
 client=TestClient(app)
@@ -54,3 +57,39 @@ def test_demo_data_separated_and_marked():
 def test_delegated_authority_prevents_excess_permissions():
     payload={"reason":"Excess grant attempt","display_name":"Bad Grant","email":"bad.grant@demo.local","country":"Ghana","role_codes":["CLINICAL_OPS_ADMIN"],"study_codes":[]}
     assert client.post("/api/admin/users",headers=TECH,json=payload).status_code==403
+
+
+def test_admin_headers_rejected_when_demo_disabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    r = client.get("/api/admin/dashboard", headers=CLIN)
+    assert r.status_code == 401
+
+
+def test_admin_session_grants_access_using_portal_role(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    db = TestingSession()
+    db.add(PortalUser(
+        email="sso.tech.admin@acrnhealth.com", display_name="SSO Tech Admin",
+        password_hash=hash_password("Whatever123!"), role="ADMIN", portal_role="TECHNICAL_ADMIN", status=ACTIVE,
+    ))
+    db.commit()
+    db.close()
+    login = client.post("/api/auth/login", json={"email": "sso.tech.admin@acrnhealth.com", "password": "Whatever123!"})
+    assert login.status_code == 200
+    r = client.get("/api/admin/dashboard", cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]})
+    assert r.status_code == 200
+
+
+def test_admin_session_without_portal_role_denied(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    db = TestingSession()
+    db.add(PortalUser(
+        email="no.portal.role@acrnhealth.com", display_name="No Portal Role",
+        password_hash=hash_password("Whatever123!"), role="ADMIN", portal_role=None, status=ACTIVE,
+    ))
+    db.commit()
+    db.close()
+    login = client.post("/api/auth/login", json={"email": "no.portal.role@acrnhealth.com", "password": "Whatever123!"})
+    assert login.status_code == 200
+    r = client.get("/api/admin/dashboard", cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]})
+    assert r.status_code == 403

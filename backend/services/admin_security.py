@@ -1,5 +1,5 @@
 """Replaceable identity adapter and server-side Admin Portal authorization."""
-import hashlib, json
+import hashlib, json, os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -35,29 +35,29 @@ class Identity:
     def permissions(self): return ROLE_PERMISSIONS.get(self.role, set())
 
 def get_identity(request: Request, acrn_demo_session: Optional[str] = Cookie(None), db: Session = Depends(get_db), x_demo_user: Optional[str] = Header(None), x_demo_role: Optional[str] = Header(None), x_study_scope: Optional[str] = Header(None)):
-    """Session adapter with legacy demo-header fallback for older local tests."""
-    try:
-        token = acrn_demo_session
-        if token:
-            from services.auth_service import _hash_token
-            from models.auth import AuthSession
-            session = db.query(AuthSession).filter_by(token_hash=_hash_token(token), revoked_at=None).first()
-            if session and session.expires_at > datetime.utcnow():
-                user = db.get(PortalUser, session.user_id)
-                if user and user.status == "ACTIVE" and user.role in ADMIN_ROLES:
-                    return Identity(user.email, user.role, tuple(filter(None, (x_study_scope or "*").split(","))))
-                if user and user.status == "ACTIVE":
+    """Resolves identity from the session-backed PortalUser. X-Demo-* headers are only
+    trusted as a fallback when ENABLE_DEMO_ACCOUNTS=true and no valid session is present."""
+    if acrn_demo_session:
+        from services.auth_service import _hash_token
+        from models.auth import AuthSession
+        session = db.query(AuthSession).filter_by(token_hash=_hash_token(acrn_demo_session), revoked_at=None).first()
+        if session and session.expires_at > datetime.utcnow():
+            user = db.get(PortalUser, session.user_id)
+            if user and user.status == "ACTIVE":
+                if user.role != "ADMIN" or user.portal_role not in ADMIN_ROLES:
                     raise HTTPException(403, "Admin Portal access denied for this role.")
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+                studies = tuple(filter(None, (user.study_scope or "*").split(",")))
+                return Identity(user.email, user.portal_role, studies, auth_source="SSO" if user.password_hash is None else "SESSION")
+
+    if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() != "true":
+        raise HTTPException(401, "Authentication required.")
+
     if not x_demo_user or not x_demo_role:
         raise HTTPException(401, "Authentication required.")
     role = x_demo_role.upper()
     if role not in ADMIN_ROLES:
         raise HTTPException(403, "Admin Portal access denied for this role.")
-    return Identity(x_demo_user, role, tuple(filter(None, (x_study_scope or "").split(","))))
+    return Identity(x_demo_user, role, tuple(filter(None, (x_study_scope or "").split(","))), auth_source="DEMO")
 
 def require(permission: str):
     def dependency(identity: Identity = Depends(get_identity)):
