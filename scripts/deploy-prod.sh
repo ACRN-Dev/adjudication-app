@@ -7,12 +7,16 @@ if [ ! -f .env.prod ]; then
   exit 1
 fi
 
+set -a
+source .env.prod
+set +a
+
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 echo "Deployed. Waiting for health check..."
 healthy=false
 for i in $(seq 1 20); do
-  if docker compose -f docker-compose.yml -f docker-compose.prod.yml ps app | grep -q "healthy"; then
+  if docker compose -f docker-compose.yml -f docker-compose.prod.yml ps app | grep -q "(healthy)"; then
     echo "app is healthy."
     healthy=true
     break
@@ -22,6 +26,11 @@ done
 
 if [ "$healthy" != "true" ]; then
   echo "Error: app did not become healthy within the timeout. Check 'docker compose -f docker-compose.yml -f docker-compose.prod.yml logs app'." >&2
+  exit 1
+fi
+
+if docker compose -f docker-compose.yml -f docker-compose.prod.yml logs app 2>&1 | grep -qi "PostgreSQL unavailable"; then
+  echo "Error: app fell back to local SQLite — check DATABASE_URL / DB_SSL_MODE in .env.prod." >&2
   exit 1
 fi
 

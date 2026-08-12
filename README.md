@@ -146,7 +146,7 @@ Starts `app` plus a throwaway `postgres:16-alpine` container (`docker-compose.lo
 | `APP_PORT` | no (default `8005`) | Host port the app is published on. |
 | `DATABASE_URL` | yes | External Postgres connection string (`postgresql://user:pass@host:5432/db`). |
 | `DB_SSL_MODE` | yes in dev/prod | Postgres SSL mode, e.g. `require`. Passed through to `psycopg2` as `connect_args={"sslmode": ...}`. |
-| `SECRET_KEY` | yes | Session/token signing key. |
+| `SECRET_KEY` | no | Reserved for future use — not currently read by the backend. |
 | `OPENAI_API_KEY` | no | Enables AI-assisted narrative generation; falls back to the local rule-based generator when unset. |
 | `SESSION_HOURS` | no (default `12`) | Session lifetime. |
 | `LOGIN_LOCK_AFTER` / `LOGIN_LOCK_MINUTES` | no (default `5` / `15`) | Login lockout policy. |
@@ -154,6 +154,7 @@ Starts `app` plus a throwaway `postgres:16-alpine` container (`docker-compose.lo
 | `DEMO_DEFAULT_PASSWORD` | no | Shared local demo password (dev only). |
 | `DEMO_FORCE_PASSWORD_CHANGE` | no | Forces a password change on first demo login. |
 | `AUTH_COOKIE_SECURE` | yes | Set `true` behind HTTPS (both dev and prod, since the edge terminates TLS). |
+| `AUTH_COOKIE_SAMESITE` | no (default `lax` when set, else `none` if `AUTH_COOKIE_SECURE=true`) | Session cookie SameSite policy. Set to `lax` (default in dev/prod compose overrides) since the SPA and API are same-origin. |
 | `RT_PSEUDONYM_SECRET` | yes | Pseudonymization secret for the RealTime import pipeline. |
 | `RT_IDENTITY_ENCRYPTION_KEY` | no | Identity encryption key for the RealTime pipeline. |
 

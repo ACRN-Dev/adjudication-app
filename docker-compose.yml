@@ -6,7 +6,7 @@ services:
     ports:
       - "${APP_PORT:-8005}:8000"
     volumes:
-      - uploads:/app/uploads
+      - uploads:/app/backend/.rt-staging
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
       interval: 15s

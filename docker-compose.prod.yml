@@ -6,4 +6,5 @@ services:
       ENVIRONMENT: production
       ENABLE_DEMO_ACCOUNTS: "false"
       AUTH_COOKIE_SECURE: "true"
+      AUTH_COOKIE_SAMESITE: "lax"
     restart: always

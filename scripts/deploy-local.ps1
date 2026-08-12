@@ -2,12 +2,16 @@ $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 
 docker compose -f docker-compose.yml -f docker-compose.localdb.yml up -d --build
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "docker compose up failed (exit code $LASTEXITCODE)."
+    exit 1
+}
 
 Write-Host "Deployed. Waiting for health check..."
 $healthy = $false
 for ($i = 0; $i -lt 20; $i++) {
     $status = docker compose -f docker-compose.yml -f docker-compose.localdb.yml ps app
-    if ($status -match "healthy") {
+    if ($status -match "\(healthy\)") {
         Write-Host "app is healthy."
         $healthy = $true
         break
@@ -17,6 +21,12 @@ for ($i = 0; $i -lt 20; $i++) {
 
 if (-not $healthy) {
     Write-Error "app did not become healthy within the timeout. Check 'docker compose -f docker-compose.yml -f docker-compose.localdb.yml logs app'."
+    exit 1
+}
+
+$logs = docker compose -f docker-compose.yml -f docker-compose.localdb.yml logs app 2>&1
+if ($logs -match "PostgreSQL unavailable") {
+    Write-Error "app fell back to local SQLite - check DATABASE_URL / DB_SSL_MODE for the bundled Postgres service."
     exit 1
 }
 

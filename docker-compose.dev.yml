@@ -6,3 +6,4 @@ services:
       ENVIRONMENT: development
       ENABLE_DEMO_ACCOUNTS: "true"
       AUTH_COOKIE_SECURE: "true"
+      AUTH_COOKIE_SAMESITE: "lax"
