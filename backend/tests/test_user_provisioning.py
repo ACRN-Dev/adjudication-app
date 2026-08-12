@@ -77,3 +77,68 @@ def test_set_study_scope_updates_existing_user():
     r = client.post(f"/api/auth/users/{user_id}/study-scope", cookies=cookies, json={"study_scope": "LOPE-Nigeria", "reason": "Narrowing scope"})
     assert r.status_code == 200
     assert r.json()["study_scope"] == "LOPE-Nigeria"
+
+
+def test_admin_cannot_change_own_portal_role():
+    cookies = _login_as_admin()
+    db = TestingSession()
+    admin_row = db.query(PortalUser).filter_by(email="provisioning.admin@acrnhealth.com").first()
+    admin_id, original_role = admin_row.id, admin_row.portal_role
+    db.close()
+
+    r = client.post(
+        f"/api/auth/users/{admin_id}/portal-role", cookies=cookies,
+        json={"portal_role": "CLINICAL_OPS_ADMIN", "reason": "Self elevation attempt"},
+    )
+    assert r.status_code == 409
+
+    db = TestingSession()
+    assert db.query(PortalUser).filter_by(id=admin_id).first().portal_role == original_role
+    db.close()
+
+
+def test_create_user_rejects_blank_study_scope():
+    cookies = _login_as_admin()
+    for label, blank in [("empty", ""), ("comma", ",")]:
+        r = client.post(
+            "/api/auth/users", cookies=cookies,
+            json={
+                "email": f"blank.{label}.scope@acrnhealth.com", "display_name": "Blank Scope",
+                "role": "MONITOR", "portal_role": "QA_REVIEWER", "study_scope": blank,
+                "reason": "Blank scope test",
+            },
+        )
+        assert r.status_code == 422
+
+
+def test_set_study_scope_rejects_blank_value():
+    cookies = _login_as_admin()
+    create = client.post(
+        "/api/auth/users", cookies=cookies,
+        json={"email": "blank.update.scope@acrnhealth.com", "display_name": "Blank Update Scope", "role": "MONITOR", "portal_role": "QA_REVIEWER", "reason": "Setup"},
+    )
+    user_id = create.json()["id"]
+    for blank in ["", ","]:
+        r = client.post(f"/api/auth/users/{user_id}/study-scope", cookies=cookies, json={"study_scope": blank, "reason": "Blank scope attempt"})
+        assert r.status_code == 422
+
+
+def test_study_scope_normalizes_whitespace_around_commas():
+    cookies = _login_as_admin()
+    create = client.post(
+        "/api/auth/users", cookies=cookies,
+        json={
+            "email": "space.scope@acrnhealth.com", "display_name": "Space Scope", "role": "MONITOR",
+            "portal_role": "QA_REVIEWER", "study_scope": "PROTECT-Africa, LOPE-Nigeria", "reason": "Setup",
+        },
+    )
+    assert create.status_code == 201
+    assert create.json()["study_scope"] == "PROTECT-Africa,LOPE-Nigeria"
+
+    user_id = create.json()["id"]
+    r = client.post(
+        f"/api/auth/users/{user_id}/study-scope", cookies=cookies,
+        json={"study_scope": "  LOPE-Nigeria ,  PROTECT-Africa  ", "reason": "Re-normalize"},
+    )
+    assert r.status_code == 200
+    assert r.json()["study_scope"] == "LOPE-Nigeria,PROTECT-Africa"

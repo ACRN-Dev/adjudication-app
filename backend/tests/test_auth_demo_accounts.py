@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database import Base, get_db
 from main import app
 from models.auth import PortalUser, AuthAuditEvent
-from services.auth_service import DEMO_ACCOUNTS, default_password, seed_demo_accounts, verify_password
+from services.auth_service import DEMO_ACCOUNTS, default_password, maybe_seed_demo_accounts, seed_demo_accounts, verify_password
 from conftest import TestingSession
 
 
@@ -91,6 +91,18 @@ def test_role_boundaries_and_logout_invalidate_access():
     assert monitor.get("/api/admin/dashboard").status_code == 403
     assert monitor.post("/api/auth/logout").status_code == 200
     assert monitor.get("/api/auth/me").status_code == 401
+
+
+def test_maybe_seed_demo_accounts_respects_enable_flag(monkeypatch):
+    db = reset_auth_tables()
+    monkeypatch.delenv("ENABLE_DEMO_ACCOUNTS", raising=False)
+    maybe_seed_demo_accounts(db)
+    assert db.query(PortalUser).filter_by(email="admin@acrnhealth.com").first() is None
+
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "true")
+    maybe_seed_demo_accounts(db)
+    assert db.query(PortalUser).filter_by(email="admin@acrnhealth.com").first() is not None
+    db.close()
 
 
 def test_admin_account_actions_audit_and_do_not_leak_default_password():

@@ -254,6 +254,16 @@ def _validate_portal_role(role: str, portal_role: Optional[str]):
         raise HTTPException(422, f"portal_role must be one of: {', '.join(sorted(MONITOR_ROLES))}")
 
 
+def _normalize_study_scope(value: str) -> str:
+    value = (value or "").strip()
+    if value == "*":
+        return "*"
+    codes = [c.strip() for c in value.split(",") if c.strip()]
+    if not codes:
+        raise HTTPException(422, "study_scope must be '*' or a non-empty comma-separated list of study codes")
+    return ",".join(codes)
+
+
 @router.post("/users", status_code=201)
 def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
                  db: Session = Depends(get_db)):
@@ -271,7 +281,7 @@ def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = De
         password_hash=None,
         role=role,
         portal_role=portal_role,
-        study_scope=req.study_scope or "*",
+        study_scope=_normalize_study_scope(req.study_scope),
         status=ACTIVE,
         is_demo_account=False,
     )
@@ -288,6 +298,8 @@ def set_portal_role(user_id: str, req: PortalRoleRequest, request: Request, admi
     row = db.get(PortalUser, user_id)
     if not row:
         raise HTTPException(404, "User not found")
+    if row.id == admin.id:
+        raise HTTPException(409, "You cannot change your own portal role.")
     portal_role = (req.portal_role or "").upper() or None
     _validate_portal_role(row.role, portal_role)
     previous = row.portal_role
@@ -304,10 +316,11 @@ def set_study_scope(user_id: str, req: StudyScopeRequest, request: Request, admi
     row = db.get(PortalUser, user_id)
     if not row:
         raise HTTPException(404, "User not found")
+    normalized_scope = _normalize_study_scope(req.study_scope)
     previous = row.study_scope
-    row.study_scope = req.study_scope
+    row.study_scope = normalized_scope
     audit_auth(db, "STUDY_SCOPE_CHANGE", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
-               details={"previous_study_scope": previous, "study_scope": req.study_scope})
+               details={"previous_study_scope": previous, "study_scope": normalized_scope})
     db.commit()
     return public_user(row)
 

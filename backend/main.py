@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from api import import_api, mapping, reconcile, derive, narrative, adjudication, committee, audit, export, derive_inline, admin, monitor, realtime, auth
 from models import longitudinal, auth as auth_models
-from services.auth_service import seed_demo_accounts
+from services.auth_service import maybe_seed_demo_accounts
 try:
     from api import workflow as workflow_api
     WORKFLOW_AVAILABLE = True
@@ -26,7 +26,7 @@ try:
     from database import SessionLocal
     db = SessionLocal()
     try:
-        seed_demo_accounts(db)
+        maybe_seed_demo_accounts(db)
     finally:
         db.close()
 except Exception as e:
