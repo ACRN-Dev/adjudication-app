@@ -19,3 +19,9 @@ Thumbs.db
 
 # Superpowers scratch workspace (plan ledgers, briefs, review packages)
 .superpowers/
+
+# Environment secrets (real values -- never commit)
+.env
+.env.dev
+.env.prod
+.env.local
