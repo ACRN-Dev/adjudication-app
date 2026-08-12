@@ -1,0 +1,9 @@
+services:
+  app:
+    env_file:
+      - .env.prod
+    environment:
+      ENVIRONMENT: production
+      ENABLE_DEMO_ACCOUNTS: "false"
+      AUTH_COOKIE_SECURE: "true"
+    restart: always

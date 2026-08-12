@@ -1,0 +1,8 @@
+services:
+  app:
+    env_file:
+      - .env.dev
+    environment:
+      ENVIRONMENT: development
+      ENABLE_DEMO_ACCOUNTS: "true"
+      AUTH_COOKIE_SECURE: "true"

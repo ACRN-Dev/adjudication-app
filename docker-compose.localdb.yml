@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: acrn_adjudication
+      POSTGRES_USER: acrn_user
+      POSTGRES_PASSWORD: acrn_local_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U acrn_user -d acrn_adjudication"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://acrn_user:acrn_local_password@db:5432/acrn_adjudication
+      DB_SSL_MODE: disable
+      ENVIRONMENT: development
+      ENABLE_DEMO_ACCOUNTS: "true"
+      AUTH_COOKIE_SECURE: "false"
+      SECRET_KEY: local-dev-secret-change-me
+
+volumes:
+  pgdata:
