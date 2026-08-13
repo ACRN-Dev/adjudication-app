@@ -32,19 +32,24 @@ ENTRA_CLIENT_SECRET=<secret value from step 7>
 APP_BASE_URL=https://adjudication-dev.acrncloud.com   # or the prod URL on the prod server
 ```
 
-Then redeploy (`./scripts/deploy-dev.sh` or `./scripts/deploy-prod.sh`).
+Then redeploy: `./scripts/init-prod.sh` on prod, `./scripts/deploy-dev.sh` on dev.
 
-**Before the first deploy after this feature ships**, run the schema migration against that server's Postgres database (this does not happen automatically):
+**On prod**, `init-prod.sh` applies the schema migrations for you — nothing else to do.
+
+**On dev**, `deploy-dev.sh` does not run migrations, so before the first deploy after this feature ships, apply the SSO migration by hand against the dev database:
 
 ```
-psql "$DATABASE_URL" -f backend/migrations/versions/20260812_05_sso_login.sql
+psql "postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME?sslmode=$DB_SSL_MODE" \
+  -f backend/migrations/versions/20260812_05_sso_login.sql
 ```
 
 This backfills every existing ADMIN account to the broad `ADMIN` sub-role and every existing MONITOR account to `MONITOR_QC_REVIEWER`, so nobody is locked out on redeploy — review and narrow individual accounts' sub-roles afterward via the Admin portal's user management screen if needed.
 
 ## Provisioning a user
 
-Microsoft SSO only lets in users who already have a `PortalUser` record. An Admin creates one via the Admin portal's user management (`POST /api/auth/users`), specifying:
+Microsoft SSO only lets in users who already have a `PortalUser` record — which means a freshly initialised database has nobody who can sign in. On prod, `./scripts/init-prod.sh` resolves this by provisioning the bootstrap administrators listed in `BOOTSTRAP_ADMINS` at the top of [../backend/scripts/init_prod.py](../backend/scripts/init_prod.py). They authenticate purely through Microsoft with no local password.
+
+Every other account is created by an Admin via the Admin portal's user management (`POST /api/auth/users`), specifying:
 - `email` — must exactly match the user's Microsoft work account email.
 - `role` — `ADMIN`, `MONITOR`, or `ADJUDICATOR`.
 - `portal_role` — required for `ADMIN`/`MONITOR` accounts (e.g. `TECHNICAL_ADMIN`, `MONITOR_QC_REVIEWER`); leave unset for `ADJUDICATOR`.

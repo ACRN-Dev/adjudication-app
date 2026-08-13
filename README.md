@@ -115,7 +115,7 @@ The app ships as a single Docker image: a multi-stage build compiles the React S
 | Environment | URL | Server | Command |
 |---|---|---|---|
 | Development | https://adjudication-dev.acrncloud.com/ | ACRN dev Oracle server | `./scripts/deploy-dev.sh` |
-| Production | https://adjudication.acrncloud.com/ | ACRN prod Oracle server | `./scripts/deploy-prod.sh` |
+| Production | https://adjudication.acrncloud.com/ | ACRN prod Oracle server | `./scripts/init-prod.sh` |
 
 On Windows, use the `.ps1` equivalents (`scripts/deploy-dev.ps1`, `scripts/deploy-prod.ps1`).
 
@@ -134,6 +134,53 @@ Then deploy:
 ```
 
 Both commands build the image, start the `app` container bound to host port `8005` (override via `APP_PORT`), and wait for `/health` to report healthy. The server's existing reverse proxy/load balancer terminates HTTPS for the public domain and forwards plain HTTP to this port -- no TLS container is included in this stack.
+
+### Production runbook
+
+On the production server, `./scripts/init-prod.sh` is the single command for every deployment. It is idempotent, so it is safe to re-run.
+
+**First deployment:**
+
+```bash
+git clone <repo-url> adjudication-app && cd adjudication-app
+cp .env.prod.example .env.prod
+```
+
+Fill in `.env.prod` — every variable in it is required, and the script refuses to deploy while any is empty or still holding an example placeholder. Generate the two RealTime secrets once and store them in the approved secret vault:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Preview what will happen to the database without changing anything:
+
+```bash
+./scripts/init-prod.sh --dry-run
+```
+
+Then deploy:
+
+```bash
+./scripts/init-prod.sh
+```
+
+**Every later deployment:**
+
+```bash
+git pull && ./scripts/init-prod.sh
+```
+
+The script validates `.env.prod`, builds the image, runs `backend/scripts/init_prod.py` against the external Postgres, starts the app, and confirms it is healthy and actually connected to Postgres rather than the SQLite fallback. The database step creates missing tables, applies `backend/migrations/versions/*.sql` in order, purges any synthetic `is_demo` rows, provisions the bootstrap administrators, and refuses to finish if no active admin exists or any demo row remains.
+
+Bootstrap administrators are defined in `BOOTSTRAP_ADMINS` at the top of [backend/scripts/init_prod.py](backend/scripts/init_prod.py). They sign in through Microsoft SSO with no local password, and hold the full `ADMIN` permission set so they can provision everyone else from the Admin Portal. Edit that list to change who gets bootstrap access.
+
+`./scripts/deploy-prod.sh` remains available for a plain rebuild-and-restart with no database work.
+
+**No test data reaches production.** `ENABLE_DEMO_ACCOUNTS` is pinned to `false` by `docker-compose.prod.yml`, which gates both the demo login accounts and the synthetic Admin Portal fixtures; `init-prod.sh` aborts if `.env.prod` tries to enable it. One consequence to expect: the Admin Portal's dashboard, users, studies, sites, versions and integrations screens read only `is_demo=true` rows, so they render empty in production. Real account management is unaffected — it lives on the separate `/api/auth/users` endpoints.
 
 ### Local development with a bundled Postgres (no external DB access)
 
@@ -163,8 +210,8 @@ Starts `app` plus a throwaway `postgres:16-alpine` container (`docker-compose.lo
 | `DEMO_FORCE_PASSWORD_CHANGE` | no | Forces a password change on first demo login. |
 | `AUTH_COOKIE_SECURE` | yes | Set `true` behind HTTPS (both dev and prod, since the edge terminates TLS). |
 | `AUTH_COOKIE_SAMESITE` | no (default `lax` when set, else `none` if `AUTH_COOKIE_SECURE=true`) | Session cookie SameSite policy. Set to `lax` (default in dev/prod compose overrides) since the SPA and API are same-origin. |
-| `RT_PSEUDONYM_SECRET` | yes | Pseudonymization secret for the RealTime import pipeline. |
-| `RT_IDENTITY_ENCRYPTION_KEY` | no | Identity encryption key for the RealTime pipeline. |
+| `RT_PSEUDONYM_SECRET` | yes | Keys the HMAC that turns MRN + screening number into a participant pseudonym. **If unset the backend falls back to a hardcoded value published in this repository**, making production pseudonyms reversible by anyone with the source. |
+| `RT_IDENTITY_ENCRYPTION_KEY` | yes in dev/prod | Fernet key encrypting the restricted identity crosswalk. If unset it is derived from `RT_PSEUDONYM_SECRET`, inheriting that fallback's weakness. Rotating either value orphans every existing pseudonym and crosswalk row. |
 | `ENTRA_TENANT_ID` | yes on real dev/prod | Microsoft Entra ID tenant ID. See [docs/entra-sso-setup.md](docs/entra-sso-setup.md). |
 | `ENTRA_CLIENT_ID` | yes on real dev/prod | Entra App Registration client ID. |
 | `ENTRA_CLIENT_SECRET` | yes on real dev/prod | Entra App Registration client secret. |
