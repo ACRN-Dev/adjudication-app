@@ -4,6 +4,6 @@ services:
       - .env.dev
     environment:
       ENVIRONMENT: development
-      ENABLE_DEMO_ACCOUNTS: "true"
+      ENABLE_DEMO_ACCOUNTS: "false"
       AUTH_COOKIE_SECURE: "true"
       AUTH_COOKIE_SAMESITE: "lax"
