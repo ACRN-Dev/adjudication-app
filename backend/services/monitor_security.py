@@ -1,13 +1,28 @@
-import hashlib,json
+import hashlib,json,os
 from dataclasses import dataclass
 from datetime import datetime,timezone
-from fastapi import Header,HTTPException,Depends
+from typing import Optional
+from fastapi import Cookie,Header,HTTPException,Depends
+from sqlalchemy.orm import Session
+from database import get_db
+from models.auth import PortalUser
 from models.monitor import MonitorAuditEvent
 ROLES={"ADJUDICATION_COORDINATOR","MONITOR_QC_REVIEWER","QA_REVIEWER","RELEASE_OPERATOR"}
 PROHIBITED=("sflt-1","sflt1","plgf","seng","biomarker","poc result","treatment allocation","randomisation","randomization")
 @dataclass(frozen=True)
 class MonitorIdentity: upn:str; role:str; studies:tuple[str,...]
-def identity(x_demo_user:str|None=Header(None),x_demo_role:str|None=Header(None),x_study_scope:str|None=Header(None)):
+def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get_db),x_demo_user:Optional[str]=Header(None),x_demo_role:Optional[str]=Header(None),x_study_scope:Optional[str]=Header(None)):
+    if acrn_demo_session:
+        from services.auth_service import _hash_token
+        from models.auth import AuthSession
+        session=db.query(AuthSession).filter_by(token_hash=_hash_token(acrn_demo_session),revoked_at=None).first()
+        if session and session.expires_at>datetime.utcnow():
+            user=db.get(PortalUser,session.user_id)
+            if user and user.status=="ACTIVE":
+                if user.role!="MONITOR" or user.portal_role not in ROLES: raise HTTPException(403,"Monitor Portal access denied")
+                studies=tuple(filter(None,(user.study_scope or "*").split(",")))
+                return MonitorIdentity(user.email,user.portal_role,studies)
+    if os.getenv("ENABLE_DEMO_ACCOUNTS","false").lower()!="true": raise HTTPException(401,"Authentication required")
     if not x_demo_user or not x_demo_role: raise HTTPException(401,"Authentication required")
     if x_demo_role.upper() not in ROLES: raise HTTPException(403,"Monitor Portal access denied")
     return MonitorIdentity(x_demo_user,x_demo_role.upper(),tuple(filter(None,(x_study_scope or "").split(","))))
