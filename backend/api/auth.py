@@ -177,6 +177,7 @@ def me(user: PortalUser = Depends(current_user)):
 def users(search: str = "", role: str = "", status: str = "", page: int = Query(1, ge=1),
           page_size: int = Query(50, ge=1, le=200), admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
           db: Session = Depends(get_db)):
+    _require_admin_permission(admin, "users.read")
     q = db.query(PortalUser)
     if search:
         s = f"%{search.lower()}%"
@@ -190,6 +191,13 @@ def users(search: str = "", role: str = "", status: str = "", page: int = Query(
     return {"total": total, "items": [public_user(x) for x in rows]}
 
 
+def _require_admin_permission(admin: PortalUser, permission: str) -> AdminIdentity:
+    acting_identity = AdminIdentity(admin.email, admin.portal_role or "", ())
+    if permission not in acting_identity.permissions:
+        raise HTTPException(403, f"Your admin role does not have '{permission}' permission.")
+    return acting_identity
+
+
 @router.post("/users/{user_id}/status")
 def set_status(user_id: str, req: StatusRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
                db: Session = Depends(get_db)):
@@ -200,6 +208,8 @@ def set_status(user_id: str, req: StatusRequest, request: Request, admin: Portal
     row = db.get(PortalUser, user_id)
     if not row:
         raise HTTPException(404, "User not found")
+    if row.id == admin.id:
+        raise HTTPException(409, "You cannot change your own account status.")
     previous = row.status
     row.status = status
     audit_auth(db, "ACCOUNT_ACTIVATION" if status == ACTIVE else "ACCOUNT_DEACTIVATION", "SUCCESS",
@@ -225,12 +235,16 @@ def unlock(user_id: str, req: ReasonRequest, request: Request, admin: PortalUser
 @router.post("/users/{user_id}/reset-password")
 def reset_password(user_id: str, req: ReasonRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
                    db: Session = Depends(get_db)):
-    _require_admin_permission(admin, "users.manage")
+    acting_identity = _require_admin_permission(admin, "users.manage")
+    if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() != "true":
+        raise HTTPException(409, "Demo accounts are disabled in this environment.")
     row = db.get(PortalUser, user_id)
     if not row:
         raise HTTPException(404, "User not found")
     if not row.is_demo_account:
         raise HTTPException(409, "Only demo account passwords can be reset here")
+    if row.role == "ADMIN":
+        validate_delegation(acting_identity, ROLE_PERMISSIONS.get(row.portal_role, set()))
     row.password_hash = hash_password(default_password())
     row.must_change_password = False
     row.failed_login_count = 0
@@ -260,13 +274,6 @@ def set_role(user_id: str, req: RoleRequest, request: Request, admin: PortalUser
                details={"previous_role": previous, "role": role, "previous_portal_role": previous_portal_role, "portal_role": None})
     db.commit()
     return public_user(row)
-
-
-def _require_admin_permission(admin: PortalUser, permission: str) -> AdminIdentity:
-    acting_identity = AdminIdentity(admin.email, admin.portal_role or "", ())
-    if permission not in acting_identity.permissions:
-        raise HTTPException(403, f"Your admin role does not have '{permission}' permission.")
-    return acting_identity
 
 
 def _validate_portal_role(role: str, portal_role: Optional[str]):
@@ -359,6 +366,7 @@ def set_study_scope(user_id: str, req: StudyScopeRequest, request: Request, admi
 @router.get("/audit")
 def audit(limit: int = Query(100, ge=1, le=500), admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
           db: Session = Depends(get_db)):
+    _require_admin_permission(admin, "audit.read")
     rows = db.query(AuthAuditEvent).order_by(AuthAuditEvent.timestamp.desc()).limit(limit).all()
     return {"items": [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]}
 

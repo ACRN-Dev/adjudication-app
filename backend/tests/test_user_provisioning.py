@@ -375,6 +375,101 @@ def test_demo_seed_succeeds_when_enabled_for_authorized_admin_and_denies_unautho
     assert r.status_code == 403
 
 
+def test_reset_password_requires_enable_demo_accounts_env(monkeypatch):
+    """reset_password reproduces the exact escalation /demo/seed was fixed to prevent: it reset
+    a DEMO account's password to the well-known default with no ENABLE_DEMO_ACCOUNTS gate. On a
+    real dev/prod server (ENABLE_DEMO_ACCOUNTS=false) it must refuse, even for an admin who does
+    hold 'users.manage'."""
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    db = TestingSession()
+    if not db.query(PortalUser).filter_by(email="gate.target@acrnhealth.com").first():
+        db.add(PortalUser(
+            email="gate.target@acrnhealth.com", display_name="Gate Target",
+            password_hash=hash_password("Whatever123!"), role="ADJUDICATOR", status=ACTIVE,
+            is_demo_account=True,
+        ))
+        db.commit()
+    target_id = db.query(PortalUser).filter_by(email="gate.target@acrnhealth.com").first().id
+    db.close()
+
+    cookies = _login_as_admin()
+    r = client.post(f"/api/auth/users/{target_id}/reset-password", cookies=cookies, json={"reason": "Attempt while disabled"})
+    assert r.status_code == 409
+
+
+def test_reset_password_on_demo_admin_requires_delegation(monkeypatch):
+    """Without a delegation check, an admin holding 'users.manage' but a deliberately
+    restricted portal_role (e.g. TECHNICAL_ADMIN, which lacks studies.manage/access.approve)
+    could reset the demo admin account's (role=ADMIN, portal_role=ADMIN, full permission set)
+    password and log in with full authority -- the identical escalation /demo/seed was fixed
+    to prevent, via a second door."""
+    from services.admin_security import ROLE_PERMISSIONS
+    from services.auth_service import seed_demo_accounts
+    assert "users.manage" in ROLE_PERMISSIONS["TECHNICAL_ADMIN"]
+    assert not ROLE_PERMISSIONS["ADMIN"] <= ROLE_PERMISSIONS["TECHNICAL_ADMIN"]
+
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "true")
+    db = TestingSession()
+    seed_demo_accounts(db)
+    demo_admin = db.query(PortalUser).filter_by(email="admin@acrnhealth.com").first()
+    demo_admin_id, original_hash = demo_admin.id, demo_admin.password_hash
+    db.close()
+
+    cookies = _login_as_admin()  # provisioning.admin@acrnhealth.com, portal_role=TECHNICAL_ADMIN
+    r = client.post(
+        f"/api/auth/users/{demo_admin_id}/reset-password", cookies=cookies,
+        json={"reason": "Attempting to inherit full ADMIN via demo admin reset"},
+    )
+    assert r.status_code == 403
+
+    db = TestingSession()
+    assert db.query(PortalUser).filter_by(id=demo_admin_id).first().password_hash == original_hash
+    db.close()
+
+
+def test_admin_cannot_change_own_status():
+    """set_status was missing the self-modification guard already present on
+    set_role/set_portal_role/set_study_scope. Deactivating your own account is worse than
+    losing portal_role -- current_user rejects a deactivated session everywhere, with no
+    in-app recovery path."""
+    cookies = _login_as_admin()
+    db = TestingSession()
+    admin_row = db.query(PortalUser).filter_by(email="provisioning.admin@acrnhealth.com").first()
+    admin_id, original_status = admin_row.id, admin_row.status
+    db.close()
+
+    r = client.post(
+        f"/api/auth/users/{admin_id}/status", cookies=cookies,
+        json={"status": "INACTIVE", "reason": "Self deactivation attempt"},
+    )
+    assert r.status_code == 409
+
+    db = TestingSession()
+    assert db.query(PortalUser).filter_by(id=admin_id).first().status == original_status
+    db.close()
+
+
+def test_get_users_and_audit_require_read_permissions():
+    """GET /users and GET /audit were readable by any coarse-role ADMIN regardless of the
+    fine-grained portal_role permission model in services.admin_security.ROLE_PERMISSIONS --
+    including QA_AUDITOR (lacks 'users.read') and a portal_role=None admin (a state set_role
+    now produces on every role change, holding no permissions at all since '' isn't a key in
+    ROLE_PERMISSIONS)."""
+    from services.admin_security import ROLE_PERMISSIONS
+    assert "users.read" not in ROLE_PERMISSIONS["QA_AUDITOR"]
+    assert "audit.read" in ROLE_PERMISSIONS["QA_AUDITOR"]
+
+    auditor_cookies = _login_as("readonly.auditor@acrnhealth.com", "Readonly Auditor", "QA_AUDITOR")
+    r = client.get("/api/auth/users", cookies=auditor_cookies)
+    assert r.status_code == 403
+    r = client.get("/api/auth/audit", cookies=auditor_cookies)
+    assert r.status_code == 200
+
+    no_permission_cookies = _login_as("no.permissions.admin@acrnhealth.com", "No Permissions Admin", None)
+    r = client.get("/api/auth/audit", cookies=no_permission_cookies)
+    assert r.status_code == 403
+
+
 def test_admin_cannot_change_own_role():
     """set_role clears the target's portal_role to None on every change, so without a
     self-modification guard (already present on set_portal_role and set_study_scope), an
