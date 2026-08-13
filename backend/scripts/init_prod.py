@@ -37,6 +37,8 @@ sys.path.insert(0, BACKEND_DIR)
 BOOTSTRAP_ADMINS = [
     ("emmanuel.buruvuru@acrnhealth.com", "Emmanuel Buruvuru"),
     ("tinotenda.chibongore@acrnhealth.com", "Tinotenda Chibongore"),
+    ("tariro.makadzange@acrnhealth.com", "Tariro Makadzange"),
+    ("kudakwashe.takarinda@acrnhealth.com", "Kudakwashe Takarinda"),
 ]
 
 DRY_RUN = "--dry-run" in sys.argv
