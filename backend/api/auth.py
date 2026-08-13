@@ -193,6 +193,7 @@ def users(search: str = "", role: str = "", status: str = "", page: int = Query(
 @router.post("/users/{user_id}/status")
 def set_status(user_id: str, req: StatusRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
                db: Session = Depends(get_db)):
+    _require_admin_permission(admin, "users.manage")
     status = req.status.upper()
     if status not in {ACTIVE, INACTIVE}:
         raise HTTPException(422, "Unsupported account status")
@@ -210,6 +211,7 @@ def set_status(user_id: str, req: StatusRequest, request: Request, admin: Portal
 @router.post("/users/{user_id}/unlock")
 def unlock(user_id: str, req: ReasonRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
            db: Session = Depends(get_db)):
+    _require_admin_permission(admin, "users.manage")
     row = db.get(PortalUser, user_id)
     if not row:
         raise HTTPException(404, "User not found")
@@ -223,6 +225,7 @@ def unlock(user_id: str, req: ReasonRequest, request: Request, admin: PortalUser
 @router.post("/users/{user_id}/reset-password")
 def reset_password(user_id: str, req: ReasonRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
                    db: Session = Depends(get_db)):
+    _require_admin_permission(admin, "users.manage")
     row = db.get(PortalUser, user_id)
     if not row:
         raise HTTPException(404, "User not found")
@@ -247,6 +250,8 @@ def set_role(user_id: str, req: RoleRequest, request: Request, admin: PortalUser
     row = db.get(PortalUser, user_id)
     if not row:
         raise HTTPException(404, "User not found")
+    if row.id == admin.id:
+        raise HTTPException(409, "You cannot change your own role.")
     previous = row.role
     previous_portal_role = row.portal_role
     row.role = role
@@ -360,6 +365,9 @@ def audit(limit: int = Query(100, ge=1, le=500), admin: PortalUser = Depends(req
 
 @router.post("/demo/seed")
 def seed(req: ReasonRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)), db: Session = Depends(get_db)):
+    _require_admin_permission(admin, "users.manage")
+    if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() != "true":
+        raise HTTPException(409, "Demo accounts are disabled in this environment.")
     created = seed_demo_accounts(db)
     audit_auth(db, "DEMO_ACCOUNTS_SEEDED", "SUCCESS", actor=admin, affected=admin, request=request, reason=req.reason, details={"created": created})
     db.commit()

@@ -315,3 +315,85 @@ def test_set_portal_role_requires_delegation_when_target_is_admin():
     row = db.query(PortalUser).filter_by(id=new_id).first()
     assert row.portal_role == "TECHNICAL_ADMIN"
     db.close()
+
+
+def test_reset_password_status_and_unlock_require_users_manage_permission():
+    """reset-password, status, and unlock were coarse-role-only (ADMIN role) endpoints that
+    still let ANY admin act on ANY other user regardless of their fine-grained portal_role
+    permissions. They must be gated behind 'users.manage' like the other provisioning
+    endpoints, or an admin explicitly denied that permission (e.g. ACCESS_REVIEWER) could
+    still lock/unlock, deactivate, or reset the password of any other user."""
+    from services.admin_security import ROLE_PERMISSIONS
+    assert "users.manage" not in ROLE_PERMISSIONS["ACCESS_REVIEWER"]
+
+    admin_cookies = _login_as_admin()
+    create = client.post(
+        "/api/auth/users", cookies=admin_cookies,
+        json={
+            "email": "coarse.target@acrnhealth.com", "display_name": "Coarse Target",
+            "role": "ADJUDICATOR", "reason": "Setup",
+        },
+    )
+    assert create.status_code == 201
+    target_id = create.json()["id"]
+
+    readonly_cookies = _login_as("coarse.attacker@acrnhealth.com", "Coarse Attacker", "ACCESS_REVIEWER")
+
+    r = client.post(f"/api/auth/users/{target_id}/reset-password", cookies=readonly_cookies, json={"reason": "Attempt"})
+    assert r.status_code == 403
+
+    r = client.post(f"/api/auth/users/{target_id}/status", cookies=readonly_cookies, json={"status": "INACTIVE", "reason": "Attempt"})
+    assert r.status_code == 403
+
+    r = client.post(f"/api/auth/users/{target_id}/unlock", cookies=readonly_cookies, json={"reason": "Attempt"})
+    assert r.status_code == 403
+
+
+def test_demo_seed_requires_enable_demo_accounts_env_even_for_authorized_admin(monkeypatch):
+    """POST /demo/seed unconditionally called seed_demo_accounts (bypassing the
+    ENABLE_DEMO_ACCOUNTS gate that maybe_seed_demo_accounts respects), which would let ANY
+    admin re-seed the well-known admin@acrnhealth.com demo account -- with its default
+    password and full portal_role=ADMIN -- on a real dev/prod server. The env gate must
+    close this off even for an admin who does hold 'users.manage'."""
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    cookies = _login_as_admin()
+    r = client.post("/api/auth/demo/seed", cookies=cookies, json={"reason": "Attempt while disabled"})
+    assert r.status_code == 409
+
+
+def test_demo_seed_succeeds_when_enabled_for_authorized_admin_and_denies_unauthorized(monkeypatch):
+    from services.admin_security import ROLE_PERMISSIONS
+    assert "users.manage" not in ROLE_PERMISSIONS["ACCESS_REVIEWER"]
+
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "true")
+    admin_cookies = _login_as_admin()
+    r = client.post("/api/auth/demo/seed", cookies=admin_cookies, json={"reason": "Seed for demo"})
+    assert r.status_code == 200
+
+    readonly_cookies = _login_as("seed.attacker@acrnhealth.com", "Seed Attacker", "ACCESS_REVIEWER")
+    r = client.post("/api/auth/demo/seed", cookies=readonly_cookies, json={"reason": "Attempt"})
+    assert r.status_code == 403
+
+
+def test_admin_cannot_change_own_role():
+    """set_role clears the target's portal_role to None on every change, so without a
+    self-modification guard (already present on set_portal_role and set_study_scope), an
+    admin with 'users.manage' could strip their own portal_role with no in-app recovery
+    path, bricking their own Admin Portal access."""
+    cookies = _login_as_admin()
+    db = TestingSession()
+    admin_row = db.query(PortalUser).filter_by(email="provisioning.admin@acrnhealth.com").first()
+    admin_id, original_role, original_portal_role = admin_row.id, admin_row.role, admin_row.portal_role
+    db.close()
+
+    r = client.post(
+        f"/api/auth/users/{admin_id}/role", cookies=cookies,
+        json={"role": "MONITOR", "reason": "Self demotion attempt"},
+    )
+    assert r.status_code == 409
+
+    db = TestingSession()
+    row = db.query(PortalUser).filter_by(id=admin_id).first()
+    assert row.role == original_role
+    assert row.portal_role == original_portal_role
+    db.close()
