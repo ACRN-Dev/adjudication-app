@@ -28,12 +28,12 @@ AUTH_COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", "false").lower() == "true"
 AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE") or ("none" if AUTH_COOKIE_SECURE else "lax")
 
 DEMO_ACCOUNTS = [
-    ("admin@acrnhealth.com", "ACRN Demo Administrator", ROLE_ADMIN),
-    ("monitor1@acrnhealth.com", "ACRN Demo Monitor 1", ROLE_MONITOR),
-    ("monitor2@acrnhealth.com", "ACRN Demo Monitor 2", ROLE_MONITOR),
-    ("adjudicatora@acrnhealth.com", "ACRN Demo Adjudicator A", ROLE_ADJUDICATOR),
-    ("adjudicatorb@acrnhealth.com", "ACRN Demo Adjudicator B", ROLE_ADJUDICATOR),
-    ("adjudicatorc@acrnhealth.com", "ACRN Demo Adjudicator C", ROLE_ADJUDICATOR),
+    ("admin@acrnhealth.com", "ACRN Demo Administrator", ROLE_ADMIN, None),
+    ("monitor1@acrnhealth.com", "ACRN Demo Monitor 1", ROLE_MONITOR, "MONITOR_QC_REVIEWER"),
+    ("monitor2@acrnhealth.com", "ACRN Demo Monitor 2", ROLE_MONITOR, "QA_REVIEWER"),
+    ("adjudicatora@acrnhealth.com", "ACRN Demo Adjudicator A", ROLE_ADJUDICATOR, None),
+    ("adjudicatorb@acrnhealth.com", "ACRN Demo Adjudicator B", ROLE_ADJUDICATOR, None),
+    ("adjudicatorc@acrnhealth.com", "ACRN Demo Adjudicator C", ROLE_ADJUDICATOR, None),
 ]
 
 
@@ -100,7 +100,7 @@ def audit_auth(db: Session, event_type: str, outcome: str = "SUCCESS", actor: Op
 def seed_demo_accounts(db: Session, force_password_reset: bool = False) -> int:
     must_change = os.getenv("DEMO_FORCE_PASSWORD_CHANGE", "false").lower() == "true"
     created = 0
-    for email, display_name, role in DEMO_ACCOUNTS:
+    for email, display_name, role, portal_role in DEMO_ACCOUNTS:
         normalized = normalize_email(email)
         row = db.query(PortalUser).filter_by(email=normalized).first()
         if not row:
@@ -109,6 +109,7 @@ def seed_demo_accounts(db: Session, force_password_reset: bool = False) -> int:
                 display_name=display_name,
                 password_hash=hash_password(default_password()),
                 role=role,
+                portal_role=portal_role,
                 status=ACTIVE,
                 is_demo_account=True,
                 must_change_password=must_change,
@@ -118,6 +119,7 @@ def seed_demo_accounts(db: Session, force_password_reset: bool = False) -> int:
         else:
             row.display_name = display_name
             row.role = role
+            row.portal_role = portal_role
             row.status = row.status or ACTIVE
             row.is_demo_account = True
             if force_password_reset:

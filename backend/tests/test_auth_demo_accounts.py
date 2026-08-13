@@ -57,7 +57,7 @@ def test_all_demo_accounts_can_login_and_route_to_expected_portal():
     seed_demo_accounts(db)
     db.close()
     expected = {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator"}
-    for email, _, role in DEMO_ACCOUNTS:
+    for email, _, role, _ in DEMO_ACCOUNTS:
         r = client.post("/api/auth/login", json={"email": email.upper(), "password": default_password()})
         assert r.status_code == 200
         body = r.json()
@@ -121,3 +121,29 @@ def test_admin_account_actions_audit_and_do_not_leak_default_password():
     events = {x.event_type for x in db.query(AuthAuditEvent).all()}
     assert {"ACCOUNT_DEACTIVATION", "ROLE_CHANGE", "PASSWORD_RESET"} <= events
     db.close()
+
+
+def test_seeded_demo_monitor_accounts_have_a_valid_portal_role():
+    """backend/api/realtime.py's actor() now rejects a MONITOR session whose portal_role
+    isn't a member of services.monitor_security.ROLES -- the seeded demo monitor accounts
+    must carry a valid one or they'd 403 out of the actual Monitor Portal API even with
+    ENABLE_DEMO_ACCOUNTS=true."""
+    from services.monitor_security import ROLES as MONITOR_PORTAL_ROLES
+    db = reset_auth_tables()
+    seed_demo_accounts(db)
+    monitor1 = db.query(PortalUser).filter_by(email="monitor1@acrnhealth.com").first()
+    monitor2 = db.query(PortalUser).filter_by(email="monitor2@acrnhealth.com").first()
+    assert monitor1.portal_role in MONITOR_PORTAL_ROLES
+    assert monitor2.portal_role in MONITOR_PORTAL_ROLES
+    db.close()
+
+
+def test_seeded_demo_monitor1_can_login_and_call_realtime_batches(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    db = reset_auth_tables()
+    seed_demo_accounts(db)
+    db.close()
+    login = client.post("/api/auth/login", json={"email": "monitor1@acrnhealth.com", "password": default_password()})
+    assert login.status_code == 200
+    r = client.get("/api/realtime/batches", cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]})
+    assert r.status_code == 200

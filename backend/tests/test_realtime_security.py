@@ -75,3 +75,45 @@ def test_realtime_non_monitor_session_rejected_even_with_spoofed_headers(monkeyp
         headers={"X-Demo-User": "monitor.demo@acrnhealth.com", "X-Demo-Role": "MONITOR"},
     )
     assert r.status_code == 403
+
+
+def test_realtime_adjudicator_session_without_portal_role_can_reach_assigned(monkeypatch):
+    """The whole reason actor()'s non-MONITOR branch has an explicit ADJUDICATOR allow-list:
+    /assigned depends on actor() directly (not monitor()) and adjudicators typically have no
+    portal_role at all. This must keep working after the allow-list tightening."""
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    db = TestingSession()
+    db.add(PortalUser(
+        email="sso.realtime.adjudicator.noportal@acrnhealth.com", display_name="SSO RealTime Adjudicator No Portal Role",
+        password_hash=hash_password("Whatever123!"), role="ADJUDICATOR", portal_role=None, status=ACTIVE,
+    ))
+    db.commit()
+    db.close()
+    login = client.post("/api/auth/login", json={"email": "sso.realtime.adjudicator.noportal@acrnhealth.com", "password": "Whatever123!"})
+    assert login.status_code == 200
+    r = client.get("/api/realtime/assigned", cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]})
+    assert r.status_code == 200
+
+
+def test_realtime_monitor_session_invalid_portal_role_definitive_even_when_demo_enabled_with_valid_headers(monkeypatch):
+    """Proves the session's rejection isn't merely reachable-but-untested when demo mode is
+    off (the earlier test only covered ENABLE_DEMO_ACCOUNTS=false, where headers are
+    unreachable anyway). Here demo mode is ON and the accompanying headers are valid MONITOR
+    credentials on their own -- the under-provisioned session must still win with a 403,
+    never silently falling through to the headers."""
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "true")
+    db = TestingSession()
+    db.add(PortalUser(
+        email="sso.realtime.monitor.badportal@acrnhealth.com", display_name="SSO RealTime Monitor Bad Portal Role",
+        password_hash=hash_password("Whatever123!"), role="MONITOR", portal_role=None, status=ACTIVE,
+    ))
+    db.commit()
+    db.close()
+    login = client.post("/api/auth/login", json={"email": "sso.realtime.monitor.badportal@acrnhealth.com", "password": "Whatever123!"})
+    assert login.status_code == 200
+    r = client.get(
+        "/api/realtime/batches",
+        cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]},
+        headers={"X-Demo-User": "monitor.demo@acrnhealth.com", "X-Demo-Role": "MONITOR"},
+    )
+    assert r.status_code == 403

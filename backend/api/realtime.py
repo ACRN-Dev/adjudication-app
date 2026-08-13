@@ -23,7 +23,9 @@ def actor(request:Request,x_demo_user:str|None=Header(None),x_demo_role:str|None
                     if u.portal_role not in MONITOR_PORTAL_ROLES:
                         raise HTTPException(403,"Monitor/QC authority required")
                     return u.email,u.portal_role
-                return u.email,u.role
+                if u.role=="ADJUDICATOR":
+                    return u.email,u.role
+                raise HTTPException(403,"Monitor/QC authority required")
     if os.getenv("ENABLE_DEMO_ACCOUNTS","false").lower()!="true":
         raise HTTPException(401,"Authentication required")
     if not x_demo_user or not x_demo_role: raise HTTPException(401,"Authentication required")
