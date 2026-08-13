@@ -106,7 +106,7 @@ Demo accounts (local demo mode only -- see [DEMO_ACCOUNTS.md](DEMO_ACCOUNTS.md))
 
 ### Microsoft SSO (dev/prod)
 
-On the real ACRN dev/prod servers (`ENABLE_DEMO_ACCOUNTS=false`), only Microsoft Entra ID sign-in is accepted — the demo email/password form is hidden. See [docs/entra-sso-setup.md](docs/entra-sso-setup.md) for setting up the Azure App Registration and provisioning users.
+On the real ACRN dev/prod servers (`ENABLE_DEMO_ACCOUNTS=false`), only Microsoft Entra ID sign-in is accepted — the demo email/password form is hidden. Anyone in the Entra tenant can sign in: a first sign-in with no matching account auto-provisions one as `ADJUDICATOR`, which reaches only the adjudication workbench and lists nothing until an Admin assigns cases. Existing accounts keep their role, and deactivated accounts stay locked out. See [docs/entra-sso-setup.md](docs/entra-sso-setup.md) for setting up the Azure App Registration and how accounts are created.
 
 ## Docker deployment
 

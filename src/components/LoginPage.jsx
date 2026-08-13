@@ -18,6 +18,7 @@ export default function LoginPage({ onLoginSuccess }) {
     if (ssoError) {
       const messages = {
         not_registered: "Your account isn't registered. Contact your administrator to be added.",
+        account_inactive: 'Your account has been deactivated. Contact your administrator.',
         cancelled: 'Microsoft sign-in was cancelled.',
         auth_failed: 'Microsoft sign-in failed. Please try again.',
         not_configured: 'Microsoft sign-in is not yet configured for this environment. Please contact your administrator.',

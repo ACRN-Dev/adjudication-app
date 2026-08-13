@@ -45,11 +45,21 @@ psql "postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME?sslmode=$DB_
 
 This backfills every existing ADMIN account to the broad `ADMIN` sub-role and every existing MONITOR account to `MONITOR_QC_REVIEWER`, so nobody is locked out on redeploy — review and narrow individual accounts' sub-roles afterward via the Admin portal's user management screen if needed.
 
-## Provisioning a user
+## How accounts are created
 
-Microsoft SSO only lets in users who already have a `PortalUser` record — which means a freshly initialised database has nobody who can sign in. On prod, `./scripts/init-prod.sh` resolves this by provisioning the bootstrap administrators listed in `BOOTSTRAP_ADMINS` at the top of [../backend/scripts/init_prod.py](../backend/scripts/init_prod.py). They authenticate purely through Microsoft with no local password.
+**Anyone in the Entra tenant can sign in.** The App Registration is single-tenant, so obtaining a token already proves an ACRN work account. On a first successful Microsoft sign-in with no matching `PortalUser`, one is created automatically:
 
-Every other account is created by an Admin via the Admin portal's user management (`POST /api/auth/users`), specifying:
+- `role` = `ADJUDICATOR`, `portal_role` = none, `study_scope` = `*`, `status` = `ACTIVE`
+- no local password — the account authenticates purely through Microsoft
+- audited as `SSO_USER_AUTO_PROVISIONED`
+
+A new adjudicator account reaches only the adjudication workbench, which lists nothing until an Admin explicitly assigns cases to it. An Admin then raises or narrows the account from the Admin portal's user management screen.
+
+Two accounts are never auto-created this way: one that already exists keeps whatever role it has (signing in never escalates or resets it), and one an Admin has deactivated stays out — it is redirected with `sso_error=account_inactive` rather than being silently reactivated.
+
+The bootstrap administrators in `BOOTSTRAP_ADMINS` at the top of [../backend/scripts/init_prod.py](../backend/scripts/init_prod.py) are provisioned by `./scripts/init-prod.sh`, since a freshly initialised database would otherwise have no one able to grant roles.
+
+An Admin can also create an account ahead of the person's first sign-in via `POST /api/auth/users`, specifying:
 - `email` — must exactly match the user's Microsoft work account email.
 - `role` — `ADMIN`, `MONITOR`, or `ADJUDICATOR`.
 - `portal_role` — required for `ADMIN`/`MONITOR` accounts (e.g. `TECHNICAL_ADMIN`, `MONITOR_QC_REVIEWER`); leave unset for `ADJUDICATOR`.

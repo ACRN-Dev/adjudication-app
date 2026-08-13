@@ -13,7 +13,7 @@ import msal
 from database import get_db
 from models.auth import PortalUser, AuthAuditEvent
 from services.auth_service import (
-    ACTIVE, AUTH_COOKIE, AUTH_COOKIE_SECURE, AUTH_COOKIE_SAMESITE, INACTIVE, ROLE_ADMIN, audit_auth,
+    ACTIVE, AUTH_COOKIE, AUTH_COOKIE_SECURE, AUTH_COOKIE_SAMESITE, INACTIVE, ROLE_ADJUDICATOR, ROLE_ADMIN, audit_auth,
     current_user, default_password, hash_password, identity_from_user, issue_session,
     login as auth_login, logout as auth_logout, require_role, seed_demo_accounts, normalize_email,
 )
@@ -86,17 +86,46 @@ def sso_callback(request: Request, code: Optional[str] = None, state: Optional[s
 
     claims = result.get("id_token_claims", {})
     email = normalize_email(claims.get("preferred_username") or claims.get("email") or "")
-    user = db.query(PortalUser).filter_by(email=email).first() if email else None
-    if not user or user.status != ACTIVE:
-        audit_auth(
-            db, "SSO_LOGIN_FAILURE", "FAILURE", request=request, reason="Email not registered",
-            details={"email_hash": hashlib.sha256(email.encode()).hexdigest()} if email else {},
-        )
+    if not email:
+        audit_auth(db, "SSO_LOGIN_FAILURE", "FAILURE", request=request,
+                   reason="Microsoft returned no email claim")
         db.commit()
-        return redirect("/?sso_error=not_registered")
+        return redirect("/?sso_error=auth_failed")
+
+    user = db.query(PortalUser).filter_by(email=email).first()
+    event_type = "SSO_LOGIN_SUCCESS"
+
+    if user is None:
+        # First sign-in by someone in the Entra tenant. The App Registration is single
+        # tenant, so reaching this point already proves an ACRN work account. Provision
+        # them as an adjudicator: the workbench only ever lists cases an admin has
+        # explicitly assigned, so a new account sees no clinical data until then.
+        user = PortalUser(
+            email=email,
+            display_name=(claims.get("name") or email.split("@")[0].replace(".", " ").title()),
+            password_hash=None,          # SSO-only: no local password is ever set
+            role=ROLE_ADJUDICATOR,
+            portal_role=None,            # only ADMIN/MONITOR accounts carry a sub-role
+            study_scope="*",
+            status=ACTIVE,
+            is_demo_account=False,
+        )
+        db.add(user)
+        db.flush()                       # populate user.id before the session row references it
+        audit_auth(db, "SSO_USER_AUTO_PROVISIONED", "SUCCESS", affected=user, request=request,
+                   reason="First Microsoft sign-in by a tenant account",
+                   details={"role": ROLE_ADJUDICATOR, "study_scope": "*"})
+        event_type = "SSO_LOGIN_SUCCESS_NEW_USER"
+
+    elif user.status != ACTIVE:
+        # An account an admin deactivated must stay out; never silently reactivate it.
+        audit_auth(db, "SSO_LOGIN_FAILURE", "FAILURE", affected=user, request=request,
+                   reason="Account is not active")
+        db.commit()
+        return redirect("/?sso_error=account_inactive")
 
     resp = redirect("/")
-    issue_session(db, user, resp, request, "SSO_LOGIN_SUCCESS")
+    issue_session(db, user, resp, request, event_type)
     return resp
 
 
