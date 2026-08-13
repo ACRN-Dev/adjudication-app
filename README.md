@@ -146,7 +146,9 @@ git clone <repo-url> adjudication-app && cd adjudication-app
 cp .env.prod.example .env.prod
 ```
 
-Fill in `.env.prod` — every variable in it is required, and the script refuses to deploy while any is empty or still holding an example placeholder. Generate the two RealTime secrets once and store them in the approved secret vault:
+Fill in `.env.prod`. The database, Entra SSO and `APP_BASE_URL` settings are required — the script refuses to deploy while any is empty or still holding an example placeholder. Values are read literally, so passwords containing `$`, backticks, `#` or spaces need no quoting.
+
+The two `RT_*` secrets are optional while the RealTime longitudinal import is unused; the script warns and continues. Generate them and store them in the approved secret vault **before the first RealTime import**, since they determine every participant pseudonym:
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(48))"
@@ -210,8 +212,8 @@ Starts `app` plus a throwaway `postgres:16-alpine` container (`docker-compose.lo
 | `DEMO_FORCE_PASSWORD_CHANGE` | no | Forces a password change on first demo login. |
 | `AUTH_COOKIE_SECURE` | yes | Set `true` behind HTTPS (both dev and prod, since the edge terminates TLS). |
 | `AUTH_COOKIE_SAMESITE` | no (default `lax` when set, else `none` if `AUTH_COOKIE_SECURE=true`) | Session cookie SameSite policy. Set to `lax` (default in dev/prod compose overrides) since the SPA and API are same-origin. |
-| `RT_PSEUDONYM_SECRET` | yes | Keys the HMAC that turns MRN + screening number into a participant pseudonym. **If unset the backend falls back to a hardcoded value published in this repository**, making production pseudonyms reversible by anyone with the source. |
-| `RT_IDENTITY_ENCRYPTION_KEY` | yes in dev/prod | Fernet key encrypting the restricted identity crosswalk. If unset it is derived from `RT_PSEUDONYM_SECRET`, inheriting that fallback's weakness. Rotating either value orphans every existing pseudonym and crosswalk row. |
+| `RT_PSEUDONYM_SECRET` | before the first RealTime import | Keys the HMAC that turns MRN + screening number into a participant pseudonym. **If unset the backend falls back to a value published in this repository**, making pseudonyms reversible by anyone with the source. |
+| `RT_IDENTITY_ENCRYPTION_KEY` | before the first RealTime import | Fernet key encrypting the restricted identity crosswalk. If unset it is derived from `RT_PSEUDONYM_SECRET`, inheriting that fallback's weakness. Set both before importing any RealTime data — adding or rotating them later orphans every pseudonym and crosswalk row created without them. |
 | `ENTRA_TENANT_ID` | yes on real dev/prod | Microsoft Entra ID tenant ID. See [docs/entra-sso-setup.md](docs/entra-sso-setup.md). |
 | `ENTRA_CLIENT_ID` | yes on real dev/prod | Entra App Registration client ID. |
 | `ENTRA_CLIENT_SECRET` | yes on real dev/prod | Entra App Registration client secret. |

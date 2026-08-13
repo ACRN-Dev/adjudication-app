@@ -66,7 +66,6 @@ export APP_PORT="${APP_PORT:-8005}"
 REQUIRED=(
   DB_NAME DB_USER DB_PASSWORD DB_HOST DB_PORT DB_SSL_MODE
   ENTRA_TENANT_ID ENTRA_CLIENT_ID ENTRA_CLIENT_SECRET APP_BASE_URL
-  RT_PSEUDONYM_SECRET RT_IDENTITY_ENCRYPTION_KEY
 )
 # Values carried over verbatim from .env.prod.example -- a filled-in file has none of these.
 PLACEHOLDERS=("USERNAME" "PASSWORD" "PROD_DB_HOST" "DEV_DB_HOST" "change-me" "change-me-dev-secret" "change-me-dev-pseudonym-secret")
@@ -103,9 +102,31 @@ case "$APP_BASE_URL" in
   */) fail "APP_BASE_URL must not end with a trailing slash (got '$APP_BASE_URL')." ;;
 esac
 
+# The RealTime longitudinal import is not in use yet, so its secrets are optional here.
+# They are only consulted when a RealTime batch is imported -- but they must be in place
+# BEFORE the first one, because they determine every participant pseudonym.
+rt_unset=()
+for name in RT_PSEUDONYM_SECRET RT_IDENTITY_ENCRYPTION_KEY; do
+  if [ -z "${!name:-}" ]; then
+    rt_unset+=("$name")
+  fi
+done
+if [ ${#rt_unset[@]} -gt 0 ]; then
+  echo ""
+  echo "      WARNING: ${rt_unset[*]} not set."
+  echo "      The RealTime longitudinal import falls back to a secret published in this"
+  echo "      repository, which would make participant pseudonyms reversible by anyone"
+  echo "      holding the source. Harmless while RealTime import is unused, but set these"
+  echo "      before the first import -- adding them afterwards orphans every pseudonym"
+  echo "      and identity-crosswalk row created without them. See .env.prod.example."
+  echo ""
+fi
+
 # Fernet keys are exactly 32 random bytes in url-safe base64: 43 chars plus '='.
-if ! printf '%s' "$RT_IDENTITY_ENCRYPTION_KEY" | grep -Eq '^[A-Za-z0-9_-]{43}=$'; then
-  fail "RT_IDENTITY_ENCRYPTION_KEY is not a valid Fernet key. Generate one with:
+if [ -n "${RT_IDENTITY_ENCRYPTION_KEY:-}" ] \
+   && ! printf '%s' "$RT_IDENTITY_ENCRYPTION_KEY" | grep -Eq '^[A-Za-z0-9_-]{43}=$'; then
+  fail "RT_IDENTITY_ENCRYPTION_KEY is set but is not a valid Fernet key. Either leave it empty
+       (RealTime import is unused) or generate a real one with:
        python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
 fi
 
