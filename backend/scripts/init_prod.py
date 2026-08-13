@@ -57,17 +57,22 @@ def fail(message):
     sys.exit(1)
 
 
-def postgres_url():
-    """Mirrors backend/database.py so this script targets exactly the same server."""
+DB_NAME = os.getenv("DB_NAME", "")
+
+
+def postgres_url(database=None):
+    """Mirrors backend/database.py so this script targets exactly the same server.
+
+    Pass `database` to reach a different database on that same server -- used to connect to
+    the maintenance database when the application database does not exist yet."""
     user = os.getenv("DB_USER", "")
     password = os.getenv("DB_PASSWORD", "")
     host = os.getenv("DB_HOST", "")
     port = os.getenv("DB_PORT", "5432")
-    name = os.getenv("DB_NAME", "")
     missing = [k for k in ("DB_USER", "DB_PASSWORD", "DB_HOST", "DB_NAME") if not os.getenv(k)]
     if missing:
         fail(f"Missing required database settings: {', '.join(missing)}. Check .env.prod.")
-    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{name}"
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database or DB_NAME}"
 
 
 # ── 1. Verify Postgres before importing anything that touches the DB ────────────────
@@ -77,18 +82,76 @@ from sqlalchemy import create_engine, inspect, text  # noqa: E402
 
 ssl_mode = os.getenv("DB_SSL_MODE")
 connect_args = {"sslmode": ssl_mode} if ssl_mode else {}
-engine = create_engine(postgres_url(), pool_pre_ping=True, connect_args=connect_args)
+
+
+def connect_to_target():
+    eng = create_engine(postgres_url(), pool_pre_ping=True, connect_args=connect_args)
+    with eng.connect() as conn:
+        return eng, conn.execute(text("SHOW server_version")).scalar(), \
+            conn.execute(text("SELECT current_database()")).scalar()
+
+
+def is_missing_database(exc):
+    """Postgres reports a non-existent database as SQLSTATE 3D000 (invalid_catalog_name)."""
+    if getattr(getattr(exc, "orig", None), "pgcode", None) == "3D000":
+        return True
+    return f'database "{DB_NAME}" does not exist' in str(exc)
+
+
+def create_database():
+    """Create the application database by connecting to a maintenance database on the
+    same server. CREATE DATABASE cannot run inside a transaction, hence AUTOCOMMIT."""
+    # The name is interpolated into DDL, so allow only plain identifiers.
+    if not DB_NAME or not DB_NAME.replace("_", "").replace("$", "").isalnum() or DB_NAME[0].isdigit():
+        fail(f"DB_NAME '{DB_NAME}' is not a plain identifier; refusing to build a CREATE DATABASE "
+             "statement from it. Use letters, digits and underscores only.")
+
+    last_error = None
+    for maintenance in ("postgres", "template1"):
+        try:
+            eng = create_engine(postgres_url(maintenance), connect_args=connect_args,
+                                isolation_level="AUTOCOMMIT")
+            with eng.connect() as conn:
+                exists = conn.execute(
+                    text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": DB_NAME}
+                ).scalar()
+                if not exists:
+                    conn.execute(text(f'CREATE DATABASE "{DB_NAME}"'))
+                    say(f"      Created database '{DB_NAME}'.")
+                else:
+                    say(f"      Database '{DB_NAME}' already exists.")
+            eng.dispose()
+            return
+        except Exception as exc:  # try the next maintenance database
+            last_error = exc
+
+    fail(
+        f"Database '{DB_NAME}' does not exist and could not be created: {last_error}\n"
+        f"       The user '{os.getenv('DB_USER')}' likely lacks the CREATEDB privilege, or cannot\n"
+        "       reach the 'postgres'/'template1' maintenance databases. Ask the DBA to run:\n"
+        f"           CREATE DATABASE \"{DB_NAME}\" OWNER \"{os.getenv('DB_USER')}\";\n"
+        "       then re-run this script."
+    )
+
 
 try:
-    with engine.connect() as conn:
-        server_version = conn.execute(text("SHOW server_version")).scalar()
-        current_db = conn.execute(text("SELECT current_database()")).scalar()
+    engine, server_version, current_db = connect_to_target()
 except Exception as exc:
-    fail(
-        f"Cannot reach the production Postgres server: {exc}\n"
-        "       Check DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD / DB_SSL_MODE in .env.prod, "
-        "and that this server's IP is allowed through the database firewall."
-    )
+    if not is_missing_database(exc):
+        fail(
+            f"Cannot reach the production Postgres server: {exc}\n"
+            "       Check DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD / DB_SSL_MODE in .env.prod, "
+            "and that this server's IP is allowed through the database firewall."
+        )
+    say(f"      Database '{DB_NAME}' does not exist on {os.getenv('DB_HOST')} -- creating it.")
+    if DRY_RUN:
+        say("      (dry run: the database would be created here; nothing further can be checked)")
+        sys.exit(0)
+    create_database()
+    try:
+        engine, server_version, current_db = connect_to_target()
+    except Exception as retry_exc:
+        fail(f"Database '{DB_NAME}' was created but is still unreachable: {retry_exc}")
 
 say(f"      Connected to '{current_db}' on {os.getenv('DB_HOST')}:{os.getenv('DB_PORT', '5432')} "
     f"(Postgres {server_version}, sslmode={ssl_mode or 'not set'})")

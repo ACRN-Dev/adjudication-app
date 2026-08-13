@@ -176,7 +176,13 @@ Then deploy:
 git pull && ./scripts/init-prod.sh
 ```
 
-The script validates `.env.prod`, builds the image, runs `backend/scripts/init_prod.py` against the external Postgres, starts the app, and confirms it is healthy and actually connected to Postgres rather than the SQLite fallback. The database step creates missing tables, applies `backend/migrations/versions/*.sql` in order, purges any synthetic `is_demo` rows, provisions the bootstrap administrators, and refuses to finish if no active admin exists or any demo row remains.
+The script validates `.env.prod`, builds the image, runs `backend/scripts/init_prod.py` against the external Postgres, starts the app, and confirms it is healthy and actually connected to Postgres rather than the SQLite fallback. The database step creates the database itself if it does not exist yet, creates missing tables, applies `backend/migrations/versions/*.sql` in order, purges any synthetic `is_demo` rows, provisions the bootstrap administrators, and refuses to finish if no active admin exists or any demo row remains.
+
+Creating the database requires `DB_USER` to hold the `CREATEDB` privilege and to be able to reach the server's `postgres` or `template1` maintenance database. If it can't, the script prints the exact statement for a DBA to run:
+
+```
+CREATE DATABASE "acrn_adjudication" OWNER "<DB_USER>";
+```
 
 Bootstrap administrators are defined in `BOOTSTRAP_ADMINS` at the top of [backend/scripts/init_prod.py](backend/scripts/init_prod.py). They sign in through Microsoft SSO with no local password, and hold the full `ADMIN` permission set so they can provision everyone else from the Admin Portal. Edit that list to change who gets bootstrap access.
 
