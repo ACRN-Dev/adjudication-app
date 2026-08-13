@@ -1,11 +1,30 @@
-import React, { useState } from 'react';
-import { login } from '../services/authApi';
+import React, { useEffect, useState } from 'react';
+import { login, getAuthConfig, SSO_LOGIN_URL } from '../services/authApi';
 
 export default function LoginPage({ onLoginSuccess }) {
   const [email, setEmail] = useState('admin@acrnhealth.com');
   const [password, setPassword] = useState('ACRN@2026');
   const [errorMsg, setErrorMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [demoEnabled, setDemoEnabled] = useState(false);
+
+  useEffect(() => {
+    getAuthConfig().then((cfg) => setDemoEnabled(!!cfg.demo_enabled)).catch(() => setDemoEnabled(false));
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ssoError = params.get('sso_error');
+    if (ssoError) {
+      const messages = {
+        not_registered: "Your account isn't registered. Contact your administrator to be added.",
+        cancelled: 'Microsoft sign-in was cancelled.',
+        auth_failed: 'Microsoft sign-in failed. Please try again.',
+      };
+      setErrorMsg(messages[ssoError] || 'Microsoft sign-in failed. Please try again.');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -44,7 +63,22 @@ export default function LoginPage({ onLoginSuccess }) {
             <img src="/acrn-logo.png" alt="ACRN Logo" style={{ height: '52px', width: 'auto', objectFit: 'contain' }} />
           </div>
 
-          <form onSubmit={handleSubmit}>
+          <button
+            type="button"
+            onClick={() => { window.location.href = SSO_LOGIN_URL; }}
+            style={{ width: '100%', padding: '14px', fontSize: '15px', fontWeight: 700, color: '#ffffff', backgroundColor: '#0f172a', border: 'none', borderRadius: '6px', cursor: 'pointer', marginBottom: demoEnabled ? '20px' : '0' }}
+          >
+            Sign in with Microsoft
+          </button>
+
+          {errorMsg && (
+            <div style={{ background: '#fef2f2', color: '#dc2626', padding: '10px 14px', borderRadius: '6px', fontSize: '13px', marginTop: '18px' }}>
+              {errorMsg}
+            </div>
+          )}
+
+          {demoEnabled && (
+          <form onSubmit={handleSubmit} style={{ marginTop: '20px' }}>
             <div style={{ background: '#fff7ed', border: '1px solid #fdba74', borderLeft: '3px solid #F07E26', padding: '12px 14px', borderRadius: '6px', fontSize: '12px', marginBottom: '18px', color: '#7c2d12' }}>
               <div style={{ fontWeight: 700, marginBottom: '6px' }}>Select Demo Account / Role:</div>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -90,12 +124,6 @@ export default function LoginPage({ onLoginSuccess }) {
               </div>
             </div>
 
-            {errorMsg && (
-              <div style={{ background: '#fef2f2', color: '#dc2626', padding: '10px 14px', borderRadius: '6px', fontSize: '13px', marginBottom: '18px' }}>
-                {errorMsg}
-              </div>
-            )}
-
             <div style={{ marginBottom: '20px' }}>
               <label style={{ display: 'block', fontSize: '14px', fontWeight: 700, color: '#0f172a', marginBottom: '8px' }}>
                 ACRN Email Address
@@ -114,6 +142,7 @@ export default function LoginPage({ onLoginSuccess }) {
               {busy ? 'Checking account...' : 'Access Portal'}
             </button>
           </form>
+          )}
 
           <div style={{ textAlign: 'center', marginTop: '20px' }}>
             <button type="button" onClick={() => alert('Access request form: Please contact the ACRN Adjudication Portal Administrator at admin@acrnhealth.com.')} style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>

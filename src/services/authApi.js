@@ -25,3 +25,5 @@ export const setUserStatus = (id, status, reason) => request(`/auth/users/${id}/
 export const unlockUser = (id, reason) => request(`/auth/users/${id}/unlock`, { method: 'POST', body: JSON.stringify({ reason }) });
 export const resetDemoPassword = (id, reason) => request(`/auth/users/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ reason }) });
 export const setUserRole = (id, role, reason) => request(`/auth/users/${id}/role`, { method: 'POST', body: JSON.stringify({ role, reason }) });
+export const getAuthConfig = () => request('/auth/config');
+export const SSO_LOGIN_URL = `${BASE}/auth/sso/login`;
