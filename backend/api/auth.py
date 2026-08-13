@@ -17,7 +17,7 @@ from services.auth_service import (
     current_user, default_password, hash_password, identity_from_user, issue_session,
     login as auth_login, logout as auth_logout, require_role, seed_demo_accounts, normalize_email,
 )
-from services.admin_security import ADMIN_ROLES
+from services.admin_security import ADMIN_ROLES, ROLE_PERMISSIONS, Identity as AdminIdentity, validate_delegation
 from services.monitor_security import ROLES as MONITOR_ROLES
 
 router = APIRouter()
@@ -44,9 +44,15 @@ def auth_config():
 
 
 @router.get("/sso/login")
-def sso_login():
-    state = secrets.token_urlsafe(24)
-    auth_url = _sso_app().get_authorization_request_url(SSO_SCOPES, state=state, redirect_uri=_sso_redirect_uri())
+def sso_login(request: Request, db: Session = Depends(get_db)):
+    base = os.environ.get("APP_BASE_URL", "").rstrip("/")
+    try:
+        state = secrets.token_urlsafe(24)
+        auth_url = _sso_app().get_authorization_request_url(SSO_SCOPES, state=state, redirect_uri=_sso_redirect_uri())
+    except Exception as e:
+        audit_auth(db, "SSO_LOGIN_FAILURE", "FAILURE", request=request, reason=f"SSO misconfigured: {e}")
+        db.commit()
+        return RedirectResponse(f"{base}/?sso_error=not_configured")
     resp = RedirectResponse(auth_url)
     resp.set_cookie(SSO_STATE_COOKIE, state, httponly=True, secure=AUTH_COOKIE_SECURE, samesite=AUTH_COOKIE_SAMESITE, max_age=600, path="/")
     return resp
@@ -241,10 +247,20 @@ def set_role(user_id: str, req: RoleRequest, request: Request, admin: PortalUser
     if not row:
         raise HTTPException(404, "User not found")
     previous = row.role
+    previous_portal_role = row.portal_role
     row.role = role
-    audit_auth(db, "ROLE_CHANGE", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason, details={"previous_role": previous, "role": role})
+    row.portal_role = None
+    audit_auth(db, "ROLE_CHANGE", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
+               details={"previous_role": previous, "role": role, "previous_portal_role": previous_portal_role, "portal_role": None})
     db.commit()
     return public_user(row)
+
+
+def _require_admin_permission(admin: PortalUser, permission: str) -> AdminIdentity:
+    acting_identity = AdminIdentity(admin.email, admin.portal_role or "", ())
+    if permission not in acting_identity.permissions:
+        raise HTTPException(403, f"Your admin role does not have '{permission}' permission.")
+    return acting_identity
 
 
 def _validate_portal_role(role: str, portal_role: Optional[str]):
@@ -267,6 +283,7 @@ def _normalize_study_scope(value: str) -> str:
 @router.post("/users", status_code=201)
 def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
                  db: Session = Depends(get_db)):
+    acting_identity = _require_admin_permission(admin, "users.manage")
     role = req.role.upper()
     if role not in {"ADMIN", "MONITOR", "ADJUDICATOR"}:
         raise HTTPException(422, "Unsupported role")
@@ -275,6 +292,8 @@ def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = De
         raise HTTPException(409, "A user with this email already exists")
     portal_role = (req.portal_role or "").upper() or None
     _validate_portal_role(role, portal_role)
+    if role == "ADMIN":
+        validate_delegation(acting_identity, ROLE_PERMISSIONS.get(portal_role, set()))
     row = PortalUser(
         email=normalized,
         display_name=req.display_name,
@@ -295,6 +314,7 @@ def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = De
 @router.post("/users/{user_id}/portal-role")
 def set_portal_role(user_id: str, req: PortalRoleRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
                      db: Session = Depends(get_db)):
+    _require_admin_permission(admin, "users.manage")
     row = db.get(PortalUser, user_id)
     if not row:
         raise HTTPException(404, "User not found")
@@ -313,9 +333,12 @@ def set_portal_role(user_id: str, req: PortalRoleRequest, request: Request, admi
 @router.post("/users/{user_id}/study-scope")
 def set_study_scope(user_id: str, req: StudyScopeRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
                      db: Session = Depends(get_db)):
+    _require_admin_permission(admin, "users.manage")
     row = db.get(PortalUser, user_id)
     if not row:
         raise HTTPException(404, "User not found")
+    if row.id == admin.id:
+        raise HTTPException(409, "You cannot change your own study scope.")
     normalized_scope = _normalize_study_scope(req.study_scope)
     previous = row.study_scope
     row.study_scope = normalized_scope

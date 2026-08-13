@@ -20,6 +20,7 @@ export default function LoginPage({ onLoginSuccess }) {
         not_registered: "Your account isn't registered. Contact your administrator to be added.",
         cancelled: 'Microsoft sign-in was cancelled.',
         auth_failed: 'Microsoft sign-in failed. Please try again.',
+        not_configured: 'Microsoft sign-in is not yet configured for this environment. Please contact your administrator.',
       };
       setErrorMsg(messages[ssoError] || 'Microsoft sign-in failed. Please try again.');
       window.history.replaceState({}, '', window.location.pathname);

@@ -41,6 +41,17 @@ def test_sso_login_redirects_to_microsoft_with_state_cookie(mock_sso_app):
     assert call_args.kwargs["redirect_uri"] == "https://adjudication-test.acrncloud.com/api/auth/sso/callback"
 
 
+def test_sso_login_redirects_to_not_configured_when_entra_env_missing(monkeypatch):
+    monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
+    monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+    os.environ["APP_BASE_URL"] = "https://adjudication-test.acrncloud.com"
+    r = client.get("/api/auth/sso/login", follow_redirects=False)
+    assert r.status_code in (302, 307)
+    assert "sso_error=not_configured" in r.headers["location"]
+    assert "acrn_sso_state" not in r.cookies
+
+
 def test_sso_callback_rejects_state_mismatch():
     _set_sso_env()
     r = client.get("/api/auth/sso/callback?code=abc&state=wrong", cookies={"acrn_sso_state": "right"})
