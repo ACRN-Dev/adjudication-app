@@ -147,3 +147,27 @@ def test_seeded_demo_monitor1_can_login_and_call_realtime_batches(monkeypatch):
     assert login.status_code == 200
     r = client.get("/api/realtime/batches", cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]})
     assert r.status_code == 200
+
+
+def test_seeded_demo_admin_account_has_a_valid_portal_role():
+    """backend/services/admin_security.py's get_identity() requires an ADMIN session to have
+    a portal_role in ADMIN_ROLES or it 403s -- the seeded demo admin account must carry a
+    valid one or it would 403 out of the actual Admin Portal API even with
+    ENABLE_DEMO_ACCOUNTS=true. Mirrors test_seeded_demo_monitor_accounts_have_a_valid_portal_role."""
+    from services.admin_security import ADMIN_ROLES
+    db = reset_auth_tables()
+    seed_demo_accounts(db)
+    admin_row = db.query(PortalUser).filter_by(email="admin@acrnhealth.com").first()
+    assert admin_row.portal_role in ADMIN_ROLES
+    db.close()
+
+
+def test_seeded_demo_admin_can_login_and_call_admin_dashboard(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    db = reset_auth_tables()
+    seed_demo_accounts(db)
+    db.close()
+    login = client.post("/api/auth/login", json={"email": "admin@acrnhealth.com", "password": default_password()})
+    assert login.status_code == 200
+    r = client.get("/api/admin/dashboard", cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]})
+    assert r.status_code == 200
