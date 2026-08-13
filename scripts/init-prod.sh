@@ -25,10 +25,43 @@ if [ ! -f .env.prod ]; then
   fail ".env.prod not found. Copy .env.prod.example to .env.prod and fill in real values."
 fi
 
-set -a
-# shellcheck disable=SC1091
-source .env.prod
-set +a
+# Read .env.prod without letting the shell evaluate it. Database passwords and generated
+# secrets routinely contain $, backticks, quotes and spaces; `source` would expand those,
+# or try to run them as commands, and mangle or reject a perfectly valid password.
+load_env_file() {
+  local file="$1" line key value
+  local reserved=" PATH IFS HOME PWD SHELL BASH_ENV ENV LD_PRELOAD LD_LIBRARY_PATH "
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"                              # tolerate a CRLF-edited file
+    line="${line#"${line%%[![:space:]]*}"}"           # strip leading whitespace
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in *=*) ;; *) continue ;; esac
+
+    key="${line%%=*}"
+    key="${key#export }"
+    key="${key%"${key##*[![:space:]]}"}"              # strip trailing whitespace
+    value="${line#*=}"
+
+    case "$key" in
+      ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;;          # not a usable variable name
+    esac
+    case "$reserved" in *" $key "*) continue ;; esac  # never let the file redefine these
+
+    # Strip one layer of matching surrounding quotes, the same as docker compose does
+    # when it reads this file for the container's own environment.
+    case "$value" in
+      \"*\") value="${value:1:${#value}-2}" ;;
+      \'*\') value="${value:1:${#value}-2}" ;;
+    esac
+
+    printf -v "$key" '%s' "$value"
+  done < "$file"
+}
+
+load_env_file .env.prod
+# docker-compose.yml interpolates ${APP_PORT} from the shell; everything else reaches the
+# container through the compose files' own env_file directive.
+export APP_PORT="${APP_PORT:-8005}"
 
 REQUIRED=(
   DB_NAME DB_USER DB_PASSWORD DB_HOST DB_PORT DB_SSL_MODE
