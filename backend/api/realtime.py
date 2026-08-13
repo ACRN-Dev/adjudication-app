@@ -8,19 +8,24 @@ from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInsta
 from services.realtime_pipeline import checksum_file,process_batch,audit
 from services.auth_service import current_user, audit_auth
 from models.auth import PortalUser
-router=APIRouter(); MONITOR={"ADJUDICATION_COORDINATOR","MONITOR_QC_REVIEWER","QA_REVIEWER","MONITOR","ADMIN"}
+router=APIRouter(); MONITOR={"ADJUDICATION_COORDINATOR","MONITOR_QC_REVIEWER","QA_REVIEWER","RELEASE_OPERATOR","MONITOR","ADMIN"}
 def actor(request:Request,x_demo_user:str|None=Header(None),x_demo_role:str|None=Header(None),db:Session=Depends(get_db)):
-    try:
-        token=request.cookies.get("acrn_demo_session")
-        if token:
-            from services.auth_service import _hash_token
-            from models.auth import AuthSession
-            s=db.query(AuthSession).filter_by(token_hash=_hash_token(token),revoked_at=None).first()
-            if s and s.expires_at>datetime.utcnow():
-                u=db.get(PortalUser,s.user_id)
-                if u and u.status=="ACTIVE": return u.email,u.role
-    except Exception:
-        pass
+    token=request.cookies.get("acrn_demo_session")
+    if token:
+        from services.auth_service import _hash_token
+        from models.auth import AuthSession
+        from services.monitor_security import ROLES as MONITOR_PORTAL_ROLES
+        s=db.query(AuthSession).filter_by(token_hash=_hash_token(token),revoked_at=None).first()
+        if s and s.expires_at>datetime.utcnow():
+            u=db.get(PortalUser,s.user_id)
+            if u and u.status=="ACTIVE":
+                if u.role=="MONITOR":
+                    if u.portal_role not in MONITOR_PORTAL_ROLES:
+                        raise HTTPException(403,"Monitor/QC authority required")
+                    return u.email,u.portal_role
+                return u.email,u.role
+    if os.getenv("ENABLE_DEMO_ACCOUNTS","false").lower()!="true":
+        raise HTTPException(401,"Authentication required")
     if not x_demo_user or not x_demo_role: raise HTTPException(401,"Authentication required")
     return x_demo_user,x_demo_role.upper()
 def monitor(i=Depends(actor)):
