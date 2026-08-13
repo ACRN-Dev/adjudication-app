@@ -244,3 +244,74 @@ def test_admin_cannot_delegate_permissions_it_does_not_hold():
         },
     )
     assert r.status_code == 201
+
+
+def test_set_role_requires_users_manage_permission():
+    """set_role must be gated behind 'users.manage' like the other provisioning endpoints.
+    Without this, an admin lacking the permission (e.g. ACCESS_REVIEWER) could call
+    POST /users/{id}/role against ANY other user -- including other admins -- and since
+    set_role clears the target's portal_role on every change, that admin could brick
+    another admin's Admin Portal access with no in-app recovery path."""
+    from services.admin_security import ROLE_PERMISSIONS
+    assert "users.manage" not in ROLE_PERMISSIONS["ACCESS_REVIEWER"]
+
+    admin_cookies = _login_as_admin()
+    create = client.post(
+        "/api/auth/users", cookies=admin_cookies,
+        json={
+            "email": "role.target@acrnhealth.com", "display_name": "Role Target",
+            "role": "ADMIN", "portal_role": "TECHNICAL_ADMIN", "reason": "Setup",
+        },
+    )
+    assert create.status_code == 201
+    target_id = create.json()["id"]
+
+    readonly_cookies = _login_as("role.attacker@acrnhealth.com", "Role Attacker", "ACCESS_REVIEWER")
+    r = client.post(
+        f"/api/auth/users/{target_id}/role", cookies=readonly_cookies,
+        json={"role": "MONITOR", "reason": "Attempting unauthorized role change"},
+    )
+    assert r.status_code == 403
+
+    db = TestingSession()
+    row = db.query(PortalUser).filter_by(id=target_id).first()
+    assert row.role == "ADMIN"
+    assert row.portal_role == "TECHNICAL_ADMIN"
+    db.close()
+
+
+def test_set_portal_role_requires_delegation_when_target_is_admin():
+    """A TECHNICAL_ADMIN has 'users.manage' but not the full ADMIN permission set, so it
+    cannot create a full-ADMIN account directly (delegation check in create_user). But
+    without an equivalent check in set_portal_role, it could still get there in two steps:
+    (1) create a role=ADMIN account with its own (lesser) portal_role -- allowed, since
+    that isn't delegating beyond what it holds -- then (2) call set_portal_role on that
+    new account to upgrade it to portal_role=ADMIN, bypassing the delegation check
+    entirely. This test reproduces that exact two-step escalation end-to-end and confirms
+    step (2) is now blocked."""
+    from services.admin_security import ROLE_PERMISSIONS
+    assert "users.manage" in ROLE_PERMISSIONS["TECHNICAL_ADMIN"]
+    assert not ROLE_PERMISSIONS["ADMIN"] <= ROLE_PERMISSIONS["TECHNICAL_ADMIN"]
+
+    cookies = _login_as("escalating.admin@acrnhealth.com", "Escalating Admin", "TECHNICAL_ADMIN")
+
+    create = client.post(
+        "/api/auth/users", cookies=cookies,
+        json={
+            "email": "two.step.admin@acrnhealth.com", "display_name": "Two Step Admin",
+            "role": "ADMIN", "portal_role": "TECHNICAL_ADMIN", "reason": "Step 1: create with own portal_role",
+        },
+    )
+    assert create.status_code == 201
+    new_id = create.json()["id"]
+
+    r = client.post(
+        f"/api/auth/users/{new_id}/portal-role", cookies=cookies,
+        json={"portal_role": "ADMIN", "reason": "Step 2: attempt to upgrade to full ADMIN"},
+    )
+    assert r.status_code == 403
+
+    db = TestingSession()
+    row = db.query(PortalUser).filter_by(id=new_id).first()
+    assert row.portal_role == "TECHNICAL_ADMIN"
+    db.close()

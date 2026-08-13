@@ -240,6 +240,7 @@ def reset_password(user_id: str, req: ReasonRequest, request: Request, admin: Po
 @router.post("/users/{user_id}/role")
 def set_role(user_id: str, req: RoleRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
              db: Session = Depends(get_db)):
+    _require_admin_permission(admin, "users.manage")
     role = req.role.upper()
     if role not in {"ADMIN", "MONITOR", "ADJUDICATOR"}:
         raise HTTPException(422, "Unsupported role")
@@ -314,7 +315,7 @@ def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = De
 @router.post("/users/{user_id}/portal-role")
 def set_portal_role(user_id: str, req: PortalRoleRequest, request: Request, admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
                      db: Session = Depends(get_db)):
-    _require_admin_permission(admin, "users.manage")
+    acting_identity = _require_admin_permission(admin, "users.manage")
     row = db.get(PortalUser, user_id)
     if not row:
         raise HTTPException(404, "User not found")
@@ -322,6 +323,8 @@ def set_portal_role(user_id: str, req: PortalRoleRequest, request: Request, admi
         raise HTTPException(409, "You cannot change your own portal role.")
     portal_role = (req.portal_role or "").upper() or None
     _validate_portal_role(row.role, portal_role)
+    if row.role == "ADMIN":
+        validate_delegation(acting_identity, ROLE_PERMISSIONS.get(portal_role, set()))
     previous = row.portal_role
     row.portal_role = portal_role
     audit_auth(db, "PORTAL_ROLE_CHANGE", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
