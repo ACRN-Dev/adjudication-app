@@ -40,6 +40,8 @@ Then redeploy (`./scripts/deploy-dev.sh` or `./scripts/deploy-prod.sh`).
 psql "$DATABASE_URL" -f backend/migrations/versions/20260812_05_sso_login.sql
 ```
 
+This backfills every existing ADMIN account to the broad `ADMIN` sub-role and every existing MONITOR account to `MONITOR_QC_REVIEWER`, so nobody is locked out on redeploy — review and narrow individual accounts' sub-roles afterward via the Admin portal's user management screen if needed.
+
 ## Provisioning a user
 
 Microsoft SSO only lets in users who already have a `PortalUser` record. An Admin creates one via the Admin portal's user management (`POST /api/auth/users`), specifying:
