@@ -104,6 +104,10 @@ Demo accounts (local demo mode only -- see [DEMO_ACCOUNTS.md](DEMO_ACCOUNTS.md))
 | monitor1@acrnhealth.com / monitor2@acrnhealth.com | Monitor |
 | adjudicatora / b / c @acrnhealth.com | Adjudicator |
 
+### Microsoft SSO (dev/prod)
+
+On the real ACRN dev/prod servers (`ENABLE_DEMO_ACCOUNTS=false`), only Microsoft Entra ID sign-in is accepted — the demo email/password form is hidden. See [docs/entra-sso-setup.md](docs/entra-sso-setup.md) for setting up the Azure App Registration and provisioning users.
+
 ## Docker deployment
 
 The app ships as a single Docker image: a multi-stage build compiles the React SPA and bundles it with the FastAPI backend on Python 3.12. Postgres is **external** (ACRN-managed) -- the container never runs a database in dev/prod.
@@ -161,6 +165,10 @@ Starts `app` plus a throwaway `postgres:16-alpine` container (`docker-compose.lo
 | `AUTH_COOKIE_SAMESITE` | no (default `lax` when set, else `none` if `AUTH_COOKIE_SECURE=true`) | Session cookie SameSite policy. Set to `lax` (default in dev/prod compose overrides) since the SPA and API are same-origin. |
 | `RT_PSEUDONYM_SECRET` | yes | Pseudonymization secret for the RealTime import pipeline. |
 | `RT_IDENTITY_ENCRYPTION_KEY` | no | Identity encryption key for the RealTime pipeline. |
+| `ENTRA_TENANT_ID` | yes on real dev/prod | Microsoft Entra ID tenant ID. See [docs/entra-sso-setup.md](docs/entra-sso-setup.md). |
+| `ENTRA_CLIENT_ID` | yes on real dev/prod | Entra App Registration client ID. |
+| `ENTRA_CLIENT_SECRET` | yes on real dev/prod | Entra App Registration client secret. |
+| `APP_BASE_URL` | yes on real dev/prod | This environment's public HTTPS URL, used to build the SSO redirect URI. |
 
 ## What is fully functional today
 
