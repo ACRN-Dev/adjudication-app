@@ -10,8 +10,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api import import_api, mapping, reconcile, derive, narrative, adjudication, committee, audit, export, derive_inline, admin, monitor, realtime, auth
-from models import longitudinal, auth as auth_models
+from api import import_api, mapping, reconcile, derive, narrative, adjudication, committee, chairperson, audit, export, derive_inline, admin, monitor, realtime, auth, assignment
+from models import canonical, longitudinal, auth as auth_models
 from services.auth_service import maybe_seed_demo_accounts
 try:
     from api import workflow as workflow_api
@@ -19,10 +19,41 @@ try:
 except ImportError:
     WORKFLOW_AVAILABLE = False
 from database import engine, Base, DB_OFFLINE
+from sqlalchemy import inspect, text
 
 # ── Create all database tables on startup (graceful if DB offline) ──────────
 try:
     Base.metadata.create_all(bind=engine)
+    if DB_OFFLINE:
+        inspector = inspect(engine)
+        compatibility_columns = {
+            "participants": {
+                "qc_approved": "BOOLEAN NOT NULL DEFAULT 0",
+                "visit_count": "INTEGER DEFAULT 0",
+            },
+            "adjudication_records": {
+                "visit_number": "INTEGER DEFAULT 1",
+                "date_of_diagnosis": "TIMESTAMP",
+            },
+            "committee_decisions": {
+                "visit_number": "INTEGER DEFAULT 1",
+                "date_of_diagnosis": "TIMESTAMP",
+                "reviewer_c_upn": "VARCHAR(255)",
+                "reviewer_c_name": "VARCHAR(255)",
+                "reviewer_c_diagnosis": "VARCHAR(100)",
+                "reviewer_c_rationale": "TEXT",
+                "concordance_status": "VARCHAR(50) DEFAULT 'DISCORDANT'",
+                "meeting_id": "VARCHAR(100)",
+                "closed": "BOOLEAN DEFAULT 0",
+                "closed_at": "TIMESTAMP",
+            },
+        }
+        with engine.begin() as connection:
+            for table_name, columns in compatibility_columns.items():
+                existing_columns = {column["name"] for column in inspect(engine).get_columns(table_name)}
+                for column_name, definition in columns.items():
+                    if column_name not in existing_columns:
+                        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"))
     from database import SessionLocal
     db = SessionLocal()
     try:
@@ -68,7 +99,10 @@ app.include_router(derive_inline.router,    prefix="/api",              tags=["I
 app.include_router(narrative.router,        prefix="/api/narrative",    tags=["AI Narrative"])
 app.include_router(adjudication.router,     prefix="/api/adjudication", tags=["Adjudication"])
 app.include_router(committee.router,        prefix="/api/committee",    tags=["Committee Review"])
+app.include_router(chairperson.router,      prefix="/api/chairperson",  tags=["Chairperson Portal"])
 app.include_router(audit.router,            prefix="/api/audit",        tags=["Audit Trail"])
+app.include_router(assignment.router,       prefix="/api/assignment",   tags=["Assignment"])
+
 app.include_router(export.router,           prefix="/api/export",       tags=["Export"])
 app.include_router(auth.router,             prefix="/api/auth",         tags=["Authentication"])
 app.include_router(admin.router,            prefix="/api/admin",        tags=["Admin Portal"])
@@ -76,6 +110,7 @@ app.include_router(monitor.router,          prefix="/api/monitor",      tags=["M
 app.include_router(realtime.router, prefix="/api/realtime", tags=["RealTime Longitudinal Database"])
 if WORKFLOW_AVAILABLE:
     app.include_router(workflow_api.router, prefix="/api/workflow",     tags=["Workflow Gates"])
+
 
 
 import traceback, logging

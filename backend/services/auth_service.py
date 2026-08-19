@@ -11,12 +11,13 @@ from fastapi import Cookie, Depends, Header, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models.auth import AuthAuditEvent, AuthSession, PortalUser
+from models.auth import AuthAuditEvent, AuthSession, CommitteeAssignment, PortalUser
 
 ROLE_ADMIN = "ADMIN"
 ROLE_MONITOR = "MONITOR"
 ROLE_ADJUDICATOR = "ADJUDICATOR"
-ROLES = {ROLE_ADMIN, ROLE_MONITOR, ROLE_ADJUDICATOR}
+ROLE_CHAIRPERSON = "CHAIRPERSON"
+ROLES = {ROLE_ADMIN, ROLE_MONITOR, ROLE_ADJUDICATOR, ROLE_CHAIRPERSON}
 ACTIVE = "ACTIVE"
 INACTIVE = "INACTIVE"
 AUTH_COOKIE = "acrn_demo_session"
@@ -29,11 +30,13 @@ AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE") or ("none" if AUTH_COOK
 
 DEMO_ACCOUNTS = [
     ("admin@acrnhealth.com", "ACRN Demo Administrator", ROLE_ADMIN, "ADMIN"),
+    ("chairperson@acrnhealth.com", "ACRN Demo Chairperson", ROLE_CHAIRPERSON, None),
     ("monitor1@acrnhealth.com", "ACRN Demo Monitor 1", ROLE_MONITOR, "MONITOR_QC_REVIEWER"),
     ("monitor2@acrnhealth.com", "ACRN Demo Monitor 2", ROLE_MONITOR, "QA_REVIEWER"),
     ("adjudicatora@acrnhealth.com", "ACRN Demo Adjudicator A", ROLE_ADJUDICATOR, None),
     ("adjudicatorb@acrnhealth.com", "ACRN Demo Adjudicator B", ROLE_ADJUDICATOR, None),
     ("adjudicatorc@acrnhealth.com", "ACRN Demo Adjudicator C", ROLE_ADJUDICATOR, None),
+    ("adjudicatord@acrnhealth.com", "ACRN Demo Adjudicator D", ROLE_ADJUDICATOR, None),
 ]
 
 
@@ -47,7 +50,8 @@ class AuthIdentity:
 
     @property
     def portal(self) -> str:
-        return {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator"}[self.role]
+        return {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson"}.get(self.role, "adjudicator")
+
 
 
 def normalize_email(email: str) -> str:
@@ -127,6 +131,24 @@ def seed_demo_accounts(db: Session, force_password_reset: bool = False) -> int:
                 row.must_change_password = must_change
                 row.failed_login_count = 0
                 row.locked_until = None
+
+    chair_user = db.query(PortalUser).filter_by(email=normalize_email("chairperson@acrnhealth.com")).first()
+    if chair_user and chair_user.role == ROLE_CHAIRPERSON:
+        existing_assignment = (
+            db.query(CommitteeAssignment)
+            .filter_by(user_id=chair_user.id, assignment_type="CHAIRPERSON", status=ACTIVE)
+            .filter(CommitteeAssignment.is_active.is_(True))
+            .first()
+        )
+        if not existing_assignment:
+            db.add(CommitteeAssignment(
+                user_id=chair_user.id,
+                assignment_type="CHAIRPERSON",
+                committee_name="PROTECT-Africa Committee",
+                is_active=True,
+                status=ACTIVE,
+                assignment_metadata={"source": "demo_seed"},
+            ))
     db.commit()
     return created
 
@@ -144,7 +166,7 @@ def _public_user(user: PortalUser) -> dict:
         "name": user.display_name,
         "role": user.role.title(),
         "roleCode": user.role,
-        "portal": {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator"}[user.role],
+        "portal": {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson"}.get(user.role, "adjudicator"),
         "status": user.status,
         "is_demo_account": user.is_demo_account,
         "demo": user.is_demo_account,
@@ -239,6 +261,48 @@ def require_role(*roles: str):
             db.commit()
             raise HTTPException(403, "Access denied")
         return user
+    return dep
+
+
+def has_active_committee_assignment(user: PortalUser, db: Session, assignment_type: str = "CHAIRPERSON") -> bool:
+    if user.role != ROLE_CHAIRPERSON:
+        return True
+
+    now = datetime.utcnow()
+    assignment = (
+        db.query(CommitteeAssignment)
+        .filter_by(user_id=user.id, assignment_type=assignment_type.upper(), status=ACTIVE)
+        .filter(CommitteeAssignment.is_active.is_(True))
+        .order_by(CommitteeAssignment.assigned_at.desc())
+        .first()
+    )
+
+    if not assignment:
+        return False
+    if assignment.expires_at and assignment.expires_at <= now:
+        return False
+    return True
+
+
+def require_chairperson_assignment():
+    def dep(user: PortalUser = Depends(current_user), db: Session = Depends(get_db), request: Request = None):
+        if user.role != ROLE_CHAIRPERSON:
+            return user
+        if not has_active_committee_assignment(user, db):
+            audit_auth(
+                db,
+                "CHAIRPERSON_ASSIGNMENT_DENIED",
+                "FAILURE",
+                actor=user,
+                affected=user,
+                request=request,
+                reason="No active committee chair assignment",
+                details={"required_assignment": "CHAIRPERSON"},
+            )
+            db.commit()
+            raise HTTPException(403, "Access denied: no active committee assignment for chairperson role")
+        return user
+
     return dep
 
 

@@ -31,18 +31,33 @@ export default function AdjudicatorWorkbench({
   onOpenSignature,
   onOpenSourceDocs,
   onOpenRecusalModal,
-  onOpenDataQueryModal
+  onOpenDataQueryModal,
+  user
 }) {
   const [selectedDiagnosis, setSelectedDiagnosis] = useState('Pre-eclampsia');
   const [selectedOnset, setSelectedOnset] = useState('Early-onset pre-eclampsia (EOPE)');
   const [selectedSeverity, setSelectedSeverity] = useState('With severe features');
   const [selectedCertainty, setSelectedCertainty] = useState('Probable');
   const [narrativeText, setNarrativeText] = useState('');
+  const [narrativeViewMode, setNarrativeViewMode] = useState('TABLE'); // 'TABLE' | 'PROSE'
   const [formCode, setFormCode] = useState('FORM-ADJ-15A');
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [pdfDownloadError, setPdfDownloadError] = useState('');
   const isSigned = activeCase?.status?.includes('Finalized');
+
+  const getVisitLabel = (bp, index) => {
+    if (bp.visitName) return bp.visitName;
+    if (bp.visit) return `Visit ${bp.visit}`;
+    const gaNum = parseFloat(bp.ga || '0');
+    if (gaNum > 0 && gaNum < 16) return 'Visit 1 (11–14w Booking)';
+    if (gaNum >= 16 && gaNum < 24) return 'Visit 2 (18–22w Anatomy)';
+    if (gaNum >= 24 && gaNum < 30) return 'Visit 3 (26–28w Routine)';
+    if (gaNum >= 30 && gaNum < 36) return 'Visit 4 (32–34w Escalation)';
+    if (gaNum >= 36 && gaNum <= 42) return 'Visit 5 (36–38w Term/Delivery)';
+    if (gaNum > 42 || String(bp.ga || '').toLowerCase().includes('post')) return 'Visit 6 (6w Postpartum)';
+    return `Visit ${index + 1}`;
+  };
 
   // Compute DV engine results for active case
   const dvResults = activeCase ? runDvEngine(activeCase) : null;
@@ -278,15 +293,18 @@ export default function AdjudicatorWorkbench({
             <div className="summary-feature-card">
               <h4>
                 <Activity color="var(--acrn-navy-dark)" size={16} />
-                1. Blood Pressure Timeline
+                1. Blood Pressure Timeline &amp; Visit Schedule
               </h4>
               <div style={{ marginTop: '8px' }}>
                 {activeCase.bpLog && activeCase.bpLog.length > 0 ? (
                   activeCase.bpLog.map((bp, i) => (
-                    <div key={i} className="data-summary-row" style={{ background: bp.severe ? '#f8fafc' : 'transparent', padding: '4px 6px', borderRadius: '3px' }}>
-                      <span>{bp.date || 'GA ' + bp.ga}</span>
-                      <span style={{ fontWeight: bp.severe ? 700 : 500, color: '#162035' }}>
-                        {bp.sbp}/{bp.dbp} mmHg {bp.severe ? '[Severe Range]' : ''}
+                    <div key={i} className="data-summary-row" style={{ background: bp.severe ? '#f8fafc' : 'transparent', padding: '5px 8px', borderRadius: '4px', marginBottom: '4px', border: '1px solid #f1f5f9' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#0f172a' }}>{getVisitLabel(bp, i)}</span>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>{bp.date || 'GA ' + bp.ga}</span>
+                      </div>
+                      <span style={{ fontWeight: bp.severe ? 700 : 500, color: bp.severe ? '#991b1b' : '#162035', fontSize: '12px' }}>
+                        {bp.sbp}/{bp.dbp} mmHg {bp.severe ? ' [Severe]' : ''}
                       </span>
                     </div>
                   ))
@@ -403,11 +421,37 @@ export default function AdjudicatorWorkbench({
 
             {/* Box 5: Clinical Narrative Preview */}
             <div className="summary-feature-card" style={{ gridColumn: '1 / -1' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
-                <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <FileText color="var(--acrn-navy-dark)" size={16} />
-                  Blinded Clinical Narrative ({formCode})
-                </h4>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                    <FileText color="var(--acrn-navy-dark)" size={16} />
+                    Blinded Clinical Narrative ({formCode})
+                  </h4>
+                  <div style={{ display: 'inline-flex', background: '#e2e8f0', borderRadius: '4px', padding: '2px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setNarrativeViewMode('TABLE')}
+                      style={{
+                        padding: '3px 8px', fontSize: '11px', fontWeight: 600, border: 'none', borderRadius: '3px', cursor: 'pointer',
+                        background: narrativeViewMode === 'TABLE' ? '#ffffff' : 'transparent',
+                        color: narrativeViewMode === 'TABLE' ? '#0f172a' : '#64748b'
+                      }}
+                    >
+                      📊 Structured Evidence Table
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNarrativeViewMode('PROSE')}
+                      style={{
+                        padding: '3px 8px', fontSize: '11px', fontWeight: 600, border: 'none', borderRadius: '3px', cursor: 'pointer',
+                        background: narrativeViewMode === 'PROSE' ? '#ffffff' : 'transparent',
+                        color: narrativeViewMode === 'PROSE' ? '#0f172a' : '#64748b'
+                      }}
+                    >
+                      📝 Narrative Prose
+                    </button>
+                  </div>
+                </div>
 
                 <button
                   type="button"
@@ -435,6 +479,59 @@ export default function AdjudicatorWorkbench({
                   <RefreshCw size={18} className="spin" color="var(--acrn-navy-dark)" style={{ margin: '0 auto 6px', display: 'block' }} />
                   🤖 AI Generative Engine: Synthesizing 13-section blinded clinical timeline for {activeCase.id}...
                 </div>
+              ) : narrativeViewMode === 'TABLE' ? (
+                <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '4px', overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead>
+                      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #cbd5e1', textAlign: 'left' }}>
+                        <th style={{ padding: '8px 12px', width: '25%', color: '#475569' }}>Narrative Section</th>
+                        <th style={{ padding: '8px 12px', width: '75%', color: '#475569' }}>Synthesized Clinical Documentation</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '8px 12px', fontWeight: 600 }}>1. Baseline &amp; Enrollment</td>
+                        <td style={{ padding: '8px 12px' }}>Subject {activeCase.id} ({activeCase.caseNo}) enrolled at site {activeCase.site || 'HARARE_01'}. Baseline ultrasound dated at booking.</td>
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid #f1f5f9', background: '#fafafa' }}>
+                        <td style={{ padding: '8px 12px', fontWeight: 600 }}>2. Blood Pressure Trajectory</td>
+                        <td style={{ padding: '8px 12px' }}>
+                          {activeCase.bpLog && activeCase.bpLog.length > 0 ? (
+                            activeCase.bpLog.map((b, idx) => (
+                              <span key={idx} style={{ display: 'inline-block', marginRight: '10px' }}>
+                                <strong>{getVisitLabel(b, idx)}:</strong> {b.sbp}/{b.dbp} mmHg
+                              </span>
+                            ))
+                          ) : 'No hypertensive BP documented prior to onset.'}
+                        </td>
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '8px 12px', fontWeight: 600 }}>3. Proteinuria &amp; Renal Function</td>
+                        <td style={{ padding: '8px 12px' }}>
+                          {activeCase.proteinuriaLog?.map(p => `${p.method}: ${p.result}`).join('; ') || 'Proteinuria verified by spot UPCR.'}
+                        </td>
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid #f1f5f9', background: '#fafafa' }}>
+                        <td style={{ padding: '8px 12px', fontWeight: 600 }}>4. Hematology &amp; Hepatic Labs</td>
+                        <td style={{ padding: '8px 12px' }}>
+                          {activeCase.labLog?.map(l => `${l.analyte}: ${l.result} ${l.unit}`).join(' | ') || 'Platelets, AST/ALT, and LDH documented.'}
+                        </td>
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '8px 12px', fontWeight: 600 }}>5. Clinical Severity &amp; Phenotype</td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <span className="badge-tag" style={{ fontWeight: 600 }}>
+                            {activeCase.derivedSubtype || 'EOPE'} • {activeCase.derivedSeverity === 'SEVERE_FEATURES' ? 'With severe features' : 'Without severe features'}
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '8px 12px', fontWeight: 600 }}>6. Diagnostic Standard</td>
+                        <td style={{ padding: '8px 12px' }}>ISSHP 2021 Diagnostic Classification Criteria (DV-26 completeness: {Math.round(evidenceScore * 100)}%).</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               ) : (
                 <pre style={{
                   marginTop: '6px',
@@ -454,6 +551,7 @@ export default function AdjudicatorWorkbench({
                 </pre>
               )}
             </div>
+
           </div>
 
           <div className="wizard-footer">
@@ -696,7 +794,16 @@ export default function AdjudicatorWorkbench({
             <ArrowLeft size={15} /> Back to Step 2
           </button>
 
-          <button className="btn-large btn-next" onClick={onOpenSignature}>
+          <button className="btn-large btn-next" onClick={() => onOpenSignature({
+            reviewerRole: activeCase?.reviewerRole || 'REVIEWER_A',
+            reviewerName: user?.display_name || user?.name || user?.email,
+            diagnosis: selectedDiagnosis,
+            onset: selectedOnset,
+            severity: selectedSeverity,
+            certainty: selectedCertainty,
+            rationale: narrativeText,
+            dateOfDiagnosis: activeCase?.visits?.[0]?.date || new Date().toISOString(),
+          })}>
             <ShieldCheck size={16} /> Sign &amp; Lock Adjudication Record
           </button>
         </div>

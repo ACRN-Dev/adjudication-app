@@ -102,42 +102,42 @@ def _sso_callback(mock_sso_app, email, name="Some Person"):
 
 
 @patch("api.auth._sso_app")
-def test_sso_callback_auto_provisions_unknown_tenant_user_as_adjudicator(mock_sso_app):
+def test_sso_callback_rejects_unknown_tenant_user_and_logs_audit_event(mock_sso_app):
     _set_sso_env()
-    r = _sso_callback(mock_sso_app, "blessward.mutsotso@acrnhealth.com", "Blessward Mutsotso")
+    r = _sso_callback(mock_sso_app, "unregistered.doctor@acrnhealth.com", "Unregistered Doctor")
 
+    assert r.status_code in (302, 307)
+    assert "sso_error=not_registered" in r.headers["location"]
+    assert "acrn_demo_session" not in r.cookies
+
+    db = TestingSession()
+    assert db.query(PortalUser).filter_by(email="unregistered.doctor@acrnhealth.com").count() == 0
+    assert db.query(AuthAuditEvent).filter_by(
+        event_type="SSO_LOGIN_FAILURE"
+    ).count() >= 1
+    db.close()
+
+
+@patch("api.auth._sso_app")
+def test_sso_callback_allows_preprovisioned_chairperson(mock_sso_app):
+    _set_sso_env()
+    db = TestingSession()
+    db.add(PortalUser(
+        email="chairperson.member@acrnhealth.com", display_name="Chairperson Member", password_hash=None,
+        role="CHAIRPERSON", status=ACTIVE,
+    ))
+    db.commit()
+    db.close()
+
+    r = _sso_callback(mock_sso_app, "chairperson.member@acrnhealth.com", "Chairperson Member")
     assert r.status_code in (302, 307)
     assert "sso_error" not in r.headers["location"]
     assert "acrn_demo_session" in r.cookies
 
     db = TestingSession()
-    user = db.query(PortalUser).filter_by(email="blessward.mutsotso@acrnhealth.com").one()
-    assert user.role == "ADJUDICATOR"
-    assert user.portal_role is None
-    assert user.status == ACTIVE
-    assert user.password_hash is None       # SSO-only, never a local password
-    assert user.is_demo_account is False
-    assert user.study_scope == "*"
-    assert user.display_name == "Blessward Mutsotso"
-    assert db.query(AuthAuditEvent).filter_by(
-        event_type="SSO_USER_AUTO_PROVISIONED", affected_email=user.email
-    ).count() == 1
+    assert db.query(PortalUser).filter_by(email="chairperson.member@acrnhealth.com").one().role == "CHAIRPERSON"
     db.close()
 
-
-@patch("api.auth._sso_app")
-def test_sso_callback_does_not_duplicate_an_auto_provisioned_user(mock_sso_app):
-    _set_sso_env()
-    email = "repeat.signin@acrnhealth.com"
-    _sso_callback(mock_sso_app, email)
-    _sso_callback(mock_sso_app, email)
-
-    db = TestingSession()
-    assert db.query(PortalUser).filter_by(email=email).count() == 1
-    assert db.query(AuthAuditEvent).filter_by(
-        event_type="SSO_USER_AUTO_PROVISIONED", affected_email=email
-    ).count() == 1
-    db.close()
 
 
 @patch("api.auth._sso_app")

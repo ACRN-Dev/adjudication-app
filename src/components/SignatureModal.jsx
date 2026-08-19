@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Lock, ShieldCheck, Key, AlertCircle, CheckCircle } from 'lucide-react';
 
-export default function SignatureModal({ caseData, onSignConfirm, onClose }) {
+export default function SignatureModal({ caseData, user, submission, onSignConfirm, onClose }) {
   const [password, setPassword] = useState('');
   const [mfaCode, setMfaCode] = useState('849201');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -17,15 +17,35 @@ export default function SignatureModal({ caseData, onSignConfirm, onClose }) {
       return;
     }
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
-      onSignConfirm({
-        signer: "Dr. Tinotenda Chibongore",
-        email: "tinotenda.chibongore@acrnhealth.com",
-        timestamp: new Date().toISOString(),
-        hash: caseHash
-      });
-    }, 1200);
+    setErrorMsg('');
+    const onset = submission?.onset?.includes('LOPE') ? 'LOPE' : 'EOPE';
+    const diagnosis = submission?.diagnosis || 'Pre-eclampsia';
+    fetch(`/api/adjudication/${encodeURIComponent(caseData.id)}/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        reviewer_role: submission?.reviewerRole || 'REVIEWER_A',
+        reviewer_upn: user?.email,
+        reviewer_name: submission?.reviewerName || user?.display_name || user?.email,
+        reviewer_password: password,
+        visit_number: 1,
+        meets_criteria: submission?.certainty !== 'Not PE',
+        diagnosis,
+        date_of_diagnosis: submission?.dateOfDiagnosis,
+        onset_class: onset,
+        severity: submission?.severity === 'Eclampsia / severe SAE' ? 'Eclampsia / SAE' : submission?.severity,
+        certainty: submission?.certainty || 'Probable',
+        rationale: submission?.rationale || 'Adjudication completed after review of the available evidence.',
+      }),
+    })
+      .then(async response => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || `Signature submission failed (${response.status})`);
+        onSignConfirm(data);
+      })
+      .catch(error => setErrorMsg(error.message))
+      .finally(() => setIsSubmitting(false));
   };
 
   return (

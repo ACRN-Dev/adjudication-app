@@ -26,3 +26,11 @@ Thumbs.db
 .env.dev
 .env.prod
 .env.local
+
+# Local datasets and runtime logs
+rt/
+sample_packets/
+result examples/
+*.log
+*.err.log
+

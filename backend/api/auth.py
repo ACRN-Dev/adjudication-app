@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 import msal
 
 from database import get_db
-from models.auth import PortalUser, AuthAuditEvent
+from models.auth import CommitteeAssignment, PortalUser, AuthAuditEvent
 from services.auth_service import (
     ACTIVE, AUTH_COOKIE, AUTH_COOKIE_SECURE, AUTH_COOKIE_SAMESITE, INACTIVE, ROLE_ADJUDICATOR, ROLE_ADMIN, audit_auth,
     current_user, default_password, hash_password, identity_from_user, issue_session,
@@ -40,7 +40,11 @@ def _sso_redirect_uri() -> str:
 
 @router.get("/config")
 def auth_config():
-    return {"demo_enabled": os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true"}
+    configured = os.getenv("ENABLE_DEMO_ACCOUNTS")
+    if configured is not None:
+        return {"demo_enabled": configured.strip().lower() in {"true", "1", "yes"}}
+    return {"demo_enabled": False}
+
 
 
 @router.get("/sso/login")
@@ -96,26 +100,12 @@ def sso_callback(request: Request, code: Optional[str] = None, state: Optional[s
     event_type = "SSO_LOGIN_SUCCESS"
 
     if user is None:
-        # First sign-in by someone in the Entra tenant. The App Registration is single
-        # tenant, so reaching this point already proves an ACRN work account. Provision
-        # them as an adjudicator: the workbench only ever lists cases an admin has
-        # explicitly assigned, so a new account sees no clinical data until then.
-        user = PortalUser(
-            email=email,
-            display_name=(claims.get("name") or email.split("@")[0].replace(".", " ").title()),
-            password_hash=None,          # SSO-only: no local password is ever set
-            role=ROLE_ADJUDICATOR,
-            portal_role=None,            # only ADMIN/MONITOR accounts carry a sub-role
-            study_scope="*",
-            status=ACTIVE,
-            is_demo_account=False,
-        )
-        db.add(user)
-        db.flush()                       # populate user.id before the session row references it
-        audit_auth(db, "SSO_USER_AUTO_PROVISIONED", "SUCCESS", affected=user, request=request,
-                   reason="First Microsoft sign-in by a tenant account",
-                   details={"role": ROLE_ADJUDICATOR, "study_scope": "*"})
-        event_type = "SSO_LOGIN_SUCCESS_NEW_USER"
+        # WS7: Restrict access to accounts on the committee roster. Unregistered tenant accounts are rejected and logged.
+        audit_auth(db, "SSO_LOGIN_FAILURE", "FAILURE", request=request,
+                   reason="Tenant account is not registered on the adjudication roster",
+                   details={"attempted_email": email})
+        db.commit()
+        return redirect("/?sso_error=not_registered")
 
     elif user.status != ACTIVE:
         # An account an admin deactivated must stay out; never silently reactivate it.
@@ -127,6 +117,7 @@ def sso_callback(request: Request, code: Optional[str] = None, state: Optional[s
     resp = redirect("/")
     issue_session(db, user, resp, request, event_type)
     return resp
+
 
 
 class LoginRequest(BaseModel):
@@ -162,6 +153,11 @@ class StudyScopeRequest(ReasonRequest):
     study_scope: str
 
 
+class CommitteeAssignmentRequest(ReasonRequest):
+    committee_name: Optional[str] = None
+    expires_at: Optional[datetime] = None
+
+
 def public_user(user: PortalUser) -> dict:
     return {
         "id": user.id,
@@ -172,7 +168,7 @@ def public_user(user: PortalUser) -> dict:
         "roleCode": user.role,
         "portal_role": user.portal_role,
         "study_scope": user.study_scope,
-        "portal": {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator"}[user.role],
+        "portal": {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson"}.get(user.role, "adjudicator"),
         "status": user.status,
         "is_demo_account": user.is_demo_account,
         "demo": user.is_demo_account,
@@ -218,6 +214,81 @@ def users(search: str = "", role: str = "", status: str = "", page: int = Query(
     total = q.count()
     rows = q.order_by(PortalUser.display_name).offset((page - 1) * page_size).limit(page_size).all()
     return {"total": total, "items": [public_user(x) for x in rows]}
+
+
+@router.get("/committee-assignments")
+def committee_assignments(admin: PortalUser = Depends(require_role(ROLE_ADMIN)), db: Session = Depends(get_db)):
+    _require_admin_permission(admin, "users.manage")
+    rows = db.query(CommitteeAssignment).order_by(CommitteeAssignment.assigned_at.desc()).all()
+    users_by_id = {u.id: u for u in db.query(PortalUser).filter(PortalUser.id.in_([r.user_id for r in rows])).all()} if rows else {}
+    return {
+        "items": [
+            {
+                "id": row.id,
+                "user_id": row.user_id,
+                "email": users_by_id[row.user_id].email if row.user_id in users_by_id else None,
+                "display_name": users_by_id[row.user_id].display_name if row.user_id in users_by_id else None,
+                "assignment_type": row.assignment_type,
+                "committee_name": row.committee_name,
+                "is_active": row.is_active,
+                "status": row.status,
+                "assigned_by": row.assigned_by,
+                "assigned_at": row.assigned_at,
+                "expires_at": row.expires_at,
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.post("/users/{user_id}/committee-assignment", status_code=201)
+def assign_committee_chair(user_id: str, req: CommitteeAssignmentRequest, request: Request,
+                           admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
+                           db: Session = Depends(get_db)):
+    _require_admin_permission(admin, "users.manage")
+    target = db.get(PortalUser, user_id)
+    if not target:
+        raise HTTPException(404, "User not found")
+    if target.role != "CHAIRPERSON":
+        raise HTTPException(422, "Committee chair assignments can only be given to CHAIRPERSON users")
+    if target.status != ACTIVE:
+        raise HTTPException(409, "Cannot assign an inactive user")
+
+    row = CommitteeAssignment(
+        user_id=target.id,
+        assignment_type="CHAIRPERSON",
+        committee_name=req.committee_name,
+        is_active=True,
+        assigned_by=admin.id,
+        expires_at=req.expires_at,
+        status=ACTIVE,
+        assignment_metadata={"reason": req.reason},
+    )
+    db.add(row)
+    db.flush()
+    audit_auth(db, "CHAIRPERSON_ASSIGNMENT_CREATED", actor=admin, affected=target, request=request,
+               reason=req.reason, details={"assignment_id": row.id, "committee_name": req.committee_name,
+                                           "expires_at": req.expires_at.isoformat() if req.expires_at else None})
+    db.commit()
+    return {"id": row.id, "user_id": row.user_id, "status": row.status, "is_active": row.is_active}
+
+
+@router.post("/committee-assignments/{assignment_id}/deactivate")
+def deactivate_committee_assignment(assignment_id: str, req: ReasonRequest, request: Request,
+                                    admin: PortalUser = Depends(require_role(ROLE_ADMIN)),
+                                    db: Session = Depends(get_db)):
+    _require_admin_permission(admin, "users.manage")
+    row = db.get(CommitteeAssignment, assignment_id)
+    if not row:
+        raise HTTPException(404, "Committee assignment not found")
+    if not row.is_active or row.status != ACTIVE:
+        raise HTTPException(409, "Committee assignment is already inactive")
+    row.is_active = False
+    row.status = INACTIVE
+    audit_auth(db, "CHAIRPERSON_ASSIGNMENT_DEACTIVATED", actor=admin, request=request,
+               reason=req.reason, details={"assignment_id": row.id, "user_id": row.user_id})
+    db.commit()
+    return {"id": row.id, "status": row.status, "is_active": row.is_active}
 
 
 def _require_admin_permission(admin: PortalUser, permission: str) -> AdminIdentity:
@@ -288,7 +359,7 @@ def set_role(user_id: str, req: RoleRequest, request: Request, admin: PortalUser
              db: Session = Depends(get_db)):
     _require_admin_permission(admin, "users.manage")
     role = req.role.upper()
-    if role not in {"ADMIN", "MONITOR", "ADJUDICATOR"}:
+    if role not in {"ADMIN", "MONITOR", "ADJUDICATOR", "CHAIRPERSON"}:
         raise HTTPException(422, "Unsupported role")
     row = db.get(PortalUser, user_id)
     if not row:
@@ -327,7 +398,7 @@ def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = De
                  db: Session = Depends(get_db)):
     acting_identity = _require_admin_permission(admin, "users.manage")
     role = req.role.upper()
-    if role not in {"ADMIN", "MONITOR", "ADJUDICATOR"}:
+    if role not in {"ADMIN", "MONITOR", "ADJUDICATOR", "CHAIRPERSON"}:
         raise HTTPException(422, "Unsupported role")
     normalized = normalize_email(req.email)
     if db.query(PortalUser).filter_by(email=normalized).first():

@@ -43,7 +43,7 @@ def reset_auth_tables():
 
 def test_demo_seed_is_idempotent_and_passwords_are_hashed():
     db = reset_auth_tables()
-    assert seed_demo_accounts(db) == 6
+    assert seed_demo_accounts(db) == len(DEMO_ACCOUNTS)
     assert seed_demo_accounts(db) == 0
     users = db.query(PortalUser).all()
     assert len(users) == len(DEMO_ACCOUNTS)
@@ -56,7 +56,7 @@ def test_all_demo_accounts_can_login_and_route_to_expected_portal():
     db = reset_auth_tables()
     seed_demo_accounts(db)
     db.close()
-    expected = {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator"}
+    expected = {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson"}
     for email, _, role, _ in DEMO_ACCOUNTS:
         r = client.post("/api/auth/login", json={"email": email.upper(), "password": default_password()})
         assert r.status_code == 200
@@ -105,7 +105,8 @@ def test_maybe_seed_demo_accounts_respects_enable_flag(monkeypatch):
     db.close()
 
 
-def test_admin_account_actions_audit_and_do_not_leak_default_password():
+def test_admin_account_actions_audit_and_do_not_leak_default_password(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "true")
     db = reset_auth_tables()
     seed_demo_accounts(db)
     target = db.query(PortalUser).filter_by(email="adjudicatora@acrnhealth.com").first().id

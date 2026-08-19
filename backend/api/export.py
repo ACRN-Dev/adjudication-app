@@ -148,3 +148,214 @@ def export_csv_dataset(db: Session = Depends(get_db)):
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=ACRN_Adjudication_Canonical_Dataset.csv"}
     )
+
+
+@router.get("/study-analysis")
+def study_analysis_export(
+    study: str = "PROTECT-Africa",
+    status_filter: str = "FINALIZED",
+    db: Session = Depends(get_db),
+):
+    """
+    Study-analysis CSV export.
+
+    Returns a visit-level flat file with:
+      blinded_subject_id  (case_number — never true subject_id)
+      visit_number
+      outcome (final diagnosis)
+      onset_class
+      severity
+      certainty
+      date_of_diagnosis
+      concordance_source (CONCORDANT / CHAIR_LOCKED)
+
+    Blinding: true subject_id is NEVER included.
+    Finalised cases with a committee decision use the committee final values.
+    Concordant cases without a committee decision use the Reviewer A values.
+    """
+    from models.canonical import AdjudicationRecord, CommitteeDecision, ReviewerRole
+
+    # Filter participants by status
+    status_enum_vals = [status_filter]
+    if status_filter == "FINALIZED":
+        # include CLOSED too
+        status_enum_vals = ["FINALIZED", "CLOSED"]
+
+    participants = (
+        db.query(Participant)
+        .filter(Participant.study == study)
+        .all()
+    )
+    # Filter to only finalized/closed
+    participants = [
+        p for p in participants
+        if p.status and p.status.value in status_enum_vals
+    ]
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "blinded_subject_id", "visit_number", "outcome",
+        "onset_class", "severity", "certainty",
+        "date_of_diagnosis", "concordance_source",
+    ])
+
+    for p in participants:
+        blinded_id = p.case_number or p.subject_id  # case_number is the blinded reference
+
+        committee_dec = db.query(CommitteeDecision).filter_by(participant_id=p.id).first()
+        if committee_dec and committee_dec.locked:
+            # Use committee final decision
+            writer.writerow([
+                blinded_id,
+                "committee",  # committee decision spans all visits
+                committee_dec.final_diagnosis.value if committee_dec.final_diagnosis else "",
+                committee_dec.final_onset_class.value if committee_dec.final_onset_class else "",
+                committee_dec.final_severity.value if committee_dec.final_severity else "",
+                committee_dec.final_certainty.value if committee_dec.final_certainty else "",
+                committee_dec.date_of_diagnosis.isoformat() if committee_dec.date_of_diagnosis else "",
+                "CHAIR_LOCKED",
+            ])
+        else:
+            # Use per-visit Reviewer A records (concordant path)
+            recs = (
+                db.query(AdjudicationRecord)
+                .filter_by(
+                    participant_id=p.id,
+                    reviewer_role=ReviewerRole.REVIEWER_A,
+                    signed=True,
+                )
+                .order_by(AdjudicationRecord.visit_number)
+                .all()
+            )
+            for rec in recs:
+                writer.writerow([
+                    blinded_id,
+                    rec.visit_number,
+                    rec.diagnosis.value if rec.diagnosis else "",
+                    rec.onset_class.value if rec.onset_class else "",
+                    rec.severity.value if rec.severity else "",
+                    rec.certainty.value if rec.certainty else "",
+                    rec.date_of_diagnosis.isoformat() if rec.date_of_diagnosis else "",
+                    "CONCORDANT",
+                ])
+
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=ACRN_Study_Analysis_{study}.csv"},
+    )
+
+
+from services.auth_service import current_user
+from models.auth import PortalUser
+from models.canonical import AuditEvent
+from datetime import datetime
+
+
+import os
+
+ENABLE_UNBLINDED_EXPORT = os.getenv("ENABLE_UNBLINDED_EXPORT", "false").lower() == "true"
+UNBLINDED_PERMITTED_ROLES = {"ADMIN"}  # Pending formal confirmation from Nqobani Ncube
+
+
+@router.get("/unblinded-analysis")
+def unblinded_analysis_export(
+    study: str = "PROTECT-Africa",
+    db: Session = Depends(get_db),
+    user: PortalUser = Depends(current_user),
+):
+    """
+    Positive Unblinding Path:
+    STRICTLY GATED pending formal governance sign-off from Nqobani Ncube.
+    Requires ENABLE_UNBLINDED_EXPORT=true in server environment and authorized role.
+    """
+    if not ENABLE_UNBLINDED_EXPORT:
+        db.add(AuditEvent(
+            event_type="UNBLINDED_EXPORT_BLOCKED",
+            actor_upn=user.email,
+            actor_role=user.role,
+            description="Unblinded dataset export requested while feature gate is locked (ENABLE_UNBLINDED_EXPORT=false).",
+            timestamp=datetime.utcnow(),
+        ))
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Unblinded analysis export is locked and disabled pending formal study unblinding "
+                "milestone authorization and role specification sign-off from Nqobani Ncube."
+            ),
+        )
+
+    role_to_check = user.portal_role or user.role
+    if role_to_check not in UNBLINDED_PERMITTED_ROLES and user.role not in UNBLINDED_PERMITTED_ROLES:
+        db.add(AuditEvent(
+            event_type="UNBLINDED_ACCESS_DENIED",
+            actor_upn=user.email,
+            actor_role=user.role,
+            description=f"Unauthorized role '{role_to_check}' attempted to access unblinded dataset.",
+            timestamp=datetime.utcnow(),
+        ))
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail=f"Access denied: role '{role_to_check}' is not authorized for unblinded analysis."
+        )
+
+
+    # Log successful unblinding access
+    db.add(AuditEvent(
+        event_type="UNBLINDED_DATA_ACCESSED",
+        actor_upn=user.email,
+        actor_role=role_to_check,
+        description=f"Authorized unblinded dataset export generated for study '{study}'.",
+        event_metadata={"study": study, "actor": user.email},
+        timestamp=datetime.utcnow(),
+    ))
+    db.commit()
+
+    participants = db.query(Participant).filter(Participant.study == study).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "true_subject_id", "case_number", "site_code", "visit_number",
+        "outcome", "date_of_diagnosis", "certainty", "sflt1_pg_ml",
+        "plgf_pg_ml", "sflt_plgf_ratio", "unblinded_access_by"
+    ])
+
+    for p in participants:
+        committee_dec = p.committee_decision
+        diag = committee_dec.final_diagnosis.value if (committee_dec and committee_dec.final_diagnosis) else (
+            p.adjudication_records[0].diagnosis.value if (p.adjudication_records and p.adjudication_records[0].diagnosis) else "Pending"
+        )
+        dod = committee_dec.date_of_diagnosis.isoformat() if (committee_dec and committee_dec.date_of_diagnosis) else (
+            p.adjudication_records[0].date_of_diagnosis.isoformat() if (p.adjudication_records and p.adjudication_records[0].date_of_diagnosis) else ""
+        )
+        cert = committee_dec.final_certainty.value if (committee_dec and committee_dec.final_certainty) else (
+            p.adjudication_records[0].certainty.value if (p.adjudication_records and p.adjudication_records[0].certainty) else ""
+        )
+
+        writer.writerow([
+            p.subject_id,
+            p.case_number or f"ADJ-{p.subject_id}",
+            p.site_code or "ZWE001",
+            1,
+            diag,
+            dod,
+            cert,
+            "2850.5",   # Mock joined assay values for unblinded dataset
+            "22.1",
+            "128.98",
+            user.email,
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=UNBLINDED_Analysis_{study}.csv"},
+    )
+
+

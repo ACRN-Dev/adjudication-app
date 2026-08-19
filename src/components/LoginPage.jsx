@@ -1,16 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { login, getAuthConfig, SSO_LOGIN_URL } from '../services/authApi';
+import { SSO_LOGIN_URL } from '../services/authApi';
 
 export default function LoginPage({ onLoginSuccess }) {
-  const [email, setEmail] = useState('admin@acrnhealth.com');
-  const [password, setPassword] = useState('ACRN@2026');
   const [errorMsg, setErrorMsg] = useState('');
   const [busy, setBusy] = useState(false);
-  const [demoEnabled, setDemoEnabled] = useState(false);
-
-  useEffect(() => {
-    getAuthConfig().then((cfg) => setDemoEnabled(!!cfg.demo_enabled)).catch(() => setDemoEnabled(false));
-  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -68,7 +61,7 @@ export default function LoginPage({ onLoginSuccess }) {
           <button
             type="button"
             onClick={() => { window.location.href = SSO_LOGIN_URL; }}
-            style={{ width: '100%', padding: '14px', fontSize: '15px', fontWeight: 700, color: '#ffffff', backgroundColor: '#0f172a', border: 'none', borderRadius: '6px', cursor: 'pointer', marginBottom: demoEnabled ? '20px' : '0' }}
+            style={{ width: '100%', padding: '14px', fontSize: '15px', fontWeight: 700, color: '#ffffff', backgroundColor: '#0f172a', border: 'none', borderRadius: '6px', cursor: 'pointer', marginBottom: '20px' }}
           >
             Sign in with Microsoft
           </button>
@@ -77,73 +70,6 @@ export default function LoginPage({ onLoginSuccess }) {
             <div style={{ background: '#fef2f2', color: '#dc2626', padding: '10px 14px', borderRadius: '6px', fontSize: '13px', marginTop: '18px' }}>
               {errorMsg}
             </div>
-          )}
-
-          {demoEnabled && (
-          <form onSubmit={handleSubmit} style={{ marginTop: '20px' }}>
-            <div style={{ background: '#fff7ed', border: '1px solid #fdba74', borderLeft: '3px solid #F07E26', padding: '12px 14px', borderRadius: '6px', fontSize: '12px', marginBottom: '18px', color: '#7c2d12' }}>
-              <div style={{ fontWeight: 700, marginBottom: '6px' }}>Select Demo Account / Role:</div>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => { setEmail('adjudicatora@acrnhealth.com'); setPassword('ACRN@2026'); }}
-                  style={{
-                    flex: '1', padding: '6px 10px', fontSize: '11px', fontWeight: 600,
-                    borderRadius: '4px', border: email === 'adjudicatora@acrnhealth.com' ? '2px solid #ea580c' : '1px solid #fdba74',
-                    background: email === 'adjudicatora@acrnhealth.com' ? '#ffedd5' : '#ffffff',
-                    color: '#9a3412', cursor: 'pointer', textAlign: 'center'
-                  }}
-                >
-                  ⚕️ Adjudicator
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setEmail('monitor1@acrnhealth.com'); setPassword('ACRN@2026'); }}
-                  style={{
-                    flex: '1', padding: '6px 10px', fontSize: '11px', fontWeight: 600,
-                    borderRadius: '4px', border: email === 'monitor1@acrnhealth.com' ? '2px solid #ea580c' : '1px solid #fdba74',
-                    background: email === 'monitor1@acrnhealth.com' ? '#ffedd5' : '#ffffff',
-                    color: '#9a3412', cursor: 'pointer', textAlign: 'center'
-                  }}
-                >
-                  📋 Monitor / QC
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setEmail('admin@acrnhealth.com'); setPassword('ACRN@2026'); }}
-                  style={{
-                    flex: '1', padding: '6px 10px', fontSize: '11px', fontWeight: 600,
-                    borderRadius: '4px', border: email === 'admin@acrnhealth.com' ? '2px solid #ea580c' : '1px solid #fdba74',
-                    background: email === 'admin@acrnhealth.com' ? '#ffedd5' : '#ffffff',
-                    color: '#9a3412', cursor: 'pointer', textAlign: 'center'
-                  }}
-                >
-                  🔑 Admin
-                </button>
-              </div>
-              <div style={{ fontSize: '11px', marginTop: '8px', color: '#9a3412' }}>
-                Shared Demo Password: <code>ACRN@2026</code>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', fontSize: '14px', fontWeight: 700, color: '#0f172a', marginBottom: '8px' }}>
-                ACRN Email Address
-              </label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} autoComplete="username" required />
-            </div>
-
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '14px', fontWeight: 700, color: '#0f172a', marginBottom: '8px' }}>
-                Password
-              </label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} autoComplete="current-password" required />
-            </div>
-
-            <button type="submit" disabled={busy} style={{ width: '100%', padding: '14px', fontSize: '15px', fontWeight: 700, color: '#ffffff', backgroundColor: busy ? '#94a3b8' : '#ea580c', border: 'none', borderRadius: '6px', cursor: busy ? 'wait' : 'pointer' }}>
-              {busy ? 'Checking account...' : 'Access Portal'}
-            </button>
-          </form>
           )}
 
           <div style={{ textAlign: 'center', marginTop: '20px' }}>

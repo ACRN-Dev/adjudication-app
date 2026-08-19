@@ -28,10 +28,14 @@ export default function SidebarNav({
   onOpenSopLibrary,
   onOpenHelp,
   activeCase,
+  onOpenCommitteeReview,
   collapsed,
   setCollapsed
 }) {
   const isSigned = activeCase?.status?.includes('Finalized');
+  const isCommitteeCase = ['DISCORDANT', 'COMMITTEE_PENDING', 'THREE_WAY_DIVERGENT'].some(
+    status => String(activeCase?.status || '').toUpperCase().includes(status)
+  );
 
   const menuItems = [
     {
@@ -64,13 +68,13 @@ export default function SidebarNav({
       active: activeView === 'workbench' && currentStep === 4,
       disabled: !isSigned,
     },
-    {
+    ...(isCommitteeCase ? [{
       id: 'committee',
-      label: 'Committee Review',
-      icon: FolderKanban,
-      action: () => setActiveView('committee'),
+      label: 'Committee Review (Discordant)',
+      icon: ShieldCheck,
+      action: onOpenCommitteeReview,
       active: activeView === 'committee',
-    },
+    }] : []),
     {
       id: 'qc',
       label: 'QC Portal & Gates',

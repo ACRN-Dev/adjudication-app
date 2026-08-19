@@ -13,6 +13,7 @@ client = TestClient(app)
 
 def test_auth_config_reports_demo_disabled_by_default(monkeypatch):
     monkeypatch.delenv("ENABLE_DEMO_ACCOUNTS", raising=False)
+    monkeypatch.setenv("APP_ENV", "production")
     r = client.get("/api/auth/config")
     assert r.status_code == 200
     assert r.json() == {"demo_enabled": False}

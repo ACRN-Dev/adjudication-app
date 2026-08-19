@@ -140,3 +140,21 @@ def report(report_code:str,identity:Identity=Depends(require("reports.read")),db
 def demo_reset(req:ReasonedRequest,identity:Identity=Depends(require("integrations.manage")),db:Session=Depends(get_db)):
     if os.getenv("ENABLE_DEMO_ACCOUNTS","false").lower()!="true": raise HTTPException(409,"Demo data is disabled in this environment.")
     counts=reset_demo(db); add_audit(db,identity,"DEMO_ADMIN_DATA_RESET","DEMO_DATA","administration",req.reason,new=counts); db.commit(); return {"demo":True,"reset":counts,"production_records_affected":0}
+
+@router.post("/demo/reset-all")
+def demo_reset_all(req:ReasonedRequest,identity:Identity=Depends(require("integrations.manage")),db:Session=Depends(get_db)):
+    if os.getenv("ENABLE_DEMO_ACCOUNTS","false").lower()!="true": raise HTTPException(409,"Demo data is disabled in this environment.")
+    from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInstance,ReviewerAssignment,RestrictedIdentityCrosswalk
+    from models.canonical import ImportBatch,Participant,CanonicalField,DerivationResult,Narrative,AdjudicationRecord,CommitteeDecision,AuditEvent
+    from models.auth import AuthSession,AuthAuditEvent
+    counts={}
+    # delete in FK-safe order
+    for m in [CommitteeDecision,AdjudicationRecord,Narrative,DerivationResult,CanonicalField,Participant,ImportBatch,
+              RestrictedIdentityCrosswalk,ReviewerAssignment,VisitInstance,LongitudinalParticipant,RTImportBatch,
+              AuthSession,AuthAuditEvent]:
+        counts[m.__tablename__]=db.query(m).delete(synchronize_session=False)
+    db.commit()
+    counts.update(reset_demo(db))
+    add_audit(db,identity,"DEMO_FULL_DATABASE_RESET","DEMO_DATA","administration",req.reason,new=counts)
+    db.commit()
+    return {"demo":True,"reset":counts,"production_records_affected":0}

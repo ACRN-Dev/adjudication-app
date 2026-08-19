@@ -59,13 +59,17 @@ class AdjudicationStatus(str, enum.Enum):
     CONCORDANT = "CONCORDANT"
     DISCORDANT = "DISCORDANT"
     COMMITTEE_PENDING = "COMMITTEE_PENDING"
+    RESOLVED_BY_MAJORITY = "RESOLVED_BY_MAJORITY"
+    THREE_WAY_DIVERGENT = "THREE_WAY_DIVERGENT"
     FINALIZED = "FINALIZED"
     LOCKED = "LOCKED"
+    CLOSED = "CLOSED"
 
 
 class ReviewerRole(str, enum.Enum):
     REVIEWER_A = "REVIEWER_A"
     REVIEWER_B = "REVIEWER_B"
+    REVIEWER_C = "REVIEWER_C"
     CHAIR = "CHAIR"
 
 
@@ -166,6 +170,10 @@ class Participant(Base):
     import_batch_id = Column(UUID(as_uuid=True), ForeignKey("import_batches.id"))
     status = Column(SAEnum(AdjudicationStatus), default=AdjudicationStatus.PENDING)
     trigger_code = Column(String(20))                             # e.g. DV-30
+    # QC gate — set by Monitor; subjects cannot be assigned until True
+    qc_approved = Column(Boolean, default=False, nullable=False)
+    # Visit completeness — number of visits received (0-6 for DV26 core)
+    visit_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -179,6 +187,8 @@ class Participant(Base):
     adjudication_records = relationship("AdjudicationRecord", back_populates="participant",
                                         cascade="all, delete-orphan")
     committee_decision = relationship("CommitteeDecision", back_populates="participant",
+                                      uselist=False, cascade="all, delete-orphan")
+    subject_assignment = relationship("SubjectAssignment", back_populates="participant",
                                       uselist=False, cascade="all, delete-orphan")
 
 
@@ -319,6 +329,7 @@ class AdjudicationRecord(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     participant_id = Column(UUID(as_uuid=True), ForeignKey("participants.id"), nullable=False)
+    visit_number = Column(Integer, default=1, index=True)
 
     reviewer_role = Column(SAEnum(ReviewerRole), nullable=False)
     reviewer_upn = Column(String(255), nullable=False)   # Entra ID UPN
@@ -327,6 +338,7 @@ class AdjudicationRecord(Base):
     # Clinical decision
     meets_criteria = Column(Boolean)
     diagnosis = Column(SAEnum(DiagnosisCode))
+    date_of_diagnosis = Column(DateTime, nullable=True)
     onset_class = Column(SAEnum(OnsetClass))
     severity = Column(SAEnum(SeverityGrade))
     certainty = Column(SAEnum(CertaintyLevel))
@@ -357,15 +369,29 @@ class CommitteeDecision(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     participant_id = Column(UUID(as_uuid=True), ForeignKey("participants.id"), nullable=False,
                             unique=True)
+    visit_number = Column(Integer, default=1)
 
-    adopted_reviewer = Column(SAEnum(ReviewerRole))  # REVIEWER_A or REVIEWER_B
+    adopted_reviewer = Column(SAEnum(ReviewerRole))  # REVIEWER_A, REVIEWER_B, REVIEWER_C, or CHAIR
     final_diagnosis = Column(SAEnum(DiagnosisCode))
+    date_of_diagnosis = Column(DateTime, nullable=True)
     final_onset_class = Column(SAEnum(OnsetClass))
     final_severity = Column(SAEnum(SeverityGrade))
     final_certainty = Column(SAEnum(CertaintyLevel))
     chair_rationale = Column(Text, nullable=False)
     quorum_met = Column(Boolean, default=True)
     members_present = Column(Integer)
+
+    # Reviewer C details (if escalated)
+    reviewer_c_upn = Column(String(255), nullable=True)
+    reviewer_c_name = Column(String(255), nullable=True)
+    reviewer_c_diagnosis = Column(String(100), nullable=True)
+    reviewer_c_rationale = Column(Text, nullable=True)
+    concordance_status = Column(String(50), default="DISCORDANT")
+
+    # Meeting link and case closure
+    meeting_id = Column(String(100), nullable=True)
+    closed = Column(Boolean, default=False)
+    closed_at = Column(DateTime, nullable=True)
 
     # Chair signature
     chair_upn = Column(String(255))
@@ -378,6 +404,67 @@ class CommitteeDecision(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     participant = relationship("Participant", back_populates="committee_decision")
+
+
+# ── Subject Assignment (adjudicator stickiness + pairing) ─────────────────────
+
+class SubjectAssignment(Base):
+    """
+    Links a Participant to exactly one Reviewer A and one Reviewer B.
+    Enforces adjudicator stickiness: once assigned, the same reviewers see
+    every visit of that subject.  Reviewer C is populated on escalation.
+
+    Hard invariants (enforced at API layer):
+      - reviewer_a_upn != reviewer_b_upn
+      - reviewer_c_upn != reviewer_a_upn and != reviewer_b_upn
+    """
+    __tablename__ = "subject_assignments"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    participant_id = Column(
+        UUID(as_uuid=True), ForeignKey("participants.id"), nullable=False, unique=True
+    )
+    reviewer_a_upn = Column(String(255), nullable=False)
+    reviewer_b_upn = Column(String(255), nullable=False)
+    reviewer_c_upn = Column(String(255), nullable=True)   # set on escalation
+    target_cases   = Column(Integer, nullable=True)        # optional batch allocation target
+    due_date       = Column(DateTime, nullable=True)
+    assigned_by    = Column(String(255), default="monitor@test.acrn", nullable=True)
+    assigned_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
+    status         = Column(String(40), default="ACTIVE", nullable=False)
+    created_at     = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
+                            nullable=False)
+
+    participant = relationship("Participant", back_populates="subject_assignment")
+
+
+
+# ── Committee Meeting Record ───────────────────────────────────────────────
+
+class CommitteeMeeting(Base):
+    """
+    Committee meeting minutes, attendee register and batch sign-off record.
+    """
+    __tablename__ = "committee_meetings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    meeting_title = Column(String(255), nullable=False)
+    batch_id = Column(String(100), nullable=True)
+    scheduled_at = Column(DateTime, default=datetime.utcnow)
+    convened_at = Column(DateTime, default=datetime.utcnow)
+    chair_upn = Column(String(255), nullable=False)
+    chair_name = Column(String(255))
+    attendees = Column(JSON, default=list)  # list of attendee strings or objects
+    quorum_met = Column(Boolean, default=True)
+    minutes = Column(Text)
+    case_ids = Column(JSON, default=list)  # list of closed case subject IDs
+    signed = Column(Boolean, default=False)
+    signed_at = Column(DateTime)
+    signature_hash = Column(String(255))
+    status = Column(String(50), default="CLOSED")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 
 
 # ── Audit Event (Immutable) ────────────────────────────────────────────────

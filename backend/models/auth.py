@@ -40,6 +40,24 @@ class AuthSession(Base):
     ip_address = Column(String(80))
 
 
+class CommitteeAssignment(Base):
+    __tablename__ = "committee_assignments"
+
+    id = Column(String(36), primary_key=True, default=uid)
+    user_id = Column(String(36), nullable=False, index=True)
+    assignment_type = Column(String(40), nullable=False, default="CHAIRPERSON", index=True)
+    committee_name = Column(String(120), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    assigned_by = Column(String(36), nullable=True)
+    assigned_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
+    status = Column(String(30), nullable=False, default="ACTIVE", index=True)
+    assignment_metadata = Column(JSON, default=dict)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class AuthAuditEvent(Base):
     __tablename__ = "auth_audit_events"
     id = Column(String(36), primary_key=True, default=uid)

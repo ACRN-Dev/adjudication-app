@@ -3,24 +3,26 @@ import Header from './components/Header';
 import SidebarNav from './components/SidebarNav';
 import InstructionBanner from './components/InstructionBanner';
 import AdjudicatorWorkbench from './components/AdjudicatorWorkbench';
-import CommitteeDashboard from './components/CommitteeDashboard';
 import SourceDocViewer from './components/SourceDocViewer';
 import SignatureModal from './components/SignatureModal';
 import HelpModal from './components/HelpModal';
 import SopLibraryModal from './components/SopLibraryModal';
 import RecusalModal from './components/RecusalModal';
 import DataQueryModal from './components/DataQueryModal';
+import CommitteeDashboard from './components/CommitteeDashboard';
 import LoginPage from './components/LoginPage';
 import AdminPortal from './admin/AdminPortal';
 import MonitorPortal from './monitor/MonitorPortal';
+import ChairpersonPortal from './chairperson/ChairpersonPortal';
 
 import { listAssigned, getAssigned, asWorkbenchCase } from './services/realtimeApi';
 import { me, logout as logoutApi } from './services/authApi';
 import './styles/acrn-theme.css';
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
   const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   const [cases, setCases] = useState([]);
   const [activeCaseId, setActiveCaseId] = useState(null);
@@ -30,12 +32,22 @@ export default function App() {
 
   const [showSourceDocs, setShowSourceDocs] = useState(false);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
+  const [signatureSubmission, setSignatureSubmission] = useState(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showSopLibrary, setShowSopLibrary] = useState(false);
   const [showRecusalModal, setShowRecusalModal] = useState(false);
   const [showDataQueryModal, setShowDataQueryModal] = useState(false);
 
   const activeCase = cases.find(c => c.id === activeCaseId) || null;
+  const isCommitteeCase = ['DISCORDANT', 'COMMITTEE_PENDING', 'THREE_WAY_DIVERGENT'].some(
+    status => String(activeCase?.status || '').toUpperCase().includes(status)
+  );
+
+  useEffect(() => {
+    const handlePop = () => setCurrentPath(window.location.pathname);
+    window.addEventListener('popstate', handlePop);
+    return () => window.removeEventListener('popstate', handlePop);
+  }, []);
 
   useEffect(() => {
     me().then(handleLoginSuccess).catch(() => {});
@@ -45,24 +57,32 @@ export default function App() {
     if (!isAuthenticated || user?.portal !== 'adjudicator') return;
     let cancelled = false;
     listAssigned(user).then(items => Promise.all(items.map(x => getAssigned(x.id, user))))
-      .then(items => { if (!cancelled) setCases(items.map(asWorkbenchCase)); })
+      .then(items => { if (!cancelled) setCases(items.map(item => asWorkbenchCase(item, user))); })
       .catch(() => { if (!cancelled) setCases([]); });
     return () => { cancelled = true; };
   }, [isAuthenticated, user]);
 
   const handleLoginSuccess = (userData) => {
+    let target = '/';
+    if (userData.portal === 'admin') target = '/admin';
+    else if (userData.portal === 'monitor') target = '/monitor';
+    else if (userData.portal === 'chairperson') target = '/chairperson';
+    else if (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/monitor') || window.location.pathname.startsWith('/chairperson')) target = '/';
+    else target = window.location.pathname;
+
+    window.history.replaceState({}, '', target);
+    setCurrentPath(target);
     setUser(userData);
     setIsAuthenticated(true);
-    if (userData.portal === 'admin') history.replaceState({}, '', '/admin');
-    else if (userData.portal === 'monitor') history.replaceState({}, '', '/monitor');
-    else if (location.pathname.startsWith('/admin')) history.replaceState({}, '', '/');
   };
+
 
   const handleLogout = async () => {
     try { await logoutApi(); } catch {}
     setIsAuthenticated(false);
     setUser(null);
-    history.replaceState({}, '', '/');
+    window.history.replaceState({}, '', '/');
+    setCurrentPath('/');
   };
 
   const handleSelectCase = (id) => {
@@ -78,7 +98,11 @@ export default function App() {
     setShowSignatureModal(false);
     setCases(prev => prev.map(c => {
       if (c && c.id === activeCaseId) {
-        return { ...c, status: 'Finalized & Signed', signature: sigData };
+        return {
+          ...c,
+          status: sigData.participant_status || 'Finalized & Signed',
+          signature: sigData,
+        };
       }
       return c;
     }));
@@ -97,30 +121,24 @@ export default function App() {
     alert(`FORM-ADJ-09 Data Query Sent: Query for Participant ${queryData.caseId} submitted to Adjudication Coordinator for review and dispatch.`);
   };
 
-  const handleAdoptCommitteeOutcome = ({ caseId, outcome, chairComment }) => {
-    setCases(prev => prev.map(c => {
-      if (c && c.id === caseId) {
-        return { ...c, status: 'Finalized (Committee Consensus)', chairComment, adoptedOutcome: outcome };
-      }
-      return c;
-    }));
-  };
-
   if (!isAuthenticated) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
   }
 
-  if (location.pathname.startsWith('/admin')) {
+  if (currentPath.startsWith('/admin')) {
     const adminRoles = ['ADMIN', 'TECHNICAL_ADMIN', 'CLINICAL_OPS_ADMIN', 'QA_AUDITOR', 'GOVERNANCE_REVIEWER', 'ACCESS_REVIEWER'];
     if (!adminRoles.includes(user?.roleCode)) {
       return <div role="alert" style={{ padding: 40, fontFamily: 'Poppins, sans-serif' }}><h1>Access denied</h1><p>Your current role is not permitted to access the Admin Portal.</p><button className="btn-primary" onClick={handleLogout}>Return to sign in</button></div>;
     }
     return <AdminPortal user={user} onLogout={handleLogout} />;
   }
-  if (location.pathname.startsWith('/monitor')) {
+  if (currentPath.startsWith('/monitor')) {
     const monitorRoles=['MONITOR','ADMIN','ADJUDICATION_COORDINATOR','MONITOR_QC_REVIEWER','QA_REVIEWER','RELEASE_OPERATOR'];
     if(!monitorRoles.includes(user?.roleCode)) return <div role="alert" style={{padding:40}}><h1>Access denied</h1><p>Your role cannot access Monitor/QC operational case data.</p><button onClick={handleLogout}>Return to sign in</button></div>;
     return <MonitorPortal user={user} onLogout={handleLogout}/>;
+  }
+  if (currentPath.startsWith('/chairperson') || user?.roleCode === 'CHAIRPERSON' || user?.portal === 'chairperson') {
+    return <ChairpersonPortal user={user} onLogout={handleLogout} />;
   }
 
   const isSigned = activeCase?.status?.includes('Finalized');
@@ -146,6 +164,7 @@ export default function App() {
           onOpenSopLibrary={() => setShowSopLibrary(true)}
           onOpenHelp={() => setShowHelpModal(true)}
           activeCase={activeCase}
+          onOpenCommitteeReview={() => setActiveView('committee')}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
         />
@@ -187,35 +206,29 @@ export default function App() {
               Locked eTMF Record
             </button>
 
-            <button
-              className={`rt-tab-btn ${activeView === 'committee' ? 'active' : ''}`}
-              onClick={() => setActiveView('committee')}
-            >
-              Committee Review
-            </button>
           </div>
 
-          {activeView === 'workbench' ? (
-            <>
-              <InstructionBanner step={currentStep} />
+          <>
+            <InstructionBanner step={currentStep} />
 
-              <AdjudicatorWorkbench
-                currentStep={currentStep}
-                setCurrentStep={setCurrentStep}
-                cases={cases}
-                activeCase={activeCase}
-                onSelectCase={handleSelectCase}
-                onCsvParsed={handleCsvParsed}
-                onOpenSignature={() => setShowSignatureModal(true)}
-                onOpenSourceDocs={() => setShowSourceDocs(true)}
-                onOpenRecusalModal={() => setShowRecusalModal(true)}
-                onOpenDataQueryModal={() => setShowDataQueryModal(true)}
-              />
-            </>
-          ) : (
-            activeCase ? <CommitteeDashboard caseData={activeCase} onAdoptOutcome={handleAdoptCommitteeOutcome} /> :
-              <div className="wizard-card"><h2>No assigned participant selected</h2><p>Select an assigned, QC-approved participant before opening committee review.</p></div>
-          )}
+            {activeView === 'committee' && isCommitteeCase ? (
+              <CommitteeDashboard caseData={activeCase} onAdoptOutcome={() => setActiveView('workbench')} />
+            ) : (
+            <AdjudicatorWorkbench
+              currentStep={currentStep}
+              setCurrentStep={setCurrentStep}
+              cases={cases}
+              activeCase={activeCase}
+              user={user}
+              onSelectCase={handleSelectCase}
+              onCsvParsed={handleCsvParsed}
+              onOpenSignature={submission => { setSignatureSubmission(submission); setShowSignatureModal(true); }}
+              onOpenSourceDocs={() => setShowSourceDocs(true)}
+              onOpenRecusalModal={() => setShowRecusalModal(true)}
+              onOpenDataQueryModal={() => setShowDataQueryModal(true)}
+            />
+            )}
+          </>
         </main>
       </div>
 
@@ -226,6 +239,8 @@ export default function App() {
       {showSignatureModal && activeCase && (
         <SignatureModal
           caseData={activeCase}
+          user={user}
+          submission={signatureSubmission}
           onClose={() => setShowSignatureModal(false)}
           onSignConfirm={handleSignatureSuccess}
         />
