@@ -48,7 +48,7 @@ def test_realtime_session_without_portal_role_rejected(monkeypatch):
     db = TestingSession()
     db.add(PortalUser(
         email="no.portal.role.realtime@acrnhealth.com", display_name="No Portal Role RealTime",
-        password_hash=hash_password("Whatever123!"), role="MONITOR", portal_role=None, status=ACTIVE,
+        password_hash=hash_password("Whatever123!"), role="MONITOR", portal_role="INVALID_ROLE", status=ACTIVE,
     ))
     db.commit()
     db.close()
@@ -105,7 +105,7 @@ def test_realtime_monitor_session_invalid_portal_role_definitive_even_when_demo_
     db = TestingSession()
     db.add(PortalUser(
         email="sso.realtime.monitor.badportal@acrnhealth.com", display_name="SSO RealTime Monitor Bad Portal Role",
-        password_hash=hash_password("Whatever123!"), role="MONITOR", portal_role=None, status=ACTIVE,
+        password_hash=hash_password("Whatever123!"), role="MONITOR", portal_role="INVALID_ROLE", status=ACTIVE,
     ))
     db.commit()
     db.close()

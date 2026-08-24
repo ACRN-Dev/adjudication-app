@@ -23,9 +23,10 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
             u = db.get(PortalUser, s.user_id)
             if u and u.status == "ACTIVE":
                 if u.role == "MONITOR":
-                    if u.portal_role not in MONITOR_PORTAL_ROLES:
+                    pr = u.portal_role or "MONITOR_QC_REVIEWER"
+                    if pr not in MONITOR_PORTAL_ROLES:
                         raise HTTPException(403, "Monitor/QC authority required")
-                    return u.email, u.portal_role
+                    return u.email, pr
                 if u.role == "ADMIN":
                     return u.email, "ADMIN"
                 if u.role in {"ADJUDICATOR", "CHAIRPERSON"}:
