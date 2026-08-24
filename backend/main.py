@@ -47,6 +47,9 @@ try:
                 "closed": "BOOLEAN DEFAULT 0",
                 "closed_at": "TIMESTAMP",
             },
+            "longitudinal_participants": {
+                "history_completeness": "FLOAT DEFAULT 0.0",
+            },
         }
         with engine.begin() as connection:
             for table_name, columns in compatibility_columns.items():
