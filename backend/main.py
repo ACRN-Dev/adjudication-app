@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api import import_api, mapping, reconcile, derive, narrative, adjudication, committee, chairperson, audit, export, derive_inline, admin, monitor, realtime, auth, assignment
-from models import canonical, longitudinal, auth as auth_models
+from models import canonical, longitudinal, auth as auth_models, history as history_models
 from services.auth_service import maybe_seed_demo_accounts
 try:
     from api import workflow as workflow_api

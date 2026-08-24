@@ -43,14 +43,14 @@ def _login_as(email, display_name, portal_role):
     return {"acrn_demo_session": r.cookies["acrn_demo_session"]}
 
 
-def test_admin_can_create_sso_managed_user_without_password():
+def test_admin_can_create_user_with_default_password_and_login():
     cookies = _login_as_admin()
     r = client.post(
         "/api/auth/users", cookies=cookies,
         json={
-            "email": "new.sso.monitor@acrnhealth.com", "display_name": "New SSO Monitor",
+            "email": "new.monitor.login@acrnhealth.com", "display_name": "New Monitor User",
             "role": "MONITOR", "portal_role": "MONITOR_QC_REVIEWER", "study_scope": "PROTECT-Africa",
-            "reason": "Provisioning for Microsoft SSO pilot",
+            "reason": "Provisioning for clinical trial operations",
         },
     )
     assert r.status_code == 201
@@ -58,11 +58,18 @@ def test_admin_can_create_sso_managed_user_without_password():
     assert body["role"] == "Monitor"
     assert body["portal_role"] == "MONITOR_QC_REVIEWER"
     assert body["study_scope"] == "PROTECT-Africa"
+    assert body["default_password"] == "ACRN@2026"
 
     db = TestingSession()
-    row = db.query(PortalUser).filter_by(email="new.sso.monitor@acrnhealth.com").first()
-    assert row.password_hash is None
+    row = db.query(PortalUser).filter_by(email="new.monitor.login@acrnhealth.com").first()
+    assert row.password_hash is not None
     db.close()
+
+    # The newly created user can immediately log in with their email and default password
+    login_res = client.post("/api/auth/login", json={"email": "new.monitor.login@acrnhealth.com", "password": "ACRN@2026"})
+    assert login_res.status_code == 200
+    assert login_res.json()["email"] == "new.monitor.login@acrnhealth.com"
+
 
 
 def test_create_user_rejects_duplicate_email():

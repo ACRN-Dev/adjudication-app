@@ -1,23 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  ArrowRight, 
-  ArrowLeft, 
-  CheckCircle2, 
-  Activity, 
-  Database, 
-  ShieldCheck, 
-  FileText, 
-  Lock,
-  Download,
-  EyeOff,
-  UserX,
-  AlertCircle,
-  RefreshCw,
-  Info,
-  ExternalLink,
-  ChevronDown,
-  Bot
-} from 'lucide-react';
+import { ArrowRight, ArrowLeft, CheckCircle2, Activity, Database, ShieldCheck, FileText, Lock, Download, EyeOff, UserX, AlertCircle, RefreshCw, Info, ExternalLink, ChevronDown, Bot, FilePlus, LogOut, Copy, Save, Server, Search, Calendar, ChevronRight, X, UserCheck, Stethoscope, AlertTriangle } from 'lucide-react';
+import PatientHistoryPanel from './PatientHistoryPanel';
 import { generateNarrative, generateSummary, AI_ENGINE_MODEL } from '../services/demoNarrative';
 import { runDvEngine } from '../services/dvEngine';
 import { downloadPdfReport } from '../services/api';
@@ -35,6 +18,7 @@ export default function AdjudicatorWorkbench({
   user
 }) {
   const [selectedDiagnosis, setSelectedDiagnosis] = useState('Pre-eclampsia');
+  const [otherDiagnosis, setOtherDiagnosis] = useState('');
   const [selectedOnset, setSelectedOnset] = useState('Early-onset pre-eclampsia (EOPE)');
   const [selectedSeverity, setSelectedSeverity] = useState('With severe features');
   const [selectedCertainty, setSelectedCertainty] = useState('Probable');
@@ -45,6 +29,7 @@ export default function AdjudicatorWorkbench({
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [pdfDownloadError, setPdfDownloadError] = useState('');
   const isSigned = activeCase?.status?.includes('Finalized');
+  const finalDiagnosis = selectedDiagnosis === 'Other' ? otherDiagnosis.trim() : selectedDiagnosis;
 
   const getVisitLabel = (bp, index) => {
     if (bp.visitName) return bp.visitName;
@@ -287,6 +272,8 @@ export default function AdjudicatorWorkbench({
             </div>
             <span className="badge-tag">BLINDED</span>
           </div>
+
+          <PatientHistoryPanel caseData={activeCase} />
 
           <div className="summary-card-grid">
             {/* Box 1: Blood Pressure */}
@@ -721,7 +708,21 @@ export default function AdjudicatorWorkbench({
               <option value="Superimposed PE">Superimposed PE</option>
               <option value="Eclampsia">Eclampsia</option>
               <option value="HELLP Syndrome">HELLP Syndrome</option>
+              <option value="Other">Other</option>
             </select>
+            {selectedDiagnosis === 'Other' && (
+              <input
+                type="text"
+                className="form-input"
+                style={{ marginTop: '8px' }}
+                value={otherDiagnosis}
+                onChange={(e) => setOtherDiagnosis(e.target.value)}
+                placeholder="Enter the adjudication diagnosis"
+                aria-label="Other adjudication diagnosis"
+                disabled={isSigned}
+                required
+              />
+            )}
           </div>
 
           <div className="form-group">
@@ -794,16 +795,19 @@ export default function AdjudicatorWorkbench({
             <ArrowLeft size={15} /> Back to Step 2
           </button>
 
-          <button className="btn-large btn-next" onClick={() => onOpenSignature({
-            reviewerRole: activeCase?.reviewerRole || 'REVIEWER_A',
-            reviewerName: user?.display_name || user?.name || user?.email,
-            diagnosis: selectedDiagnosis,
-            onset: selectedOnset,
-            severity: selectedSeverity,
-            certainty: selectedCertainty,
-            rationale: narrativeText,
-            dateOfDiagnosis: activeCase?.visits?.[0]?.date || new Date().toISOString(),
-          })}>
+          <button className="btn-large btn-next" onClick={() => {
+            if (!finalDiagnosis) return;
+            onOpenSignature({
+              reviewerRole: activeCase?.reviewerRole || 'REVIEWER_A',
+              reviewerName: user?.display_name || user?.name || user?.email,
+              diagnosis: finalDiagnosis,
+              onset: selectedOnset,
+              severity: selectedSeverity,
+              certainty: selectedCertainty,
+              rationale: narrativeText,
+              dateOfDiagnosis: activeCase?.visits?.[0]?.date || new Date().toISOString(),
+            });
+          }} disabled={selectedDiagnosis === 'Other' && !finalDiagnosis}>
             <ShieldCheck size={16} /> Sign &amp; Lock Adjudication Record
           </button>
         </div>

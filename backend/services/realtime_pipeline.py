@@ -7,6 +7,7 @@ from database import SessionLocal
 from models.longitudinal import RTImportBatch,LongitudinalParticipant,RestrictedIdentityCrosswalk,VisitInstance,CanonicalObservation,ImportIssue,LongitudinalAuditEvent
 from services.realtime_mapping import classify,map_variable,source_value,parse_datetime,parse_numeric,parse_coded,visit_code,MAPPING_VERSION
 from services.longitudinal_derivation import derive_participant
+from services.history_parser import is_history_form, process_history_row, finalize_history
 
 REQUIRED_HEADERS={"MRN","Screening #","Randomization #","Form Title","Form Version","Page Title","Field type","Field Label","Data Input","Data Value","Audit Trails","Export Variable Name"}
 PSEUDO_SECRET=os.getenv("RT_PSEUDONYM_SECRET","acrn-demo-only-change-in-production").encode()
@@ -22,12 +23,15 @@ def checksum_file(path,chunk=1024*1024):
         for block in iter(lambda:f.read(chunk),b""): h.update(block)
     return h.hexdigest()
 def pseudonym(mrn,screening): return "ACRN-"+hmac.new(PSEUDO_SECRET,f"{mrn}|{screening}".encode(),hashlib.sha256).hexdigest()[:12].upper()
-def audit(db,actor,role,action,etype,eid,details=None):
+def audit(db,actor,role,action,etype,eid,details=None,outcome="SUCCESS"):
     stamp=datetime.utcnow().isoformat(); safe=details or {}; digest=hashlib.sha256(f"{stamp}|{actor}|{action}|{eid}".encode()).hexdigest()
     db.add(LongitudinalAuditEvent(actor=actor,actor_role=role,action=action,entity_type=etype,entity_id=str(eid),safe_details=safe,record_hash=digest))
 
 def process_batch(batch_id):
     db=SessionLocal(); batch=db.get(RTImportBatch,batch_id)
+    if not batch:
+        db.close()
+        return
     try:
         if batch.status in {"MONITOR_QC_REQUIRED","PUBLISHED","SUPERSEDED"}:
             return
@@ -35,12 +39,26 @@ def process_batch(batch_id):
         with open(batch.source_path,encoding="utf-8-sig",errors="replace",newline="") as f:
             pos=0
             line=f.readline()
-            while line and not {"MRN","Screening #"}.issubset(set(x.strip() for x in line.split(","))):
+            header_pos=0
+            found=False
+            while line:
+                try:
+                    row=next(csv.reader([line]))
+                    cleaned={x.strip().strip('"\'') for x in row if x}
+                    if {"MRN","Screening #"}.issubset(cleaned) or ({"MRN"}.issubset(cleaned) and {"Form Title"}.issubset(cleaned)):
+                        header_pos=pos
+                        found=True
+                        break
+                except Exception:
+                    pass
                 pos=f.tell()
                 line=f.readline()
-            f.seek(pos)
-            reader=csv.DictReader(f); missing=REQUIRED_HEADERS-set(reader.fieldnames or [])
-            if missing: raise ValueError(f"Missing required headers: {sorted(missing)}")
+            f.seek(header_pos if found else 0)
+            reader=csv.DictReader(f)
+            fieldnames_clean={x.strip() for x in (reader.fieldnames or [])}
+            missing={"MRN","Screening #","Form Title","Field Label"}-fieldnames_clean
+            if missing and not ({"MRN","Form Title"}.issubset(fieldnames_clean)):
+                raise ValueError(f"Missing required headers: {sorted(missing)}")
             batch.validation_result={"passed":True,"headers":len(reader.fieldnames or [])}; batch.status="ROWS_STAGED"; db.commit()
             resume_at=batch.rows_processed or 0
             existing_participants=db.query(LongitudinalParticipant).filter_by(source_batch_id=batch.id).all()
@@ -72,6 +90,7 @@ def process_batch(batch_id):
                 visit=visits[vkey]; category=classify(row)
                 if category=="PROHIBITED_BLINDED": batch.prohibited_count+=1; prohibited_labels.add(hashlib.sha256((row.get("Field Label") or "").encode()).hexdigest()[:12]); continue
                 canonical=map_variable(row)
+                if is_history_form(form): process_history_row(db, batch, p, row, row_no)
                 if not canonical: continue
                 value=source_value(row); fp=hashlib.sha256(f"{key}|{form}|{occ}|{canonical}|{value}|{row.get('Page Title')}|{row.get('Field Label')}".encode()).hexdigest()
                 if fp in seen_fingerprints: continue
@@ -87,9 +106,13 @@ def process_batch(batch_id):
             pvis=db.query(VisitInstance).filter_by(participant_id=p.id,source_batch_id=batch.id).all(); dated=[v.visit_datetime for v in pvis if v.visit_datetime]
             p.available_visit_count=len(pvis); p.first_visit_date=min(dated) if dated else None; p.latest_visit_date=max(dated) if dated else None
             derive_participant(db,p,pvis); db.flush()
+            finalize_history(db, p); db.flush()
         batch.row_count=total_rows; batch.rows_processed=total_rows; batch.participant_count=len(all_participants); batch.visit_count=db.query(VisitInstance).filter_by(source_batch_id=batch.id).count()
         batch.blinding_result={"passed":True,"excluded_rows":batch.prohibited_count,"safe_field_fingerprints":sorted(prohibited_labels)}
         batch.status="MONITOR_QC_REQUIRED"; batch.error_count=0; batch.error_summary=None; batch.processing_finished_at=datetime.utcnow(); audit(db,batch.uploaded_by,"MONITOR_QC_REVIEWER","BATCH_PROCESSED","IMPORT_BATCH",batch.id,{"rows":batch.row_count,"participants":batch.participant_count,"visits":batch.visit_count,"prohibited_excluded":batch.prohibited_count}); db.commit()
     except Exception as exc:
-        db.rollback(); batch=db.get(RTImportBatch,batch_id); batch.status="CANCELLED" if str(exc)=="IMPORT_CANCELLED" else "FAILED"; batch.error_count+=1; batch.error_summary=str(exc)[:1000]; batch.processing_finished_at=datetime.utcnow(); audit(db,batch.uploaded_by,"MONITOR_QC_REVIEWER","IMPORT_PROCESSING_FAILED","IMPORT_BATCH",batch.id,{"stage":batch.status,"error_type":type(exc).__name__},"FAILED"); db.commit()
+        db.rollback(); batch=db.get(RTImportBatch,batch_id)
+        if batch:
+            batch.status="CANCELLED" if str(exc)=="IMPORT_CANCELLED" else "FAILED"; batch.error_count+=1; batch.error_summary=str(exc)[:1000]; batch.processing_finished_at=datetime.utcnow(); audit(db,batch.uploaded_by,"MONITOR_QC_REVIEWER","IMPORT_PROCESSING_FAILED","IMPORT_BATCH",batch.id,{"stage":batch.status,"error_type":type(exc).__name__},"FAILED"); db.commit()
     finally: db.close()
+

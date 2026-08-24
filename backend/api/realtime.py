@@ -5,33 +5,40 @@ from fastapi import APIRouter,UploadFile,File,BackgroundTasks,Depends,HTTPExcept
 from sqlalchemy.orm import Session,selectinload
 from database import get_db
 from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInstance,ImportIssue,ReviewerAssignment,LongitudinalCaseDerivation
+from models.history import PatientHistoryField, PatientRiskSummary
 from services.realtime_pipeline import checksum_file,process_batch,audit
 from services.auth_service import current_user, audit_auth
 from models.auth import PortalUser
-router=APIRouter(); MONITOR={"ADJUDICATION_COORDINATOR","MONITOR_QC_REVIEWER","QA_REVIEWER","RELEASE_OPERATOR","MONITOR","ADMIN"}
-def actor(request:Request,x_demo_user:str|None=Header(None),x_demo_role:str|None=Header(None),db:Session=Depends(get_db)):
-    token=request.cookies.get("acrn_demo_session")
+router = APIRouter()
+MONITOR = {"ADJUDICATION_COORDINATOR", "MONITOR_QC_REVIEWER", "QA_REVIEWER", "RELEASE_OPERATOR", "MONITOR", "ADMIN"}
+
+def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role: str | None = Header(None), db: Session = Depends(get_db)):
+    token = request.cookies.get("acrn_demo_session")
     if token:
         from services.auth_service import _hash_token
         from models.auth import AuthSession
         from services.monitor_security import ROLES as MONITOR_PORTAL_ROLES
-        s=db.query(AuthSession).filter_by(token_hash=_hash_token(token),revoked_at=None).first()
-        if s and s.expires_at>datetime.utcnow():
-            u=db.get(PortalUser,s.user_id)
-            if u and u.status=="ACTIVE":
-                if u.role=="MONITOR":
+        s = db.query(AuthSession).filter_by(token_hash=_hash_token(token), revoked_at=None).first()
+        if s and s.expires_at > datetime.utcnow():
+            u = db.get(PortalUser, s.user_id)
+            if u and u.status == "ACTIVE":
+                if u.role == "MONITOR":
                     if u.portal_role not in MONITOR_PORTAL_ROLES:
-                        raise HTTPException(403,"Monitor/QC authority required")
-                    return u.email,u.portal_role
-                if u.role=="ADJUDICATOR":
-                    return u.email,u.role
-                raise HTTPException(403,"Monitor/QC authority required")
-    if os.getenv("ENABLE_DEMO_ACCOUNTS","false").lower()!="true":
-        raise HTTPException(401,"Authentication required")
-    if not x_demo_user or not x_demo_role: raise HTTPException(401,"Authentication required")
-    return x_demo_user,x_demo_role.upper()
-def monitor(i=Depends(actor)):
-    if i[1] not in MONITOR: raise HTTPException(403,"Monitor/QC authority required")
+                        raise HTTPException(403, "Monitor/QC authority required")
+                    return u.email, u.portal_role
+                if u.role == "ADMIN":
+                    return u.email, "ADMIN"
+                if u.role in {"ADJUDICATOR", "CHAIRPERSON"}:
+                    return u.email, u.role
+                raise HTTPException(403, "Monitor/QC authority required")
+    if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true":
+        if x_demo_user and x_demo_role:
+            return x_demo_user, x_demo_role.upper()
+    raise HTTPException(401, "Authentication required")
+
+def monitor(i = Depends(actor)):
+    if i[1] not in MONITOR:
+        raise HTTPException(403, "Monitor/QC authority required")
     return i
 def bjson(b): return {"id":str(b.id),"filename":b.filename,"checksum":b.checksum,"file_size":b.file_size,"uploaded_at":b.uploaded_at,"rows":b.row_count,"rows_processed":b.rows_processed,"participants":b.participant_count,"visits":b.visit_count,"mapping_version":b.mapping_version,"status":b.status,"validation_result":b.validation_result,"blinding_result":b.blinding_result,"errors":b.error_count,"warnings":b.warning_count,"prohibited_excluded":b.prohibited_count,"finished_at":b.processing_finished_at}
 @router.post("/batches",status_code=202)
@@ -76,6 +83,7 @@ def pjson(p):
         "onset_classification":p.derived_onset_classification,
         "maximum_severity":p.maximum_severity,
         "packet_completeness":p.packet_completeness or 0.0,
+        "history_completeness": getattr(p, "history_completeness", 0.0),
         "open_issues":p.open_data_issues or 0,
         "qc_status":p.workflow_status,
         "source_batch_id":str(p.source_batch_id) if p.source_batch_id else None,
@@ -102,7 +110,14 @@ def timeline(p,db):
         visits.append({"id":str(v.id),"name":v.scheduled_visit_code,"occurrence":v.visit_occurrence,"date":v.visit_datetime,"ga_days":v.gestational_age_days,"form":v.form_title,"form_version":v.form_version,"reconstruction":{"method":v.reconstruction_method,"confidence":v.reconstruction_confidence,"qc_status":v.qc_status},"evidence":evidence})
     d=db.query(LongitudinalCaseDerivation).filter_by(participant_id=p.id).first()
     long=None if not d else {"earliest_qualifying_date":d.earliest_qualifying_pe_date,"first_qualifying_visit_id":str(d.first_qualifying_visit_id) if d.first_qualifying_visit_id else None,"onset_classification":d.onset_classification,"maximum_severity":d.maximum_severity,"packet_completeness":d.packet_completeness,"certainty_restriction":d.certainty_restriction,"trigger_status":d.trigger_status,"recorded_site_diagnosis":d.recorded_site_diagnosis,"recorded_site_diagnosis_date":d.recorded_site_diagnosis_date,"discrepancy":d.recorded_versus_derived_discrepancy,"explanation":d.explanation}
-    return {**pjson(p),"visits":visits,"longitudinal":long}
+    history_fields = db.query(PatientHistoryField).filter_by(participant_id=p.id).all()
+    history = {"obstetric": [], "medical": [], "family": [], "allergy_surgery": [], "social": [], "baseline": []}
+    for f in history_fields:
+        if f.domain in history:
+            history[f.domain].append({"key": f.field_key, "label": f.field_label_raw, "value": f.value, "precision": f.value_precision, "instance": f.instance_index, "amber_flag": f.amber_flag, "flag_reason": f.flag_reason, "signed_at": f.signed_at.isoformat() if f.signed_at else None, "actor_hash": f.audit_actor_hash})
+    rs = db.query(PatientRiskSummary).filter_by(participant_id=p.id).first()
+    risk_summary = {"chips": rs.chips if rs else [], "parity_summary": rs.parity_summary if rs else "", "gravidity": rs.gravidity if rs else 0, "parity": rs.parity if rs else 0, "miscarriages": rs.miscarriages if rs else 0, "stillbirths": rs.stillbirths if rs else 0, "vaginal_deliveries": rs.vaginal_deliveries if rs else 0, "c_sections": rs.c_sections if rs else 0, "chronic_htn": rs.chronic_htn if rs else False, "pregestational_diabetes": rs.pregestational_diabetes if rs else False}
+    return {**pjson(p),"visits":visits,"longitudinal":long,"history":history,"risk_summary":risk_summary}
 @router.get("/patients/{participant_id}")
 def patient(participant_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
     p=loaded(db,participant_id)

@@ -1,11 +1,16 @@
 const BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    credentials: 'include',
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-  });
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      credentials: 'include',
+      ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    });
+  } catch {
+    throw new Error('The backend API is unavailable. Start it on port 8000 and try again.');
+  }
   if (!res.ok) {
     let detail = 'Request failed';
     try {
@@ -25,5 +30,7 @@ export const setUserStatus = (id, status, reason) => request(`/auth/users/${id}/
 export const unlockUser = (id, reason) => request(`/auth/users/${id}/unlock`, { method: 'POST', body: JSON.stringify({ reason }) });
 export const resetDemoPassword = (id, reason) => request(`/auth/users/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ reason }) });
 export const setUserRole = (id, role, reason) => request(`/auth/users/${id}/role`, { method: 'POST', body: JSON.stringify({ role, reason }) });
+export const createUser = (data) => request('/auth/users', { method: 'POST', body: JSON.stringify(data) });
 export const getAuthConfig = () => request('/auth/config');
 export const SSO_LOGIN_URL = `${BASE}/auth/sso/login`;
+

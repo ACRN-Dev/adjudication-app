@@ -43,7 +43,7 @@ def auth_config():
     configured = os.getenv("ENABLE_DEMO_ACCOUNTS")
     if configured is not None:
         return {"demo_enabled": configured.strip().lower() in {"true", "1", "yes"}}
-    return {"demo_enabled": False}
+    return {"demo_enabled": True}
 
 
 
@@ -143,6 +143,7 @@ class CreateUserRequest(ReasonRequest):
     role: str
     portal_role: Optional[str] = None
     study_scope: str = "*"
+    password: Optional[str] = None
 
 
 class PortalRoleRequest(ReasonRequest):
@@ -369,9 +370,14 @@ def set_role(user_id: str, req: RoleRequest, request: Request, admin: PortalUser
     previous = row.role
     previous_portal_role = row.portal_role
     row.role = role
-    row.portal_role = None
+    if role == "MONITOR":
+        row.portal_role = "MONITOR_QC_REVIEWER"
+    elif role == "ADMIN":
+        row.portal_role = "ADMIN"
+    else:
+        row.portal_role = None
     audit_auth(db, "ROLE_CHANGE", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
-               details={"previous_role": previous, "role": role, "previous_portal_role": previous_portal_role, "portal_role": None})
+               details={"previous_role": previous, "role": role, "previous_portal_role": previous_portal_role, "portal_role": row.portal_role})
     db.commit()
     return public_user(row)
 
@@ -404,13 +410,20 @@ def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = De
     if db.query(PortalUser).filter_by(email=normalized).first():
         raise HTTPException(409, "A user with this email already exists")
     portal_role = (req.portal_role or "").upper() or None
+    if not portal_role:
+        if role == "MONITOR":
+            portal_role = "MONITOR_QC_REVIEWER"
+        elif role == "ADMIN":
+            portal_role = "ADMIN"
     _validate_portal_role(role, portal_role)
     if role == "ADMIN":
         validate_delegation(acting_identity, ROLE_PERMISSIONS.get(portal_role, set()))
+    default_password = req.password or "ACRN@2026"
+    password_hash = hash_password(default_password)
     row = PortalUser(
         email=normalized,
         display_name=req.display_name,
-        password_hash=None,
+        password_hash=password_hash,
         role=role,
         portal_role=portal_role,
         study_scope=_normalize_study_scope(req.study_scope),
@@ -421,7 +434,8 @@ def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = De
     audit_auth(db, "USER_CREATED", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
                details={"role": role, "portal_role": portal_role})
     db.commit()
-    return public_user(row)
+    return {**public_user(row), "default_password": default_password}
+
 
 
 @router.post("/users/{user_id}/portal-role")

@@ -262,7 +262,7 @@ function ReconstructionQC({ user, onOpen }) {
       )}
 
       <Table
-        cols={['Blinded Subject', 'Study', 'Visits', 'First Visit', 'Latest Visit', 'Derived Onset', 'Completeness', 'QC Status', 'Action']}
+        cols={['Blinded Subject', 'Study', 'Visits', 'First Visit', 'Latest Visit', 'Derived Onset', 'Completeness', 'History', 'QC Status', 'Action']}
         rows={data.items.map((p) => ({
           id: p.id,
           data: p,
@@ -274,6 +274,7 @@ function ReconstructionQC({ user, onOpen }) {
             date(p.latest_visit),
             p.onset_classification,
             `${Math.round((p.packet_completeness || 0) * 100)}%`,
+            `${Math.round((p.history_completeness || 0) * 100)}%`,
             <span
               className={`badge-qc ${
                 p.qc_status === 'QC_APPROVED' || p.qc_status === 'ASSIGNED' ? 'approved' : 'pending'

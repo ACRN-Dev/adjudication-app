@@ -13,6 +13,7 @@ export default function ChairpersonPortal({ user, onLogout }) {
   const [summary, setSummary] = useState({ concordant: 0, discordant: 0, three_way_divergent: 0, closed: 0 });
   const [agendaPack, setAgendaPack] = useState(null);
   const [meetings, setMeetings] = useState([]);
+  const [isUsingDemoData, setIsUsingDemoData] = useState(false);
 
   // Minutes Form state
   const [meetingTitle, setMeetingTitle] = useState('PROTECT-Africa Adjudication Committee Session #1');

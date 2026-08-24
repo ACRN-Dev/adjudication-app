@@ -117,3 +117,62 @@ def test_realtime_monitor_session_invalid_portal_role_definitive_even_when_demo_
         headers={"X-Demo-User": "monitor.demo@acrnhealth.com", "X-Demo-Role": "MONITOR"},
     )
     assert r.status_code == 403
+
+
+def test_realtime_session_monitor_can_upload_batch(monkeypatch):
+    import io, uuid
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    db = TestingSession()
+    db.add(PortalUser(
+        email="sso.upload.monitor@acrnhealth.com", display_name="SSO Upload Monitor",
+        password_hash=hash_password("Whatever123!"), role="MONITOR", portal_role="MONITOR_QC_REVIEWER", status=ACTIVE,
+    ))
+    db.commit()
+    db.close()
+    login = client.post("/api/auth/login", json={"email": "sso.upload.monitor@acrnhealth.com", "password": "Whatever123!"})
+    assert login.status_code == 200
+
+    csv_content = (
+        "MRN,Screening #,Randomization #,Form Title,Form Version,Page Title,Field type,Field Label,Data Input,Data Value,Audit Trails,Export Variable Name\n"
+        f"MRN-{uuid.uuid4().hex[:6]},SCR-001,RAND-001,Visit 1,v1.0,Vitals,text,Systolic Blood Pressure,120,120,,SBP\n"
+        f"MRN-{uuid.uuid4().hex[:6]},SCR-001,RAND-001,Visit 1,v1.0,Vitals,text,Diastolic Blood Pressure,80,80,,DBP\n"
+    )
+    files = {"file": ("test_batch.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
+    r = client.post(
+        "/api/realtime/batches",
+        files=files,
+        cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]},
+    )
+    assert r.status_code == 202
+    data = r.json()
+    assert data["filename"] == "test_batch.csv"
+    assert data["status"] in {"CHECKSUM_CALCULATED", "ROWS_STAGED", "VISITS_RECONSTRUCTED", "MONITOR_QC_REQUIRED"}
+
+
+def test_realtime_session_admin_can_upload_batch(monkeypatch):
+    import io, uuid
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    db = TestingSession()
+    db.add(PortalUser(
+        email="sso.upload.admin@acrnhealth.com", display_name="SSO Upload Admin",
+        password_hash=hash_password("Whatever123!"), role="ADMIN", portal_role="ADMIN", status=ACTIVE,
+    ))
+    db.commit()
+    db.close()
+    login = client.post("/api/auth/login", json={"email": "sso.upload.admin@acrnhealth.com", "password": "Whatever123!"})
+    assert login.status_code == 200
+
+    csv_content = (
+        "MRN,Screening #,Randomization #,Form Title,Form Version,Page Title,Field type,Field Label,Data Input,Data Value,Audit Trails,Export Variable Name\n"
+        f"MRN-{uuid.uuid4().hex[:6]},SCR-002,RAND-002,Visit 1,v1.0,Vitals,text,Systolic Blood Pressure,130,130,,SBP\n"
+    )
+    files = {"file": ("admin_batch.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
+    r = client.post(
+        "/api/realtime/batches",
+        files=files,
+        cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]},
+    )
+    assert r.status_code == 202
+    data = r.json()
+    assert data["filename"] == "admin_batch.csv"
+

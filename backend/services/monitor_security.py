@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.auth import PortalUser
 from models.monitor import MonitorAuditEvent
-ROLES={"ADJUDICATION_COORDINATOR","MONITOR_QC_REVIEWER","QA_REVIEWER","RELEASE_OPERATOR"}
+ROLES = {"ADJUDICATION_COORDINATOR", "MONITOR_QC_REVIEWER", "QA_REVIEWER", "RELEASE_OPERATOR", "MONITOR", "ADMIN"}
 PROHIBITED=("sflt-1","sflt1","plgf","seng","biomarker","poc result","treatment allocation","randomisation","randomization")
 @dataclass(frozen=True)
 class MonitorIdentity: upn:str; role:str; studies:tuple[str,...]
@@ -19,9 +19,14 @@ def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get
         if session and session.expires_at>datetime.utcnow():
             user=db.get(PortalUser,session.user_id)
             if user and user.status=="ACTIVE":
-                if user.role!="MONITOR" or user.portal_role not in ROLES: raise HTTPException(403,"Monitor Portal access denied")
-                studies=tuple(filter(None,(user.study_scope or "*").split(",")))
-                return MonitorIdentity(user.email,user.portal_role,studies)
+                if user.role=="MONITOR":
+                    if user.portal_role not in ROLES: raise HTTPException(403,"Monitor Portal access denied")
+                    studies=tuple(filter(None,(user.study_scope or "*").split(",")))
+                    return MonitorIdentity(user.email,user.portal_role,studies)
+                if user.role=="ADMIN":
+                    studies=tuple(filter(None,(user.study_scope or "*").split(",")))
+                    return MonitorIdentity(user.email,"ADMIN",studies)
+                raise HTTPException(403,"Monitor Portal access denied")
     if os.getenv("ENABLE_DEMO_ACCOUNTS","false").lower()!="true": raise HTTPException(401,"Authentication required")
     if not x_demo_user or not x_demo_role: raise HTTPException(401,"Authentication required")
     if x_demo_role.upper() not in ROLES: raise HTTPException(403,"Monitor Portal access denied")

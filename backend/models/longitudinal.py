@@ -42,6 +42,7 @@ class LongitudinalParticipant(Base):
     pregnancy_status = Column(String(40), default="UNKNOWN"); workflow_status = Column(String(60), default="MONITOR_QC_REQUIRED", index=True)
     first_qualifying_visit_id = Column(UUID(as_uuid=True)); derived_onset_date = Column(DateTime); derived_onset_classification = Column(String(30))
     maximum_severity = Column(String(50)); packet_completeness = Column(Float, default=0); open_data_issues = Column(Integer, default=0)
+    history_completeness = Column(Float, default=0.0)
     source_batch_id = Column(UUID(as_uuid=True), ForeignKey("rt_import_batches.id"), nullable=False, index=True)
     provenance_type = Column(String(30), default="SOURCE_RECORDED"); created_at = Column(DateTime, default=datetime.utcnow)
     visits = relationship("VisitInstance", back_populates="participant")
