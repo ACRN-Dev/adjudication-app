@@ -4,7 +4,10 @@ services:
       - .env.prod
     environment:
       ENVIRONMENT: production
-      ENABLE_DEMO_ACCOUNTS: "false"
+      # Temporarily set to true for the supervisor demo
+      ENABLE_DEMO_ACCOUNTS: "true"
+      # Prevent fake accounts from being seeded
+      SEED_DEMO_ACCOUNTS: "false"
       AUTH_COOKIE_SECURE: "true"
       AUTH_COOKIE_SAMESITE: "lax"
     restart: always
