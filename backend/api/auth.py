@@ -43,7 +43,7 @@ def auth_config():
     configured = os.getenv("ENABLE_DEMO_ACCOUNTS")
     if configured is not None:
         return {"demo_enabled": configured.strip().lower() in {"true", "1", "yes"}}
-    return {"demo_enabled": True}
+    return {"demo_enabled": False}
 
 
 
