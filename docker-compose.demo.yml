@@ -1,4 +1,4 @@
-﻿# docker-compose.demo.yml  — overlay for team demonstration sessions
+# docker-compose.demo.yml  — overlay for team demonstration sessions
 #
 # Usage (on the server, from the repo root):
 #
@@ -14,13 +14,14 @@
 services:
   app:
     environment:
-      # Enable pre-seeded demo accounts and password-based login for the demo.
-      # The backend seeds monitor1@acrnhealth.com, admin@acrnhealth.com, etc.
-      # on startup when this flag is true.
+      # Enable demo mode features (like reset data)
       ENABLE_DEMO_ACCOUNTS: "true"
 
-      # Default password for all seeded demo accounts.
-      # Change this to something memorable for your team presentation.
+      # Prevent seeding the default demo accounts (admin@acrnhealth.com, etc)
+      # so you can use your real SSO/email accounts instead.
+      SEED_DEMO_ACCOUNTS: "false"
+
+      # Default password for any accounts that DO get created.
       DEMO_DEFAULT_PASSWORD: "ACRN@Demo2026"
 
       # Cookie settings — keep secure=true so the browser sends the cookie

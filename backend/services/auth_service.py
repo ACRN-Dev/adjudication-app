@@ -155,7 +155,8 @@ def seed_demo_accounts(db: Session, force_password_reset: bool = False) -> int:
 
 def maybe_seed_demo_accounts(db: Session):
     if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true":
-        seed_demo_accounts(db)
+        if os.getenv("SEED_DEMO_ACCOUNTS", "true").lower() == "true":
+            seed_demo_accounts(db)
 
 
 def _public_user(user: PortalUser) -> dict:
