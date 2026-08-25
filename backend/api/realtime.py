@@ -55,8 +55,9 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
     raise HTTPException(401, detail={"message": "Authentication required. Please sign in.", "reason": "no_session"})
 
 
-def importer(i = Depends(actor)):
-    """The RealTime batch import is open to every authenticated account, whatever its role."""
+def authenticated(i = Depends(actor)):
+    """The RealTime batch import and the reconstructed-participant views are open to every
+    authenticated account, whatever its role. QC decisions still go through monitor()."""
     return i
 
 
@@ -66,7 +67,7 @@ def monitor(i = Depends(actor)):
     return i
 def bjson(b): return {"id":str(b.id),"filename":b.filename,"checksum":b.checksum,"file_size":b.file_size,"uploaded_at":b.uploaded_at,"rows":b.row_count,"rows_processed":b.rows_processed,"participants":b.participant_count,"visits":b.visit_count,"mapping_version":b.mapping_version,"status":b.status,"validation_result":b.validation_result,"blinding_result":b.blinding_result,"errors":b.error_count,"warnings":b.warning_count,"prohibited_excluded":b.prohibited_count,"finished_at":b.processing_finished_at}
 @router.post("/batches",status_code=202)
-async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(importer),db:Session=Depends(get_db)):
+async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(authenticated),db:Session=Depends(get_db)):
     if not (file.filename or "").lower().endswith(".csv"): raise HTTPException(415,"RealTime import requires CSV")
     staging=os.path.join(os.path.dirname(os.path.dirname(__file__)),".rt-staging"); os.makedirs(staging,exist_ok=True)
     path=os.path.join(staging,f"{uuid.uuid4()}.csv"); size=0
@@ -77,14 +78,14 @@ async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(
     b=RTImportBatch(filename=os.path.basename(file.filename),checksum=checksum,file_size=size,uploaded_by=i[0],source_path=path,status="CHECKSUM_CALCULATED")
     db.add(b); db.flush(); audit(db,i[0],i[1],"BATCH_UPLOADED","IMPORT_BATCH",b.id,{"filename":b.filename,"size":size,"checksum":checksum}); db.commit(); background.add_task(process_batch,b.id); return bjson(b)
 @router.get("/batches")
-def batches(i=Depends(importer),db:Session=Depends(get_db)): return [bjson(x) for x in db.query(RTImportBatch).order_by(RTImportBatch.uploaded_at.desc()).all()]
+def batches(i=Depends(authenticated),db:Session=Depends(get_db)): return [bjson(x) for x in db.query(RTImportBatch).order_by(RTImportBatch.uploaded_at.desc()).all()]
 @router.get("/batches/{batch_id}")
-def batch(batch_id:uuid.UUID,i=Depends(importer),db:Session=Depends(get_db)):
+def batch(batch_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends(get_db)):
     b=db.get(RTImportBatch,batch_id)
     if not b: raise HTTPException(404,"Batch not found")
     return bjson(b)
 @router.post("/batches/{batch_id}/cancel")
-def cancel(batch_id:uuid.UUID,i=Depends(importer),db:Session=Depends(get_db)):
+def cancel(batch_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends(get_db)):
     b=db.get(RTImportBatch,batch_id)
     if not b or b.status in {"PUBLISHED","SUPERSEDED"}: raise HTTPException(409,"Batch cannot be cancelled")
     b.cancel_requested=True; audit(db,i[0],i[1],"IMPORT_CANCEL_REQUESTED","IMPORT_BATCH",b.id); db.commit(); return {"status":"CANCEL_REQUESTED"}
@@ -114,7 +115,7 @@ def pjson(p):
         "assignments": assignments
     }
 @router.get("/patients")
-def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",i=Depends(monitor),db:Session=Depends(get_db)):
+def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",i=Depends(authenticated),db:Session=Depends(get_db)):
     page_val = int(page.default if hasattr(page, 'default') else page)
     size_val = int(page_size.default if hasattr(page_size, 'default') else page_size)
     q=db.query(LongitudinalParticipant)
@@ -143,10 +144,12 @@ def timeline(p,db):
     risk_summary = {"chips": rs.chips if rs else [], "parity_summary": rs.parity_summary if rs else "", "gravidity": rs.gravidity if rs else 0, "parity": rs.parity if rs else 0, "miscarriages": rs.miscarriages if rs else 0, "stillbirths": rs.stillbirths if rs else 0, "vaginal_deliveries": rs.vaginal_deliveries if rs else 0, "c_sections": rs.c_sections if rs else 0, "chronic_htn": rs.chronic_htn if rs else False, "pregestational_diabetes": rs.pregestational_diabetes if rs else False}
     return {**pjson(p),"visits":visits,"longitudinal":long,"history":history,"risk_summary":risk_summary}
 @router.get("/patients/{participant_id}")
-def patient(participant_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
+def patient(participant_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends(get_db)):
     p=loaded(db,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
-    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"MONITOR"}); db.commit(); return timeline(p,db)
+    # Record the caller's actual authority, not a hardcoded portal: this view is reachable
+    # by every role now, so a fixed "MONITOR" would misattribute the access.
+    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"MONITOR" if i[2] else "NON_QC","role":i[1]}); db.commit(); return timeline(p,db)
 @router.post("/patients/{participant_id}/approve")
 def approve(participant_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
     p=db.get(LongitudinalParticipant,participant_id)

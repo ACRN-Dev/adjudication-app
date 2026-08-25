@@ -15,6 +15,11 @@ from conftest import TestingSession
 
 client = TestClient(app)
 
+# QC decisions are the last thing still gated on Monitor/QC authority. Against a
+# non-existent participant an authorised caller gets 404 and an unauthorised one 403,
+# which cleanly separates "no authority" from "allowed but nothing there".
+QC_DECISION = "/api/realtime/patients/00000000-0000-0000-0000-000000000000/approve"
+
 
 def test_realtime_headers_rejected_when_demo_disabled_and_no_session(monkeypatch):
     monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
@@ -56,8 +61,10 @@ def test_realtime_session_without_portal_role_rejected(monkeypatch):
     login = client.post("/api/auth/login", json={"email": "no.portal.role.realtime@acrnhealth.com", "password": "Whatever123!"})
     assert login.status_code == 200
     cookies = {"acrn_demo_session": login.cookies["acrn_demo_session"]}
-    assert client.get("/api/realtime/patients", cookies=cookies).status_code == 403
+    assert client.post(QC_DECISION, cookies=cookies).status_code == 403
+    # ...but the import and the reconstructed-participant views are open to them.
     assert client.get("/api/realtime/batches", cookies=cookies).status_code == 200
+    assert client.get("/api/realtime/patients", cookies=cookies).status_code == 200
 
 
 def test_realtime_non_monitor_session_rejected_even_with_spoofed_headers(monkeypatch):
@@ -72,8 +79,8 @@ def test_realtime_non_monitor_session_rejected_even_with_spoofed_headers(monkeyp
     db.close()
     login = client.post("/api/auth/login", json={"email": "sso.realtime.adjudicator@acrnhealth.com", "password": "Whatever123!"})
     assert login.status_code == 200
-    r = client.get(
-        "/api/realtime/patients",
+    r = client.post(
+        QC_DECISION,
         cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]},
         headers={"X-Demo-User": "monitor.demo@acrnhealth.com", "X-Demo-Role": "MONITOR"},
     )
@@ -114,8 +121,8 @@ def test_realtime_monitor_session_invalid_portal_role_definitive_even_when_demo_
     db.close()
     login = client.post("/api/auth/login", json={"email": "sso.realtime.monitor.badportal@acrnhealth.com", "password": "Whatever123!"})
     assert login.status_code == 200
-    r = client.get(
-        "/api/realtime/patients",
+    r = client.post(
+        QC_DECISION,
         cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]},
         headers={"X-Demo-User": "monitor.demo@acrnhealth.com", "X-Demo-Role": "MONITOR"},
     )
@@ -218,11 +225,28 @@ def test_realtime_session_chairperson_can_upload_batch(monkeypatch):
 
 
 def test_realtime_unprovisioned_monitor_can_upload_batch(monkeypatch):
-    """A MONITOR whose portal_role was never provisioned may import, but not QC-review."""
+    """A MONITOR whose portal_role was never provisioned may import and view, not decide."""
     monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
     r, cookies = _upload_as("sso.upload.monitor.noportal@acrnhealth.com", "MONITOR", None, "noportal_batch.csv")
     assert r.status_code == 202, r.text
-    assert client.get("/api/realtime/patients", cookies=cookies).status_code == 403
+    assert client.get("/api/realtime/patients", cookies=cookies).status_code == 200
+    assert client.post(QC_DECISION, cookies=cookies).status_code == 403
+
+
+def test_realtime_adjudicator_can_view_reconstructed_patients(monkeypatch):
+    """'Inspect Reconstructed Patients' is reachable by every role; QC decisions are not."""
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    r, cookies = _upload_as("sso.view.adjudicator@acrnhealth.com", "ADJUDICATOR", None, "view_batch.csv")
+    assert r.status_code == 202, r.text
+    assert client.get("/api/realtime/patients", cookies=cookies).status_code == 200
+    assert client.post(QC_DECISION, cookies=cookies).status_code == 403
+
+
+def test_realtime_qc_decisions_still_reachable_for_monitor_authority(monkeypatch):
+    """Guards the QC_DECISION probe: 403 above must mean 'no authority', not 'bad URL'."""
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    _, cookies = _upload_as("qc.authority@acrnhealth.com", "MONITOR", "MONITOR_QC_REVIEWER", "qc_batch.csv")
+    assert client.post(QC_DECISION, cookies=cookies).status_code == 404
 
 
 def test_realtime_import_still_requires_authentication(monkeypatch):
