@@ -80,14 +80,22 @@ app = FastAPI(
     redoc_url="/api/redoc",
 )
 
-# ── CORS (frontend on localhost:5173 / Next.js on :3000) ───────────────────
+# ── CORS (frontend on localhost:5173 / Next.js on :3000 / deployed origin) ─
+import os as _os
+
+_extra_origins = [
+    o.strip() for o in _os.getenv("CORS_EXTRA_ORIGINS", "").split(",") if o.strip()
+]
+_cors_origins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://acrn-adjudicate.azurewebsites.net",
+    "https://adjudication.acrncloud.com",
+] + _extra_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "https://acrn-adjudicate.azurewebsites.net",
-    ],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

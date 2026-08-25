@@ -19,23 +19,40 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
         from models.auth import AuthSession
         from services.monitor_security import ROLES as MONITOR_PORTAL_ROLES
         s = db.query(AuthSession).filter_by(token_hash=_hash_token(token), revoked_at=None).first()
-        if s and s.expires_at > datetime.utcnow():
-            u = db.get(PortalUser, s.user_id)
-            if u and u.status == "ACTIVE":
-                if u.role == "MONITOR":
-                    pr = u.portal_role or "MONITOR_QC_REVIEWER"
-                    if pr not in MONITOR_PORTAL_ROLES:
-                        raise HTTPException(403, "Monitor/QC authority required")
-                    return u.email, pr
-                if u.role == "ADMIN":
-                    return u.email, "ADMIN"
-                if u.role in {"ADJUDICATOR", "CHAIRPERSON"}:
-                    return u.email, u.role
+        if s is None:
+            # Cookie present but no matching session — likely the container restarted
+            # and the SQLite/Postgres session table was reset, or the token was revoked.
+            raise HTTPException(
+                401,
+                detail={"message": "Session not found. Please sign in again.", "reason": "session_not_found"},
+            )
+        if s.expires_at <= datetime.utcnow():
+            raise HTTPException(
+                401,
+                detail={"message": "Your session has expired. Please sign in again.", "reason": "session_expired"},
+            )
+        u = db.get(PortalUser, s.user_id)
+        if u is None or u.status != "ACTIVE":
+            raise HTTPException(
+                401,
+                detail={"message": "Account not found or inactive. Contact your administrator.", "reason": "account_inactive"},
+            )
+        if u.role == "MONITOR":
+            pr = u.portal_role or "MONITOR_QC_REVIEWER"
+            if pr not in MONITOR_PORTAL_ROLES:
                 raise HTTPException(403, "Monitor/QC authority required")
+            return u.email, pr
+        if u.role == "ADMIN":
+            return u.email, "ADMIN"
+        if u.role in {"ADJUDICATOR", "CHAIRPERSON"}:
+            return u.email, u.role
+        raise HTTPException(403, "Monitor/QC authority required")
+    # No cookie at all — fall back to demo headers only when demo mode is enabled
     if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true":
         if x_demo_user and x_demo_role:
             return x_demo_user, x_demo_role.upper()
-    raise HTTPException(401, "Authentication required")
+    raise HTTPException(401, detail={"message": "Authentication required. Please sign in.", "reason": "no_session"})
+
 
 def monitor(i = Depends(actor)):
     if i[1] not in MONITOR:

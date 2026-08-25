@@ -1,6 +1,30 @@
 const BASE=(import.meta.env.VITE_API_BASE_URL||'/api').replace(/\/$/,'')+'/realtime';
 const headers=(user)=>user?({'X-Demo-User':user.email,'X-Demo-Role':user.roleCode}):({});
-async function request(path,user,options={}){let r;try{r=await fetch(BASE+path,{...options,credentials:'include',headers:{...headers(user),...(options.headers||{})}})}catch{throw new Error('The backend API is unavailable. Start it on port 8000 and try again.')}if(!r.ok){let x;try{x=await r.json()}catch{x={}}throw new Error(typeof x.detail==='string'?x.detail:x.detail?.message||`Request failed (${r.status})`)}return r.json()}
+async function request(path,user,options={}){
+  let r;
+  try{
+    r=await fetch(BASE+path,{...options,credentials:'include',headers:{...headers(user),...(options.headers||{})}});
+  }catch{
+    throw new Error('The backend API is unavailable. Start it on port 8000 and try again.');
+  }
+  if(r.status===401){
+    // Session expired or not found — clear stale state and redirect to login
+    let reason='session_expired';
+    try{const b=await r.json();reason=b?.detail?.reason||b?.detail||reason;}catch{}
+    const msg=reason==='session_not_found'||reason==='session_expired'
+      ?'Your session has expired. Please sign in again.'
+      :'Authentication required. Please sign in.';
+    // Give the UI a moment to show the message before forcing a redirect
+    setTimeout(()=>{window.location.href='/';},1500);
+    throw new Error(msg);
+  }
+  if(!r.ok){
+    let x;
+    try{x=await r.json()}catch{x={}}
+    throw new Error(typeof x.detail==='string'?x.detail:x.detail?.message||`Request failed (${r.status})`);
+  }
+  return r.json();
+}
 export const listBatches=(user)=>request('/batches',user);
 export const getBatch=(id,user)=>request(`/batches/${id}`,user);
 export const listPatients=(user,params={})=>request(`/patients?${new URLSearchParams(params)}`,user);

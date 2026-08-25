@@ -1,0 +1,29 @@
+﻿# docker-compose.demo.yml  — overlay for team demonstration sessions
+#
+# Usage (on the server, from the repo root):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.demo.yml up -d --build
+#
+# This overlay ONLY changes the demo-account flags and extends cookie settings
+# for the demo deployment.  All other production settings (Postgres, secrets,
+# SSO) remain exactly as set in .env.prod / docker-compose.prod.yml.
+#
+# IMPORTANT: Remove this overlay (revert to the two-file prod deploy command)
+# before going live with real participant data.
+
+services:
+  app:
+    environment:
+      # Enable pre-seeded demo accounts and password-based login for the demo.
+      # The backend seeds monitor1@acrnhealth.com, admin@acrnhealth.com, etc.
+      # on startup when this flag is true.
+      ENABLE_DEMO_ACCOUNTS: "true"
+
+      # Default password for all seeded demo accounts.
+      # Change this to something memorable for your team presentation.
+      DEMO_DEFAULT_PASSWORD: "ACRN@Demo2026"
+
+      # Cookie settings — keep secure=true so the browser sends the cookie
+      # over HTTPS to adjudication.acrncloud.com, lax allows same-site nav.
+      AUTH_COOKIE_SECURE: "true"
+      AUTH_COOKIE_SAMESITE: "lax"
