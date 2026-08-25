@@ -29,11 +29,11 @@ class ReviewCreate(ReasonedRequest): name: str; scope_type: str; scope_value: st
 def serialize(row):
     return {c.name: getattr(row,c.name) for c in row.__table__.columns}
 def boot(db):
-    """Seed the synthetic administration fixtures, but only in a demo-enabled environment.
+    """Seed synthetic administration fixtures only when demo data is enabled.
 
-    Production runs with ENABLE_DEMO_ACCOUNTS=false, so no is_demo row is ever written to the
-    production database — the Admin Portal screens simply return empty result sets there."""
-    if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true":
+    This is deliberately separate from ENABLE_DEMO_ACCOUNTS: hosted demonstration instances
+    can use SSO-only authentication while retaining resettable synthetic admin data."""
+    if os.getenv("ENABLE_DEMO_DATA", "false").lower() == "true":
         seed_demo(db)
 
 @router.get("/me")
@@ -138,12 +138,12 @@ def report(report_code:str,identity:Identity=Depends(require("reports.read")),db
     add_audit(db,identity,"REPORT_EXPORTED","REPORT",report_code,"Controlled administrative report generated",new={"scope":identity.studies}); db.commit(); return {"demo":True,"report":report_code,"generated_at":datetime.utcnow(),"study_scope":identity.studies,"note":"Synthetic demonstration report; production export adapter not connected."}
 @router.post("/demo/reset")
 def demo_reset(req:ReasonedRequest,identity:Identity=Depends(require("integrations.manage")),db:Session=Depends(get_db)):
-    if os.getenv("ENABLE_DEMO_ACCOUNTS","false").lower()!="true": raise HTTPException(409,"Demo data is disabled in this environment.")
+    if os.getenv("ENABLE_DEMO_DATA","false").lower()!="true": raise HTTPException(409,"Demo data is disabled in this environment.")
     counts=reset_demo(db); add_audit(db,identity,"DEMO_ADMIN_DATA_RESET","DEMO_DATA","administration",req.reason,new=counts); db.commit(); return {"demo":True,"reset":counts,"production_records_affected":0}
 
 @router.post("/demo/reset-all")
 def demo_reset_all(req:ReasonedRequest,identity:Identity=Depends(require("integrations.manage")),db:Session=Depends(get_db)):
-    if os.getenv("ENABLE_DEMO_ACCOUNTS","false").lower()!="true": raise HTTPException(409,"Demo data is disabled in this environment.")
+    if os.getenv("ENABLE_DEMO_DATA","false").lower()!="true": raise HTTPException(409,"Demo data is disabled in this environment.")
     from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInstance,ReviewerAssignment,RestrictedIdentityCrosswalk
     from models.canonical import ImportBatch,Participant,CanonicalField,DerivationResult,Narrative,AdjudicationRecord,CommitteeDecision,AuditEvent
     from models.auth import AuthSession,AuthAuditEvent

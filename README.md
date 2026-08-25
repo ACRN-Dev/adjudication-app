@@ -188,7 +188,7 @@ Bootstrap administrators are defined in `BOOTSTRAP_ADMINS` at the top of [backen
 
 `./scripts/deploy-prod.sh` remains available for a plain rebuild-and-restart with no database work.
 
-**No test data reaches production.** `ENABLE_DEMO_ACCOUNTS` is pinned to `false` by `docker-compose.prod.yml`, which gates both the demo login accounts and the synthetic Admin Portal fixtures; `init-prod.sh` aborts if `.env.prod` tries to enable it. One consequence to expect: the Admin Portal's dashboard, users, studies, sites, versions and integrations screens read only `is_demo=true` rows, so they render empty in production. Real account management is unaffected — it lives on the separate `/api/auth/users` endpoints.
+**No test data reaches production by default.** `ENABLE_DEMO_ACCOUNTS` is pinned to `false` by `docker-compose.prod.yml`, so demo credentials and header-based authentication are never available there. A dedicated hosted demonstration environment may set `ENABLE_DEMO_DATA=true` to enable resettable synthetic Admin Portal fixtures; authentication remains SSO-only and uses administrator-provisioned users. Leave `ENABLE_DEMO_DATA=false` for live clinical production. Real account management is unaffected — it lives on the separate `/api/auth/users` endpoints.
 
 ### Local development with a bundled Postgres (no external DB access)
 
@@ -214,6 +214,7 @@ Starts `app` plus a throwaway `postgres:16-alpine` container (`docker-compose.lo
 | `SESSION_HOURS` | no (default `12`) | Session lifetime. |
 | `LOGIN_LOCK_AFTER` / `LOGIN_LOCK_MINUTES` | no (default `5` / `15`) | Login lockout policy. |
 | `ENABLE_DEMO_ACCOUNTS` | no (default `false`) | Seeds the fixed demo accounts on startup. Set `true` in dev, `false` in prod. |
+| `ENABLE_DEMO_DATA` | no (default `false`) | Enables resettable synthetic Admin Portal data without enabling demo-account authentication. Use only in a dedicated demonstration environment. |
 | `DEMO_DEFAULT_PASSWORD` | no | Shared local demo password (dev only). |
 | `DEMO_FORCE_PASSWORD_CHANGE` | no | Forces a password change on first demo login. |
 | `AUTH_COOKIE_SECURE` | yes | Set `true` behind HTTPS (both dev and prod, since the edge terminates TLS). |

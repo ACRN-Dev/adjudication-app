@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 os.environ["ENABLE_DEMO_ACCOUNTS"] = "true"
+os.environ["ENABLE_DEMO_DATA"] = "true"
 from main import app
 from models.admin import AdminUser, ControlledVersion, AdminAuditEvent
 from models.auth import PortalUser
@@ -93,3 +94,23 @@ def test_admin_session_without_portal_role_denied(monkeypatch):
     assert login.status_code == 200
     r = client.get("/api/admin/dashboard", cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]})
     assert r.status_code == 403
+
+
+def test_sso_admin_can_reset_demo_data_without_demo_accounts(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    monkeypatch.setenv("ENABLE_DEMO_DATA", "true")
+    db = TestingSession()
+    db.add(PortalUser(
+        email="demo.data.admin@acrnhealth.com", display_name="Demo Data Admin",
+        password_hash=hash_password("Whatever123!"), role="ADMIN", portal_role="TECHNICAL_ADMIN", status=ACTIVE,
+    ))
+    db.commit()
+    db.close()
+    login = client.post("/api/auth/login", json={"email": "demo.data.admin@acrnhealth.com", "password": "Whatever123!"})
+    assert login.status_code == 200
+    response = client.post(
+        "/api/admin/demo/reset",
+        json={"reason": "Reset synthetic data for the hosted demonstration"},
+        cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]},
+    )
+    assert response.status_code == 200
