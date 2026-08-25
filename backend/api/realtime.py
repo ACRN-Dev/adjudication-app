@@ -37,30 +37,36 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
                 401,
                 detail={"message": "Account not found or inactive. Contact your administrator.", "reason": "account_inactive"},
             )
+        # Resolved as (email, label, qc_authority). Authority gates QC review over
+        # participant records; it does not gate the batch import, which is open to all roles.
         if u.role == "MONITOR":
             pr = u.portal_role
             if not pr or pr not in MONITOR_PORTAL_ROLES:
-                raise HTTPException(403, "Monitor/QC authority required — portal role not provisioned. Contact your administrator.")
-            return u.email, pr
+                return u.email, "MONITOR", False
+            return u.email, pr, True
         if u.role == "ADMIN":
-            return u.email, "ADMIN"
-        if u.role in {"ADJUDICATOR", "CHAIRPERSON"}:
-            return u.email, u.role
-        raise HTTPException(403, "Monitor/QC authority required")
+            return u.email, "ADMIN", True
+        return u.email, u.role, False
     # No cookie at all — fall back to demo headers only when demo mode is enabled
     if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true":
         if x_demo_user and x_demo_role:
-            return x_demo_user, x_demo_role.upper()
+            label = x_demo_role.upper()
+            return x_demo_user, label, label in MONITOR
     raise HTTPException(401, detail={"message": "Authentication required. Please sign in.", "reason": "no_session"})
 
 
+def importer(i = Depends(actor)):
+    """The RealTime batch import is open to every authenticated account, whatever its role."""
+    return i
+
+
 def monitor(i = Depends(actor)):
-    if i[1] not in MONITOR:
-        raise HTTPException(403, "Monitor/QC authority required")
+    if not i[2]:
+        raise HTTPException(403, "Monitor/QC authority required — portal role not provisioned. Contact your administrator.")
     return i
 def bjson(b): return {"id":str(b.id),"filename":b.filename,"checksum":b.checksum,"file_size":b.file_size,"uploaded_at":b.uploaded_at,"rows":b.row_count,"rows_processed":b.rows_processed,"participants":b.participant_count,"visits":b.visit_count,"mapping_version":b.mapping_version,"status":b.status,"validation_result":b.validation_result,"blinding_result":b.blinding_result,"errors":b.error_count,"warnings":b.warning_count,"prohibited_excluded":b.prohibited_count,"finished_at":b.processing_finished_at}
 @router.post("/batches",status_code=202)
-async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(monitor),db:Session=Depends(get_db)):
+async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(importer),db:Session=Depends(get_db)):
     if not (file.filename or "").lower().endswith(".csv"): raise HTTPException(415,"RealTime import requires CSV")
     staging=os.path.join(os.path.dirname(os.path.dirname(__file__)),".rt-staging"); os.makedirs(staging,exist_ok=True)
     path=os.path.join(staging,f"{uuid.uuid4()}.csv"); size=0
@@ -71,14 +77,14 @@ async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(
     b=RTImportBatch(filename=os.path.basename(file.filename),checksum=checksum,file_size=size,uploaded_by=i[0],source_path=path,status="CHECKSUM_CALCULATED")
     db.add(b); db.flush(); audit(db,i[0],i[1],"BATCH_UPLOADED","IMPORT_BATCH",b.id,{"filename":b.filename,"size":size,"checksum":checksum}); db.commit(); background.add_task(process_batch,b.id); return bjson(b)
 @router.get("/batches")
-def batches(i=Depends(monitor),db:Session=Depends(get_db)): return [bjson(x) for x in db.query(RTImportBatch).order_by(RTImportBatch.uploaded_at.desc()).all()]
+def batches(i=Depends(importer),db:Session=Depends(get_db)): return [bjson(x) for x in db.query(RTImportBatch).order_by(RTImportBatch.uploaded_at.desc()).all()]
 @router.get("/batches/{batch_id}")
-def batch(batch_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
+def batch(batch_id:uuid.UUID,i=Depends(importer),db:Session=Depends(get_db)):
     b=db.get(RTImportBatch,batch_id)
     if not b: raise HTTPException(404,"Batch not found")
     return bjson(b)
 @router.post("/batches/{batch_id}/cancel")
-def cancel(batch_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
+def cancel(batch_id:uuid.UUID,i=Depends(importer),db:Session=Depends(get_db)):
     b=db.get(RTImportBatch,batch_id)
     if not b or b.status in {"PUBLISHED","SUPERSEDED"}: raise HTTPException(409,"Batch cannot be cancelled")
     b.cancel_requested=True; audit(db,i[0],i[1],"IMPORT_CANCEL_REQUESTED","IMPORT_BATCH",b.id); db.commit(); return {"status":"CANCEL_REQUESTED"}
