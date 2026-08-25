@@ -20,8 +20,8 @@ def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get
             user=db.get(PortalUser,session.user_id)
             if user and user.status=="ACTIVE":
                 if user.role=="MONITOR":
-                    pr = user.portal_role or "MONITOR_QC_REVIEWER"
-                    if pr not in ROLES: raise HTTPException(403,"Monitor Portal access denied")
+                    pr = user.portal_role
+                    if not pr or pr not in ROLES: raise HTTPException(403,"Monitor Portal access denied — portal role not provisioned. Contact your administrator.")
                     studies=tuple(filter(None,(user.study_scope or "*").split(",")))
                     return MonitorIdentity(user.email,pr,studies)
                 if user.role=="ADMIN":

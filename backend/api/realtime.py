@@ -38,9 +38,9 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
                 detail={"message": "Account not found or inactive. Contact your administrator.", "reason": "account_inactive"},
             )
         if u.role == "MONITOR":
-            pr = u.portal_role or "MONITOR_QC_REVIEWER"
-            if pr not in MONITOR_PORTAL_ROLES:
-                raise HTTPException(403, "Monitor/QC authority required")
+            pr = u.portal_role
+            if not pr or pr not in MONITOR_PORTAL_ROLES:
+                raise HTTPException(403, "Monitor/QC authority required — portal role not provisioned. Contact your administrator.")
             return u.email, pr
         if u.role == "ADMIN":
             return u.email, "ADMIN"
