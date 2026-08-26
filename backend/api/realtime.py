@@ -237,6 +237,12 @@ def assigned(i=Depends(actor),db:Session=Depends(get_db)):
     if i[1] not in {"ADJUDICATOR","REVIEWER_A","REVIEWER_B"}: raise HTTPException(403,"Adjudicator role required")
     rows=db.query(ReviewerAssignment,LongitudinalParticipant).join(LongitudinalParticipant,ReviewerAssignment.participant_id==LongitudinalParticipant.id).filter(ReviewerAssignment.reviewer_upn==i[0],LongitudinalParticipant.workflow_status=="ASSIGNED").all()
     return [pjson(p) for _,p in rows]
+
+@router.get("/adjudicators")
+def adjudicators(i=Depends(monitor), db:Session=Depends(get_db)):
+    """Active roster; A/B are positional slots, never fixed identities."""
+    rows = db.query(PortalUser).filter_by(role="ADJUDICATOR", status="ACTIVE").order_by(PortalUser.display_name).all()
+    return [{"email": u.email, "display_name": u.display_name, "portal_role": u.portal_role} for u in rows]
 @router.get("/assigned/{participant_id}")
 def assigned_patient(participant_id:uuid.UUID,i=Depends(actor),db:Session=Depends(get_db)):
     if not db.query(ReviewerAssignment).filter_by(participant_id=participant_id,reviewer_upn=i[0]).first(): raise HTTPException(403,"Participant is not assigned to this reviewer")

@@ -10,6 +10,7 @@ import {
   uploadRealtimeBulk,
   approvePatient,
   assignPatient,
+  listAdjudicators,
   listReferenceRanges,
   upsertReferenceRange,
   deactivateReferenceRange
@@ -95,6 +96,7 @@ function ProgressBar({ pct, tone = 'info' }) {
 function Imports({ user, onNavigate }) {
   const [batches, setBatches] = useState([]);
   const [msg, setMsg] = useState('');
+  const [roster, setRoster] = useState([]);
   const [msgType, setMsgType] = useState('info');
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -285,7 +287,8 @@ function ReconstructionQC({ user, onOpen }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
-  const load = () => listPatients(user, { page_size: 100 }).then(setData);
+  const load = () => Promise.all([listPatients(user, { page_size: 100 }), listAdjudicators(user)])
+    .then(([patients, adjudicators]) => { setData(patients); setRoster(adjudicators); });
 
   useEffect(() => {
     load();
@@ -383,12 +386,6 @@ function Assignments({ user, onOpen }) {
     load();
   }, []);
 
-  const demoAdjudicators = [
-    { email: 'adjudicatora@acrnhealth.com', label: 'Adjudicator A (adjudicatora@acrnhealth.com)' },
-    { email: 'adjudicatorb@acrnhealth.com', label: 'Adjudicator B (adjudicatorb@acrnhealth.com)' },
-    { email: 'adjudicatorc@acrnhealth.com', label: 'Adjudicator C (adjudicatorc@acrnhealth.com)' }
-  ];
-
   const doAssign = async (patientId, email, role) => {
     try {
       await assignPatient(patientId, email, role, user);
@@ -403,9 +400,10 @@ function Assignments({ user, onOpen }) {
     setBusy(true);
     setMsg('Assigning demo adjudicators A & B to all subjects…');
     try {
+      if (roster.length < 2) { setMsg('At least two active adjudicators are required.'); return; }
       for (const p of data.items) {
-        await assignPatient(p.id, 'adjudicatora@acrnhealth.com', 'REVIEWER_A', user);
-        await assignPatient(p.id, 'adjudicatorb@acrnhealth.com', 'REVIEWER_B', user);
+        await assignPatient(p.id, roster[0].email, 'REVIEWER_A', user);
+        await assignPatient(p.id, roster[1].email, 'REVIEWER_B', user);
       }
       setMsg('Auto-assigned Adjudicator A & Adjudicator B to all participants!');
       load();
@@ -455,9 +453,9 @@ function Assignments({ user, onOpen }) {
                 style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}
               >
                 <option value="">-- Assign Reviewer A --</option>
-                {demoAdjudicators.map((a) => (
+                {roster.map((a) => (
                   <option key={a.email} value={a.email} disabled={a.email === revB}>
-                    {a.label}
+                    {a.display_name} ({a.email})
                   </option>
                 ))}
               </select>,
@@ -467,9 +465,9 @@ function Assignments({ user, onOpen }) {
                 style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}
               >
                 <option value="">-- Assign Reviewer B --</option>
-                {demoAdjudicators.map((a) => (
+                {roster.map((a) => (
                   <option key={a.email} value={a.email} disabled={a.email === revA}>
-                    {a.label}
+                    {a.display_name} ({a.email})
                   </option>
                 ))}
               </select>,
@@ -533,8 +531,10 @@ function Patients({ user, onOpen }) {
 function Timeline({ patient, user, onClose }) {
   if (!patient) return null;
   const [assignRole, setAssignRole] = useState('REVIEWER_A');
-  const [selectedAdjudicator, setSelectedAdjudicator] = useState('adjudicatora@acrnhealth.com');
+  const [roster, setRoster] = useState([]);
+  const [selectedAdjudicator, setSelectedAdjudicator] = useState('');
   const [msg, setMsg] = useState('');
+  useEffect(() => { listAdjudicators(user).then(setRoster).catch(e => setMsg(e.message)); }, [user]);
 
   const approve = async () => {
     try {
@@ -573,9 +573,8 @@ function Timeline({ patient, user, onClose }) {
             onChange={(e) => setSelectedAdjudicator(e.target.value)}
             style={{ fontSize: '11px', padding: '4px' }}
           >
-            <option value="adjudicatora@acrnhealth.com">adjudicatora@acrnhealth.com (Adjudicator A)</option>
-            <option value="adjudicatorb@acrnhealth.com">adjudicatorb@acrnhealth.com (Adjudicator B)</option>
-            <option value="adjudicatorc@acrnhealth.com">adjudicatorc@acrnhealth.com (Adjudicator C)</option>
+            <option value="">Select active adjudicator</option>
+            {roster.map(a => <option key={a.email} value={a.email}>{a.display_name} ({a.email})</option>)}
           </select>
           <button className="a-primary" style={{ fontSize: '11px', padding: '4px 8px' }} onClick={assign}>
             Assign Adjudicator

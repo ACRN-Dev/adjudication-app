@@ -32,6 +32,7 @@ export const getPatient=(id,user)=>request(`/patients/${id}`,user);
 export const approvePatient=(id,user)=>request(`/patients/${id}/approve`,user,{method:'POST'});
 export const assignPatient=(id,email,role,user)=>request(`/patients/${id}/assign?${new URLSearchParams({reviewer_upn:email,reviewer_role:role})}`,user,{method:'POST'});
 export const listAssigned=(user)=>request('/assigned',user);
+export const listAdjudicators=(user)=>request('/adjudicators',user);
 export const getAssigned=(id,user)=>request(`/assigned/${id}`,user);
 
 // XHR (not fetch) so we get real upload progress events for the progress bar.
