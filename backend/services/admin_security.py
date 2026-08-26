@@ -17,6 +17,7 @@ ROLE_PERMISSIONS = {
     "QA_AUDITOR": {"admin.read", "audit.read", "reports.read", "rules.approve", "mappings.approve", "forms.approve"},
     "GOVERNANCE_REVIEWER": {"admin.read", "roles.read", "studies.read", "rules.read", "audit.read", "reports.read"},
     "ACCESS_REVIEWER": {"admin.read", "users.read", "access.review", "audit.read", "reports.read"},
+    "FINANCE": {"admin.read", "finance.read", "finance.manage", "audit.read", "reports.read"},
 }
 ADMIN_ROLES = set(ROLE_PERMISSIONS)
 PROHIBITED_FIELDS = {"sflt1", "sflt-1", "plgf", "seng", "biomarkerresults", "biomarker_results", "pocresults", "poc_results", "treatmentallocation", "treatment_allocation"}

@@ -13,6 +13,7 @@ import uuid
 
 from database import get_db
 from models.auth import PortalUser, AuthAuditEvent
+from models.admin import AdjudicationActivityLedger
 from models.canonical import (
     Participant, AdjudicationRecord, CommitteeDecision, CommitteeMeeting,
     ReviewerRole, DiagnosisCode, OnsetClass, SeverityGrade, CertaintyLevel, AdjudicationStatus
@@ -31,6 +32,59 @@ class MeetingSignOffRequest(BaseModel):
     minutes: str = Field(min_length=10, description="Comprehensive meeting minutes")
     case_ids: List[str] = Field(description="List of participant subject IDs finalized during this session")
     chair_name: Optional[str] = "Adjudication Chairperson"
+
+class MeetingDelegationRequest(BaseModel):
+    meeting_title: str = Field(min_length=3)
+    scheduled_at: datetime
+    delegate_upn: str = Field(min_length=3)
+    case_ids: List[str] = Field(default_factory=list)
+    note: str = Field(min_length=5)
+
+@router.post("/meetings/delegate")
+def delegate_meeting(req: MeetingDelegationRequest, db: Session = Depends(get_db),
+                     user: PortalUser = Depends(require_chairperson_assignment())):
+    delegate = db.query(PortalUser).filter_by(email=req.delegate_upn.strip().lower(), status="ACTIVE").first()
+    if not delegate or delegate.role not in (ROLE_CHAIRPERSON, "ADJUDICATOR"):
+        raise HTTPException(422, "Delegate must be an active chairperson or adjudicator.")
+    meeting = CommitteeMeeting(
+        meeting_title=req.meeting_title,
+        scheduled_at=req.scheduled_at,
+        chair_upn=user.email,
+        chair_name=user.display_name,
+        delegated_to_upn=delegate.email,
+        delegated_by_upn=user.email,
+        delegation_note=req.note,
+        delegated_at=datetime.utcnow(),
+        case_ids=req.case_ids,
+        attendees=[delegate.email],
+        quorum_met=False,
+        signed=False,
+        status="DELEGATED",
+    )
+    db.add(meeting)
+    db.flush()
+    # Attendance and chair sign-off are ledger facts; attendee labels that are
+    # not email addresses are intentionally ignored to avoid misattribution.
+    for attendee in req.attendees:
+        attendee_upn = str(attendee).strip().lower()
+        if "@" not in attendee_upn:
+            continue
+        if not db.query(PortalUser).filter_by(email=attendee_upn, role="ADJUDICATOR").first():
+            continue
+        db.add(AdjudicationActivityLedger(
+            adjudicator_upn=attendee_upn, study_code="PROTECT-Africa",
+            blinded_case_reference=f"MEETING-{meeting.id}", role_served="COMMITTEE_MEMBER",
+            event_type="COMMITTEE_MEETING_ATTENDED", event_at=now_dt, billable=False,
+            source_record_id=str(meeting.id), idempotency_key=f"MEETING_ATTENDED:{meeting.id}:{attendee_upn}",
+        ))
+    db.add(AdjudicationActivityLedger(
+        adjudicator_upn=chair_upn.lower(), study_code="PROTECT-Africa",
+        blinded_case_reference=f"MEETING-{meeting.id}", role_served="CHAIR",
+        event_type="CHAIR_SIGNOFF", event_at=now_dt, billable=False,
+        source_record_id=str(meeting.id), idempotency_key=f"CHAIR_SIGNOFF:{meeting.id}",
+    ))
+    db.commit()
+    return {"status": "delegated", "meeting_id": str(meeting.id), "delegate_upn": delegate.email}
 
 
 @router.get("/completed-adjudications")
@@ -338,8 +392,9 @@ def list_meetings(db: Session = Depends(get_db), user: PortalUser = Depends(requ
                 "signed_at": m.signed_at.isoformat() if m.signed_at else None,
                 "signature_hash": m.signature_hash,
                 "status": m.status
+                ,"delegated_to_upn": m.delegated_to_upn
+                ,"scheduled_at": m.scheduled_at.isoformat() if m.scheduled_at else None
             }
             for m in rows
         ]
     }
-

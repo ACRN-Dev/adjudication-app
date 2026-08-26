@@ -122,10 +122,11 @@ def export_csv_dataset(db: Session = Depends(get_db)):
                 diag = "Pending"
                 onset = "Pending"
                 sev = "Pending"
-                if p.committee_decision:
-                    diag = p.committee_decision.final_diagnosis.value
-                    onset = p.committee_decision.final_onset_class.value
-                    sev = p.committee_decision.final_severity.value
+                committee_decision = p.committee_decisions[-1] if p.committee_decisions else None
+                if committee_decision:
+                    diag = committee_decision.final_diagnosis.value
+                    onset = committee_decision.final_onset_class.value
+                    sev = committee_decision.final_severity.value
                 elif p.adjudication_records:
                     diag = p.adjudication_records[0].diagnosis.value if p.adjudication_records[0].diagnosis else "Pending"
 
@@ -326,7 +327,7 @@ def unblinded_analysis_export(
     ])
 
     for p in participants:
-        committee_dec = p.committee_decision
+        committee_dec = p.committee_decisions[-1] if p.committee_decisions else None
         diag = committee_dec.final_diagnosis.value if (committee_dec and committee_dec.final_diagnosis) else (
             p.adjudication_records[0].diagnosis.value if (p.adjudication_records and p.adjudication_records[0].diagnosis) else "Pending"
         )

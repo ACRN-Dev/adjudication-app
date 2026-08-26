@@ -14,8 +14,9 @@ from database import get_db
 from models.auth import CommitteeAssignment, PortalUser, AuthAuditEvent
 from services.auth_service import (
     ACTIVE, AUTH_COOKIE, AUTH_COOKIE_SECURE, AUTH_COOKIE_SAMESITE, INACTIVE, ROLE_ADJUDICATOR, ROLE_ADMIN, audit_auth,
-    current_user, default_password, hash_password, identity_from_user, issue_session,
-    login as auth_login, logout as auth_logout, require_role, seed_demo_accounts, normalize_email,
+    change_password as auth_change_password, current_user, default_password, hash_password, identity_from_user,
+    issue_session, login as auth_login, logout as auth_logout, require_role, seed_demo_accounts, normalize_email,
+    validate_password_strength,
 )
 from services.admin_security import ADMIN_ROLES, ROLE_PERMISSIONS, Identity as AdminIdentity, validate_delegation
 from services.monitor_security import ROLES as MONITOR_ROLES
@@ -125,6 +126,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=1)
+
+
 class ReasonRequest(BaseModel):
     reason: str = Field(min_length=3)
 
@@ -197,6 +203,12 @@ def logout(response: Response, request: Request, token: Optional[str] = Cookie(N
 @router.get("/me")
 def me(user: PortalUser = Depends(current_user)):
     return public_user(user)
+
+
+@router.post("/change-password")
+def change_password(req: ChangePasswordRequest, request: Request, db: Session = Depends(get_db),
+                     user: PortalUser = Depends(current_user)):
+    return auth_change_password(db, user, req.current_password, req.new_password, request)
 
 
 @router.get("/users")
@@ -347,7 +359,8 @@ def reset_password(user_id: str, req: ReasonRequest, request: Request, admin: Po
     if row.role == "ADMIN":
         validate_delegation(acting_identity, ROLE_PERMISSIONS.get(row.portal_role, set()))
     row.password_hash = hash_password(default_password())
-    row.must_change_password = False
+    # Shared default password must never be usable without a forced change on next login.
+    row.must_change_password = True
     row.failed_login_count = 0
     row.locked_until = None
     audit_auth(db, "PASSWORD_RESET", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason)
@@ -418,8 +431,12 @@ def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = De
     _validate_portal_role(role, portal_role)
     if role == "ADMIN":
         validate_delegation(acting_identity, ROLE_PERMISSIONS.get(portal_role, set()))
-    default_password = req.password or "ACRN@2026"
-    password_hash = hash_password(default_password)
+    # Each account gets its own randomly generated temporary password — never a shared default —
+    # and must_change_password forces the user to set a private credential on first login.
+    temp_password = req.password or secrets.token_urlsafe(12)
+    if req.password:
+        validate_password_strength(req.password, normalized)
+    password_hash = hash_password(temp_password)
     row = PortalUser(
         email=normalized,
         display_name=req.display_name,
@@ -429,12 +446,14 @@ def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = De
         study_scope=_normalize_study_scope(req.study_scope),
         status=ACTIVE,
         is_demo_account=False,
+        must_change_password=True,
     )
     db.add(row)
     audit_auth(db, "USER_CREATED", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
                details={"role": role, "portal_role": portal_role})
     db.commit()
-    return {**public_user(row), "default_password": default_password}
+    # temp_password is returned once, out-of-band, so the admin can share it; it is never logged or audited.
+    return {**public_user(row), "temporary_password": temp_password}
 
 
 

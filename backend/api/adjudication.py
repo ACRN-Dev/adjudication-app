@@ -14,20 +14,21 @@ Enforces:
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 import hashlib
 import random
 
 from database import get_db
 from models.canonical import (
-    Participant, AdjudicationRecord, SubjectAssignment, AuditEvent,
+    Participant, AdjudicationVisit, VisitMeasurementDate, AdjudicationRecord, SubjectAssignment, AuditEvent,
     ReviewerRole, DiagnosisCode, OnsetClass, SeverityGrade, CertaintyLevel,
     AdjudicationStatus, StudyCode,
 )
 from models.auth import PortalUser
 from models.longitudinal import LongitudinalParticipant, ReviewerAssignment
 from services.auth_service import verify_password
+from services.case_finalization import finalize_case_pdf, record_determination_activity
 
 router = APIRouter()
 
@@ -62,6 +63,11 @@ class ReviewerSubmission(BaseModel):
     certainty: CertaintyLevel
     differential_diagnosis: Optional[str] = None
     rationale: str = Field(min_length=10)
+    comment: Optional[str] = None
+    other_rationale: Optional[str] = None
+    visit_code: Optional[str] = None
+    visit_date: Optional[datetime] = None
+    measurement_dates: List[dict] = Field(default_factory=list)
 
 
 @router.post("/{subject_id}/submit")
@@ -114,6 +120,40 @@ def submit_adjudication(
             db.flush()
 
     # ── 2. Server-side credential re-verification (21 CFR Part 11 §11.200) ───
+    visit = db.query(AdjudicationVisit).filter_by(
+        participant_id=participant.id, visit_number=sub.visit_number
+    ).first()
+    if not visit:
+        visit = AdjudicationVisit(
+            participant_id=participant.id,
+            visit_number=sub.visit_number,
+            visit_code=sub.visit_code or f"V{sub.visit_number:02d}",
+            visit_date=sub.visit_date,
+        )
+        db.add(visit)
+        db.flush()
+    elif sub.visit_date and visit.visit_date and sub.visit_date != visit.visit_date:
+        raise HTTPException(status_code=409, detail="visit_date conflicts with the established subject-visit date.")
+
+    # Store measurement dates as distinct evidence timestamps. Sorting is by
+    # parsed datetime on retrieval, never by source row or formatted text.
+    for item in sub.measurement_dates:
+        try:
+            measured_at = datetime.fromisoformat(str(item["measured_at"]).replace("Z", "+00:00"))
+            measurement_type = str(item["measurement_type"]).strip().upper()
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Each measurement date requires measurement_type and an ISO-8601 measured_at value.")
+        if not measurement_type:
+            raise HTTPException(status_code=422, detail="measurement_type cannot be blank.")
+        exists = db.query(VisitMeasurementDate).filter_by(
+            visit_id=visit.id, measurement_type=measurement_type, measured_at=measured_at
+        ).first()
+        if not exists:
+            db.add(VisitMeasurementDate(
+                visit_id=visit.id, measurement_type=measurement_type,
+                measured_at=measured_at, source_reference=item.get("source_reference"),
+            ))
+
     sub_upn = sub.reviewer_upn.strip().lower()
     reviewer_user = (
         db.query(PortalUser)
@@ -134,6 +174,12 @@ def submit_adjudication(
         db.commit()
         raise HTTPException(status_code=401,
                             detail="Invalid credentials. Signature rejected (21 CFR Part 11).")
+    if reviewer_user.must_change_password:
+        _audit(db, "SIGN_REJECTED", participant.id, sub.reviewer_upn, "ADJUDICATOR",
+               "Signature rejected: password change required before signing", {"reason": "password_change_required"})
+        db.commit()
+        raise HTTPException(status_code=403,
+                            detail="You must set a new password before you can sign adjudications (21 CFR Part 11).")
 
     # ── 3. Adjudicator Stickiness Enforcement ────────────────────────────────
     assignment = (
@@ -201,7 +247,7 @@ def submit_adjudication(
         )
 
     # ── 4. Visit-Level Completeness Gating & Mandatory date_of_diagnosis ─
-    if sub.diagnosis != DiagnosisCode.NOT_PE and sub.meets_criteria:
+    if sub.meets_criteria:
         if not sub.date_of_diagnosis:
             raise HTTPException(
                 status_code=422,
@@ -268,12 +314,17 @@ def submit_adjudication(
     existing = (
         db.query(AdjudicationRecord)
         .filter_by(
-            participant_id=participant.id,
+            visit_id=visit.id,
             reviewer_role=sub.reviewer_role,
-            visit_number=sub.visit_number,
         )
         .first()
     )
+    if sub.diagnosis == DiagnosisCode.OTHER:
+        if sub.reviewer_role != ReviewerRole.REVIEWER_C:
+            raise HTTPException(status_code=422, detail="Other is available only to Reviewer C after A/B disagreement.")
+        if not sub.other_rationale or not sub.other_rationale.strip():
+            raise HTTPException(status_code=422, detail="other_rationale is mandatory when Reviewer C selects Other.")
+
     if existing and existing.signed:
         raise HTTPException(
             status_code=409,
@@ -284,8 +335,10 @@ def submit_adjudication(
         )
 
     # ── 6. Generate e-signature hash (SHA-256, 21 CFR Part 11) ───────────────
+    # Bound to reviewer_user.id (immutable, unique per person) rather than just the
+    # UPN string, so the credential used to sign can never be attributed to anyone else.
     raw_sig = (
-        f"{subject_id}|{sub.reviewer_upn}|{sub.reviewer_role.value}|"
+        f"{subject_id}|{reviewer_user.id}|{sub.reviewer_upn}|{sub.reviewer_role.value}|"
         f"{sub.diagnosis.value}|{sub.visit_number}|"
         f"{sub.date_of_diagnosis.isoformat() if sub.date_of_diagnosis else ''}|"
         f"{datetime.utcnow().isoformat()}"
@@ -298,6 +351,7 @@ def submit_adjudication(
     else:
         rec = AdjudicationRecord(
             participant_id=participant.id,
+            visit_id=visit.id,
             reviewer_role=sub.reviewer_role,
             reviewer_upn=sub.reviewer_upn,
             reviewer_name=sub.reviewer_name,
@@ -313,6 +367,8 @@ def submit_adjudication(
     rec.certainty = sub.certainty
     rec.differential_diagnosis = sub.differential_diagnosis
     rec.rationale = sub.rationale
+    rec.comment = sub.comment
+    rec.other_rationale = sub.other_rationale.strip() if sub.other_rationale else None
     rec.signed = True
     rec.signed_at = datetime.utcnow()
     rec.signature_hash = sig_hash
@@ -320,6 +376,7 @@ def submit_adjudication(
     rec.submitted_at = datetime.utcnow()
 
     db.flush()
+    record_determination_activity(db, participant, visit, rec)
 
     # ── 8. Audit Event ───────────────────────────────────────────────────────
     _audit(
@@ -341,7 +398,7 @@ def submit_adjudication(
     # ── 9. Concordance check ─────────────────────────────────────────────────
     visit_records = (
         db.query(AdjudicationRecord)
-        .filter_by(participant_id=participant.id, visit_number=sub.visit_number, signed=True)
+        .filter_by(visit_id=visit.id, signed=True)
         .all()
     )
     rev_a = next((r for r in visit_records if r.reviewer_role == ReviewerRole.REVIEWER_A), None)
@@ -375,8 +432,10 @@ def submit_adjudication(
             participant.status = AdjudicationStatus.RESOLVED_BY_MAJORITY
             resolution = "RESOLVED_BY_MAJORITY"
         else:
-            participant.status = AdjudicationStatus.THREE_WAY_DIVERGENT
-            resolution = "THREE_WAY_DIVERGENT"
+            # Reviewer C is the escalation/tie-break path. A distinct standard
+            # outcome (including a justified Other) is C's final determination.
+            participant.status = AdjudicationStatus.FINALIZED
+            resolution = "RESOLVED_BY_REVIEWER_C"
 
         _audit(
             db, "REVIEWER_C_OUTCOME_RESOLVED", participant.id,
@@ -431,6 +490,19 @@ def submit_adjudication(
         )
 
 
+    artifact = None
+    if participant.status in (
+        AdjudicationStatus.CONCORDANT,
+        AdjudicationStatus.RESOLVED_BY_MAJORITY,
+        AdjudicationStatus.FINALIZED,
+    ):
+        determination = rev_c or rev_b or rev_a
+        try:
+            artifact = finalize_case_pdf(db, participant, visit, determination)
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=502, detail=f"Signature was not finalized because SharePoint filing failed: {exc}")
+
     db.commit()
 
     return {
@@ -442,6 +514,8 @@ def submit_adjudication(
         "signed_at": rec.signed_at.isoformat(),
         "date_of_diagnosis": rec.date_of_diagnosis.isoformat() if rec.date_of_diagnosis else None,
         "participant_status": participant.status.value,
+        "pdf_filed": artifact is not None,
+        "pdf_sha256": artifact.pdf_sha256 if artifact else None,
     }
 
 
@@ -495,6 +569,8 @@ def get_adjudication_status(
                 "certainty": r.certainty.value if r.certainty else None,
                 "date_of_diagnosis": r.date_of_diagnosis.isoformat() if r.date_of_diagnosis else None,
                 "rationale": r.rationale,
+                "comment": r.comment,
+                "other_rationale": r.other_rationale,
                 "signed_at": r.signed_at.isoformat() if r.signed_at else None,
                 "signature_hash": r.signature_hash,
             })
@@ -505,5 +581,28 @@ def get_adjudication_status(
         "records": visible_records,
         "is_committee_phase": is_committee_phase,
         "visit_count": participant.visit_count,
+        "visits": [
+            {
+                "visit_id": str(v.id),
+                "visit_number": v.visit_number,
+                "visit_code": v.visit_code,
+                "visit_date": v.visit_date.isoformat() if v.visit_date else None,
+                "measurement_dates": [
+                    {
+                        "measurement_type": m.measurement_type,
+                        "measured_at": m.measured_at.isoformat(),
+                        "source_reference": m.source_reference,
+                    }
+                    for m in v.measurement_dates
+                ],
+                "adjudication_status": {
+                    role.value: any(
+                        r.reviewer_role == role and r.signed
+                        for r in v.adjudication_records
+                    )
+                    for role in (ReviewerRole.REVIEWER_A, ReviewerRole.REVIEWER_B, ReviewerRole.REVIEWER_C)
+                },
+            }
+            for v in participant.visits
+        ],
     }
-

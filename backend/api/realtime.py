@@ -1,13 +1,16 @@
 """Secure RealTime import, Monitor database, and assigned-case API."""
 import os, uuid
 from datetime import datetime
+from typing import Optional
 from fastapi import APIRouter,UploadFile,File,BackgroundTasks,Depends,HTTPException,Header,Query,Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session,selectinload
 from database import get_db
-from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInstance,ImportIssue,ReviewerAssignment,LongitudinalCaseDerivation
+from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInstance,ImportIssue,ReviewerAssignment,LongitudinalCaseDerivation,LabReferenceRange
 from models.history import PatientHistoryField, PatientRiskSummary
 from services.realtime_pipeline import checksum_file,process_batch,audit
 from services.auth_service import current_user, audit_auth
+from services.lab_reference import evaluate_participant_labs, LAB_ANALYTES
 from models.auth import PortalUser
 router = APIRouter()
 MONITOR = {"ADJUDICATION_COORDINATOR", "MONITOR_QC_REVIEWER", "QA_REVIEWER", "RELEASE_OPERATOR", "MONITOR", "ADMIN"}
@@ -37,20 +40,39 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
                 401,
                 detail={"message": "Account not found or inactive. Contact your administrator.", "reason": "account_inactive"},
             )
+        if u.must_change_password:
+            raise HTTPException(403, detail={"code": "PASSWORD_CHANGE_REQUIRED", "message": "You must set a new password before continuing."})
         if u.role == "MONITOR":
             pr = u.portal_role
             if not pr or pr not in MONITOR_PORTAL_ROLES:
-                raise HTTPException(403, "Monitor/QC authority required — portal role not provisioned. Contact your administrator.")
+                # Provisioning gap, not a permission denial: a MONITOR account always carries
+                # baseline QC authority even if a sub-role was never explicitly assigned.
+                u.portal_role = "MONITOR_QC_REVIEWER"
+                audit_auth(db, "PORTAL_ROLE_AUTO_PROVISIONED", "SUCCESS", actor=u, affected=u, request=request,
+                           reason="MONITOR account had no portal_role; defaulted to baseline QC authority")
+                db.commit()
+                pr = u.portal_role
             return u.email, pr
         if u.role == "ADMIN":
             return u.email, "ADMIN"
         if u.role in {"ADJUDICATOR", "CHAIRPERSON"}:
             return u.email, u.role
         raise HTTPException(403, "Monitor/QC authority required")
-    # No cookie at all — fall back to demo headers only when demo mode is enabled
+    # No cookie at all — fall back to demo headers only when demo mode is enabled,
+    # and only after verifying the claimed user actually exists with that role.
+    # Trusting the header value alone would let anyone impersonate any adjudicator.
     if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true":
         if x_demo_user and x_demo_role:
-            return x_demo_user, x_demo_role.upper()
+            claimed_email = x_demo_user.strip().lower()
+            claimed_role = x_demo_role.strip().upper()
+            demo_user = db.query(PortalUser).filter_by(email=claimed_email, status="ACTIVE").first()
+            if not demo_user or not demo_user.is_demo_account:
+                raise HTTPException(401, detail={"message": "Unrecognized demo identity.", "reason": "no_session"})
+            if demo_user.must_change_password:
+                raise HTTPException(403, detail={"code": "PASSWORD_CHANGE_REQUIRED", "message": "You must set a new password before continuing."})
+            if demo_user.role != claimed_role and not (demo_user.role == "ADJUDICATOR" and claimed_role in {"REVIEWER_A", "REVIEWER_B"}):
+                raise HTTPException(403, detail={"message": "Role mismatch for demo identity.", "reason": "role_mismatch"})
+            return demo_user.email, claimed_role
     raise HTTPException(401, detail={"message": "Authentication required. Please sign in.", "reason": "no_session"})
 
 
@@ -58,7 +80,25 @@ def monitor(i = Depends(actor)):
     if i[1] not in MONITOR:
         raise HTTPException(403, "Monitor/QC authority required")
     return i
-def bjson(b): return {"id":str(b.id),"filename":b.filename,"checksum":b.checksum,"file_size":b.file_size,"uploaded_at":b.uploaded_at,"rows":b.row_count,"rows_processed":b.rows_processed,"participants":b.participant_count,"visits":b.visit_count,"mapping_version":b.mapping_version,"status":b.status,"validation_result":b.validation_result,"blinding_result":b.blinding_result,"errors":b.error_count,"warnings":b.warning_count,"prohibited_excluded":b.prohibited_count,"finished_at":b.processing_finished_at}
+
+
+# Coarse, monotonically increasing progress estimate for the async batch pipeline.
+_STAGE_PCT = {
+    "UPLOADED": 5, "CHECKSUM_CALCULATED": 10, "STRUCTURE_VALIDATION": 20, "ROWS_STAGED": 30,
+    "VISITS_RECONSTRUCTED": 85, "MONITOR_QC_REQUIRED": 100, "FAILED": 100, "CANCELLED": 100,
+}
+
+
+def _progress_pct(b):
+    base = _STAGE_PCT.get(b.status, 0)
+    if b.status == "ROWS_STAGED" and b.row_count:
+        # Interpolate within the row-processing stage using rows_processed/row_count.
+        frac = min(1.0, (b.rows_processed or 0) / max(1, b.row_count))
+        return int(30 + frac * 55)
+    return base
+
+
+def bjson(b): return {"id":str(b.id),"filename":b.filename,"checksum":b.checksum,"file_size":b.file_size,"uploaded_at":b.uploaded_at,"rows":b.row_count,"rows_processed":b.rows_processed,"participants":b.participant_count,"visits":b.visit_count,"mapping_version":b.mapping_version,"status":b.status,"progress_pct":_progress_pct(b),"validation_result":b.validation_result,"blinding_result":b.blinding_result,"errors":b.error_count,"warnings":b.warning_count,"prohibited_excluded":b.prohibited_count,"finished_at":b.processing_finished_at}
 @router.post("/batches",status_code=202)
 async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(monitor),db:Session=Depends(get_db)):
     if not (file.filename or "").lower().endswith(".csv"): raise HTTPException(415,"RealTime import requires CSV")
@@ -70,6 +110,30 @@ async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(
     if existing: os.remove(path); raise HTTPException(409,{"message":"Exact duplicate file","batch_id":str(existing.id)})
     b=RTImportBatch(filename=os.path.basename(file.filename),checksum=checksum,file_size=size,uploaded_by=i[0],source_path=path,status="CHECKSUM_CALCULATED")
     db.add(b); db.flush(); audit(db,i[0],i[1],"BATCH_UPLOADED","IMPORT_BATCH",b.id,{"filename":b.filename,"size":size,"checksum":checksum}); db.commit(); background.add_task(process_batch,b.id); return bjson(b)
+@router.post("/batches/bulk",status_code=202)
+async def upload_bulk(background:BackgroundTasks,files:list[UploadFile]=File(...),i=Depends(monitor),db:Session=Depends(get_db)):
+    """Accept multiple RealTime CSV snapshots in one request; each is queued and processed independently
+    so a single malformed file does not block the rest of the batch of files."""
+    results=[]
+    staging=os.path.join(os.path.dirname(os.path.dirname(__file__)),".rt-staging"); os.makedirs(staging,exist_ok=True)
+    for file in files:
+        entry={"filename":file.filename}
+        try:
+            if not (file.filename or "").lower().endswith(".csv"):
+                entry.update(status="REJECTED",error="RealTime import requires CSV"); results.append(entry); continue
+            path=os.path.join(staging,f"{uuid.uuid4()}.csv"); size=0
+            with open(path,"wb") as out:
+                while chunk:=await file.read(1024*1024): size+=len(chunk); out.write(chunk)
+            checksum=checksum_file(path); existing=db.query(RTImportBatch).filter_by(checksum=checksum).first()
+            if existing:
+                os.remove(path); entry.update(status="DUPLICATE",batch_id=str(existing.id)); results.append(entry); continue
+            b=RTImportBatch(filename=os.path.basename(file.filename),checksum=checksum,file_size=size,uploaded_by=i[0],source_path=path,status="CHECKSUM_CALCULATED")
+            db.add(b); db.flush(); audit(db,i[0],i[1],"BATCH_UPLOADED","IMPORT_BATCH",b.id,{"filename":b.filename,"size":size,"checksum":checksum,"bulk":True}); db.commit()
+            background.add_task(process_batch,b.id)
+            entry.update(status="QUEUED",batch=bjson(b)); results.append(entry)
+        except Exception as exc:
+            db.rollback(); entry.update(status="ERROR",error=str(exc)); results.append(entry)
+    return {"total":len(files),"accepted":sum(1 for r in results if r["status"]=="QUEUED"),"items":results}
 @router.get("/batches")
 def batches(i=Depends(monitor),db:Session=Depends(get_db)): return [bjson(x) for x in db.query(RTImportBatch).order_by(RTImportBatch.uploaded_at.desc()).all()]
 @router.get("/batches/{batch_id}")
@@ -116,7 +180,7 @@ def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",i=Depen
     if qc_status:q=q.filter_by(workflow_status=qc_status)
     total=q.count()
     items=q.order_by(LongitudinalParticipant.blinded_subject_id).offset((page_val-1)*size_val).limit(size_val).all()
-    return {"page":page_val,"page_size":size_val,"total":total,"items":[pjson(p) for p in items]}
+    return {"page":page_val,"page_size":size_val,"total":total,"items":[{**pjson(p),"lab_issues":evaluate_participant_labs(db,p)} for p in items]}
 def loaded(db,pid): return db.query(LongitudinalParticipant).options(selectinload(LongitudinalParticipant.visits).selectinload(VisitInstance.observations),selectinload(LongitudinalParticipant.reviewer_assignments)).filter_by(id=pid).first()
 def timeline(p,db):
     visits=[]
@@ -129,7 +193,7 @@ def timeline(p,db):
     d=db.query(LongitudinalCaseDerivation).filter_by(participant_id=p.id).first()
     long=None if not d else {"earliest_qualifying_date":d.earliest_qualifying_pe_date,"first_qualifying_visit_id":str(d.first_qualifying_visit_id) if d.first_qualifying_visit_id else None,"onset_classification":d.onset_classification,"maximum_severity":d.maximum_severity,"packet_completeness":d.packet_completeness,"certainty_restriction":d.certainty_restriction,"trigger_status":d.trigger_status,"recorded_site_diagnosis":d.recorded_site_diagnosis,"recorded_site_diagnosis_date":d.recorded_site_diagnosis_date,"discrepancy":d.recorded_versus_derived_discrepancy,"explanation":d.explanation}
     history_fields = db.query(PatientHistoryField).filter_by(participant_id=p.id).all()
-    history = {"obstetric": [], "medical": [], "family": [], "allergy_surgery": [], "social": [], "baseline": []}
+    history = {"obstetric": [], "medical": [], "family": [], "allergy_surgery": [], "social": [], "baseline": [], "medications": []}
     for f in history_fields:
         if f.domain in history:
             history[f.domain].append({"key": f.field_key, "label": f.field_label_raw, "value": f.value, "precision": f.value_precision, "instance": f.instance_index, "amber_flag": f.amber_flag, "flag_reason": f.flag_reason, "signed_at": f.signed_at.isoformat() if f.signed_at else None, "actor_hash": f.audit_actor_hash})
@@ -140,7 +204,8 @@ def timeline(p,db):
 def patient(participant_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
     p=loaded(db,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
-    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"MONITOR"}); db.commit(); return timeline(p,db)
+    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"MONITOR"}); db.commit()
+    return {**timeline(p,db),"lab_issues":evaluate_participant_labs(db,p)}
 @router.post("/patients/{participant_id}/approve")
 def approve(participant_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
     p=db.get(LongitudinalParticipant,participant_id)
@@ -171,3 +236,51 @@ def assigned_patient(participant_id:uuid.UUID,i=Depends(actor),db:Session=Depend
     p=loaded(db,participant_id)
     if not p or p.workflow_status!="ASSIGNED": raise HTTPException(404,"Assigned participant unavailable")
     audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"ADJUDICATOR"}); db.commit(); return timeline(p,db)
+
+
+# ── Configurable per-site/per-lab reference ranges (Monitor/QC authority only) ──
+def rjson(r):
+    return {"id":str(r.id),"analyte":r.analyte,"site_code":r.site_code,"lab_code":r.lab_code,"unit":r.unit,"low":r.low,"high":r.high,"is_active":r.is_active,"created_by":r.created_by,"updated_at":r.updated_at}
+
+
+class ReferenceRangeRequest(BaseModel):
+    analyte: str
+    site_code: Optional[str] = None
+    lab_code: Optional[str] = None
+    unit: Optional[str] = None
+    low: Optional[float] = None
+    high: Optional[float] = None
+
+
+@router.get("/reference-ranges")
+def list_reference_ranges(i=Depends(monitor),db:Session=Depends(get_db)):
+    rows=db.query(LabReferenceRange).order_by(LabReferenceRange.analyte,LabReferenceRange.site_code.nullsfirst()).all()
+    return {"analytes":sorted(LAB_ANALYTES),"items":[rjson(r) for r in rows]}
+
+
+@router.post("/reference-ranges",status_code=201)
+def upsert_reference_range(req:ReferenceRangeRequest,i=Depends(monitor),db:Session=Depends(get_db)):
+    analyte=req.analyte.strip().upper()
+    if analyte not in LAB_ANALYTES:
+        raise HTTPException(422,f"Unsupported analyte. Must be one of: {', '.join(sorted(LAB_ANALYTES))}")
+    if req.low is None and req.high is None:
+        raise HTTPException(422,"At least one of low/high must be provided")
+    site_code=(req.site_code or "").strip().upper() or None
+    lab_code=(req.lab_code or "").strip().upper() or None
+    row=db.query(LabReferenceRange).filter_by(analyte=analyte,site_code=site_code,lab_code=lab_code).first()
+    if row:
+        row.unit=req.unit; row.low=req.low; row.high=req.high; row.is_active=True
+    else:
+        row=LabReferenceRange(analyte=analyte,site_code=site_code,lab_code=lab_code,unit=req.unit,low=req.low,high=req.high,created_by=i[0])
+        db.add(row)
+    db.flush(); audit(db,i[0],i[1],"LAB_REFERENCE_RANGE_SET","LAB_REFERENCE_RANGE",row.id,{"analyte":analyte,"site_code":site_code,"lab_code":lab_code,"low":req.low,"high":req.high}); db.commit()
+    return rjson(row)
+
+
+@router.post("/reference-ranges/{range_id}/deactivate")
+def deactivate_reference_range(range_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
+    row=db.get(LabReferenceRange,range_id)
+    if not row: raise HTTPException(404,"Reference range not found")
+    row.is_active=False
+    audit(db,i[0],i[1],"LAB_REFERENCE_RANGE_DEACTIVATED","LAB_REFERENCE_RANGE",row.id); db.commit()
+    return rjson(row)

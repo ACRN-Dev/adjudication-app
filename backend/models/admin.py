@@ -88,6 +88,105 @@ class TrainingRecord(Base):
     completed_at = Column(DateTime); expires_at = Column(DateTime); evidence_reference = Column(String(255)); is_demo = Column(Boolean, default=False)
 
 
+class AdjudicatorProfile(Base):
+    __tablename__ = "adjudicator_profiles"
+    id = Column(String(36), primary_key=True, default=uid)
+    adjudicator_upn = Column(String(255), nullable=False, unique=True, index=True)
+    contract_signed_at = Column(DateTime)  # legacy compatibility; use study contracts below
+    billing_status = Column(String(30), nullable=False, default="NOT_READY", index=True)  # Finance-only legacy field
+    billing_note = Column(Text)  # Finance-only legacy field
+    updated_by = Column(String(255))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class AdjudicatorStudyContract(Base):
+    __tablename__ = "adjudicator_study_contracts"
+    id = Column(String(36), primary_key=True, default=uid)
+    adjudicator_upn = Column(String(255), nullable=False, index=True)
+    study_code = Column(String(80), nullable=False, index=True)
+    contract_signed_at = Column(DateTime)
+    contract_reference = Column(String(255))
+    terms_of_reference_url = Column(String(1000))
+    effective_from = Column(DateTime)
+    effective_to = Column(DateTime)
+    status = Column(String(30), nullable=False, default="ACTIVE")
+    changed_by = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (UniqueConstraint("adjudicator_upn", "study_code", "effective_from", name="uq_adjudicator_study_contract"),)
+
+
+class AdjudicatorCommitteeMembership(Base):
+    __tablename__ = "adjudicator_committee_memberships"
+    id = Column(String(36), primary_key=True, default=uid)
+    adjudicator_upn = Column(String(255), nullable=False, index=True)
+    committee_name = Column(String(160), nullable=False)
+    membership_role = Column(String(30), nullable=False, default="MEMBER")
+    effective_from = Column(DateTime, nullable=False, default=datetime.utcnow)
+    effective_to = Column(DateTime)
+    status = Column(String(30), nullable=False, default="ACTIVE")
+    changed_by = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AdjudicationActivityLedger(Base):
+    """Immutable activity facts; no true subject identifier is stored or serialized."""
+    __tablename__ = "adjudication_activity_ledger"
+    id = Column(String(36), primary_key=True, default=uid)
+    adjudicator_upn = Column(String(255), nullable=False, index=True)
+    study_code = Column(String(80), nullable=False, index=True)
+    blinded_case_reference = Column(String(100), nullable=False, index=True)
+    subject_visit_id = Column(String(36), nullable=True, index=True)
+    role_served = Column(String(30), nullable=False)
+    event_type = Column(String(50), nullable=False)
+    event_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    billable = Column(Boolean, nullable=False, default=False)
+    status = Column(String(30), nullable=False, default="RECORDED")
+    source_record_id = Column(String(36))
+    idempotency_key = Column(String(255), nullable=False, unique=True)
+    metadata_json = Column(JSON, default=dict)
+    __table_args__ = (UniqueConstraint("adjudicator_upn", "blinded_case_reference", "role_served", "event_type", name="uq_activity_event"),)
+
+
+class BillingRateCard(Base):
+    __tablename__ = "billing_rate_cards"
+    id = Column(String(36), primary_key=True, default=uid)
+    study_code = Column(String(80), nullable=False, index=True)
+    role_served = Column(String(30), nullable=False)
+    event_type = Column(String(50), nullable=False)
+    currency = Column(String(3), nullable=False, default="USD")
+    rate_amount = Column(Integer, nullable=False)  # minor currency units
+    effective_from = Column(DateTime, nullable=False)
+    effective_to = Column(DateTime)
+    status = Column(String(30), nullable=False, default="ACTIVE")
+    approved_by = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BillingPeriod(Base):
+    __tablename__ = "billing_periods"
+    id = Column(String(36), primary_key=True, default=uid)
+    period_code = Column(String(40), nullable=False, unique=True)
+    starts_at = Column(DateTime, nullable=False)
+    ends_at = Column(DateTime, nullable=False)
+    due_at = Column(DateTime)
+    status = Column(String(30), nullable=False, default="OPEN")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BillingPayment(Base):
+    __tablename__ = "billing_payments"
+    id = Column(String(36), primary_key=True, default=uid)
+    adjudicator_upn = Column(String(255), nullable=False, index=True)
+    billing_period_id = Column(String(36), ForeignKey("billing_periods.id"), nullable=False)
+    amount_minor = Column(Integer, nullable=False)
+    currency = Column(String(3), nullable=False, default="USD")
+    paid_at = Column(DateTime)
+    payment_reference = Column(String(255))
+    status = Column(String(30), nullable=False, default="OUTSTANDING")
+    recorded_by = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class ConflictDeclaration(Base):
     __tablename__ = "admin_conflict_declarations"
     id = Column(String(36), primary_key=True, default=uid)

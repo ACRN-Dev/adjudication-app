@@ -127,6 +127,23 @@ if WORKFLOW_AVAILABLE:
 import traceback, logging
 logger = logging.getLogger("acrn.error")
 
+from fastapi.exceptions import RequestValidationError
+from services.auth_service import SENSITIVE_KEYS
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    # FastAPI's default handler echoes back the raw submitted value for invalid fields.
+    # Redact credential fields (password, reviewer_password, etc.) so they never leak
+    # into API responses, browser devtools or access logs.
+    safe_errors = []
+    for err in exc.errors():
+        err = dict(err)
+        loc = err.get("loc") or ()
+        if any(str(part).lower() in SENSITIVE_KEYS for part in loc):
+            err["input"] = "***REDACTED***"
+        safe_errors.append(err)
+    return JSONResponse(status_code=422, content={"detail": safe_errors})
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     err = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))

@@ -7,8 +7,12 @@ import {
   listPatients,
   getPatient,
   uploadRealtime,
+  uploadRealtimeBulk,
   approvePatient,
-  assignPatient
+  assignPatient,
+  listReferenceRanges,
+  upsertReferenceRange,
+  deactivateReferenceRange
 } from '../services/realtimeApi';
 
 const nav = [
@@ -18,6 +22,7 @@ const nav = [
   ['/monitor/reconstruction', 'Visit Reconstruction QC', 'GitCompare'],
   ['/monitor/longitudinal', 'Longitudinal Review', 'Activity'],
   ['/monitor/assignments', 'Assignments', 'UsersRound'],
+  ['/monitor/reference-ranges', 'Lab Reference Ranges', 'SlidersHorizontal'],
   ['/monitor/queries', 'Queries', 'MessagesSquare'],
   ['/monitor/audit', 'Audit History', 'ScrollText']
 ];
@@ -78,12 +83,23 @@ function Page({ title, desc, children }) {
   );
 }
 
+function ProgressBar({ pct, tone = 'info' }) {
+  const color = tone === 'error' ? '#dc2626' : tone === 'success' ? '#16a34a' : '#F07E26';
+  return (
+    <div style={{ background: '#e2e8f0', borderRadius: '999px', height: '8px', width: '100%', overflow: 'hidden' }}>
+      <div style={{ width: `${Math.max(0, Math.min(100, pct || 0))}%`, height: '100%', background: color, transition: 'width 0.2s ease' }} />
+    </div>
+  );
+}
+
 function Imports({ user, onNavigate }) {
   const [batches, setBatches] = useState([]);
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState('info');
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // Per-file upload progress, keyed by a synthetic id, for single + bulk uploads.
+  const [uploads, setUploads] = useState([]);
 
   const load = () =>
     listBatches(user)
@@ -105,27 +121,56 @@ function Imports({ user, onNavigate }) {
     return () => clearInterval(t);
   }, [batches]);
 
-  const handleFile = async (f) => {
-    if (!f) return;
-    if (!f.name.toLowerCase().endsWith('.csv')) {
-      setMsg('Invalid file format. Please upload a RealTime long-form .csv file.');
+  const handleFiles = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const invalid = files.filter((f) => !f.name.toLowerCase().endsWith('.csv'));
+    if (invalid.length) {
+      setMsg(`Invalid file format: ${invalid.map((f) => f.name).join(', ')}. Please upload RealTime long-form .csv files.`);
       setMsgType('error');
       return;
     }
     setBusy(true);
-    setMsg(`Streaming upload: ${f.name} (${(f.size / 1024 / 1024).toFixed(2)} MB)…`);
-    setMsgType('info');
+    setMsg('');
+    const uploadId = Date.now();
+    const entries = files.map((f, idx) => ({ key: `${uploadId}-${idx}`, name: f.name, size: f.size, pct: 0, status: 'uploading' }));
+    setUploads(entries);
+
     try {
-      const newBatch = await uploadRealtime(f, user, setMsg);
-      if (newBatch && newBatch.id) {
-        setBatches((prev) => [newBatch, ...prev.filter((x) => x.id !== newBatch.id)]);
+      if (files.length === 1) {
+        const f = files[0];
+        try {
+          const newBatch = await uploadRealtime(f, user, (pct) =>
+            setUploads((prev) => prev.map((u) => (u.key === entries[0].key ? { ...u, pct } : u)))
+          );
+          setUploads((prev) => prev.map((u) => (u.key === entries[0].key ? { ...u, pct: 100, status: 'queued' } : u)));
+          if (newBatch && newBatch.id) {
+            setBatches((prev) => [newBatch, ...prev.filter((x) => x.id !== newBatch.id)]);
+          }
+          setMsg(`Batch '${f.name}' accepted. Visit reconstruction pipeline active.`);
+          setMsgType('success');
+        } catch (x) {
+          setUploads((prev) => prev.map((u) => (u.key === entries[0].key ? { ...u, status: 'error', error: x.message } : u)));
+          setMsg(x.message || 'Import failed.');
+          setMsgType('error');
+        }
+      } else {
+        // Bulk upload: one request carrying every file; overall progress reflects total bytes sent.
+        const result = await uploadRealtimeBulk(
+          files,
+          user,
+          (pct) => setUploads((prev) => prev.map((u) => ({ ...u, pct })))
+        );
+        setUploads((prev) =>
+          prev.map((u, idx) => {
+            const item = result?.items?.[idx];
+            return { ...u, pct: 100, status: (item?.status || 'queued').toLowerCase(), error: item?.error };
+          })
+        );
+        setMsg(`Bulk upload complete: ${result.accepted}/${result.total} file(s) queued for processing.`);
+        setMsgType(result.accepted === result.total ? 'success' : 'error');
       }
-      setMsg(`Batch '${f.name}' accepted. Visit reconstruction pipeline active.`);
-      setMsgType('success');
       load();
-    } catch (x) {
-      setMsg(x.message || 'Import failed.');
-      setMsgType('error');
     } finally {
       setBusy(false);
     }
@@ -135,8 +180,7 @@ function Imports({ user, onNavigate }) {
     e.preventDefault();
     setDragging(false);
     if (busy) return;
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
+    if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
   };
 
   return (
@@ -154,17 +198,35 @@ function Imports({ user, onNavigate }) {
         onDrop={onDrop}
       >
         <I.Upload size={32} color={dragging ? '#F07E26' : '#64748b'} />
-        <b>{dragging ? 'Drop RealTime CSV snapshot here' : 'Import RealTime Patient Batch'}</b>
-        <span>Drag &amp; drop your approved long-form CSV snapshot here, or click to browse files</span>
+        <b>{dragging ? 'Drop RealTime CSV snapshot(s) here' : 'Import RealTime Patient Batch'}</b>
+        <span>Drag &amp; drop one or more approved long-form CSV snapshots here, or click to browse files</span>
         <input
           type="file"
           accept=".csv,text/csv"
+          multiple
           disabled={busy}
           onChange={(e) => {
-            if (e.target.files[0]) handleFile(e.target.files[0]);
+            if (e.target.files.length) handleFiles(e.target.files);
+            e.target.value = '';
           }}
         />
       </div>
+
+      {uploads.length > 0 && (
+        <div className="a-notice" style={{ marginBottom: '16px', display: 'grid', gap: '10px' }}>
+          {uploads.map((u) => (
+            <div key={u.key}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                <span>{u.name} {u.size ? `(${(u.size / 1024 / 1024).toFixed(2)} MB)` : ''}</span>
+                <span style={{ fontWeight: 600, color: u.status === 'error' ? '#dc2626' : u.status === 'queued' ? '#16a34a' : '#64748b' }}>
+                  {u.status === 'uploading' ? `${u.pct}%` : u.status === 'error' ? `Failed: ${u.error || 'error'}` : u.status}
+                </span>
+              </div>
+              <ProgressBar pct={u.pct} tone={u.status === 'error' ? 'error' : u.status === 'queued' ? 'success' : 'info'} />
+            </div>
+          ))}
+        </div>
+      )}
 
       {msg && (
         <div
@@ -188,7 +250,7 @@ function Imports({ user, onNavigate }) {
       )}
 
       <Table
-        cols={['Batch ID', 'Filename', 'Stage', 'Rows Processed', 'Participants', 'Visits', 'Excluded Blinded', 'Errors']}
+        cols={['Batch ID', 'Filename', 'Stage', 'Progress', 'Rows Processed', 'Participants', 'Visits', 'Excluded Blinded', 'Errors']}
         rows={(batches || []).map((b) => ({
           id: b.id,
           cells: [
@@ -202,6 +264,10 @@ function Imports({ user, onNavigate }) {
             >
               {b.status || '—'}
             </span>,
+            <div style={{ minWidth: '90px' }}>
+              <ProgressBar pct={b.progress_pct ?? 0} tone={b.status === 'FAILED' ? 'error' : b.status === 'MONITOR_QC_REQUIRED' ? 'success' : 'info'} />
+              <span style={{ fontSize: '10px', color: '#64748b' }}>{b.progress_pct ?? 0}%</span>
+            </div>,
             (b.rows_processed || 0).toLocaleString(),
             b.participants ?? 0,
             b.visits ?? 0,
@@ -432,23 +498,32 @@ function Patients({ user, onOpen }) {
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search blinded subject ID..." />
       </div>
       <Table
-        cols={['Blinded Subject', 'Study', 'Visits', 'First Visit', 'Latest Visit', 'Derived Onset', 'Severity', 'Completeness', 'Issues', 'QC']}
-        rows={data.items.map((p) => ({
-          id: p.id,
-          data: p,
-          cells: [
-            <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{p.subject_id}</span>,
-            <span className="study-badge">{p.study}</span>,
-            p.visit_count,
-            date(p.first_visit),
-            date(p.latest_visit),
-            p.onset_classification,
-            p.maximum_severity,
-            `${Math.round((p.packet_completeness || 0) * 100)}%`,
-            p.open_issues,
-            <span className={`badge-qc ${p.qc_status === 'ASSIGNED' || p.qc_status === 'QC_APPROVED' ? 'approved' : 'pending'}`}>{p.qc_status}</span>
-          ]
-        }))}
+        cols={['Blinded Subject', 'Study', 'Visits', 'First Visit', 'Latest Visit', 'Derived Onset', 'Severity', '% Data', '% History', 'Issues', 'QC']}
+        rows={data.items.map((p) => {
+          const labStatus = p.lab_issues?.status || 'NO_DATA';
+          const abnormalCount = p.lab_issues?.abnormal_count || 0;
+          const issueLabel = labStatus === 'ABNORMAL' ? `Abnormal (${abnormalCount})` : labStatus === 'NORMAL' ? 'Normal' : 'No Data';
+          const issueColor = labStatus === 'ABNORMAL' ? '#dc2626' : labStatus === 'NORMAL' ? '#16a34a' : '#94a3b8';
+          return {
+            id: p.id,
+            data: p,
+            cells: [
+              <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{p.subject_id}</span>,
+              <span className="study-badge">{p.study}</span>,
+              p.visit_count,
+              date(p.first_visit),
+              date(p.latest_visit),
+              p.onset_classification,
+              p.maximum_severity,
+              `${Math.round((p.packet_completeness || 0) * 100)}%`,
+              `${Math.round((p.history_completeness || 0) * 100)}%`,
+              <span title={p.open_issues ? `${p.open_issues} unresolved import issue(s)` : 'No unresolved import issues'} style={{ fontWeight: 700, color: issueColor }}>
+                {issueLabel}
+              </span>,
+              <span className={`badge-qc ${p.qc_status === 'ASSIGNED' || p.qc_status === 'QC_APPROVED' ? 'approved' : 'pending'}`}>{p.qc_status}</span>
+            ]
+          };
+        })}
         onOpen={onOpen}
       />
     </Page>
@@ -596,6 +671,100 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+function ReferenceRanges({ user }) {
+  const [state, setState] = useState({ analytes: [], items: [] });
+  const [msg, setMsg] = useState('');
+  const [form, setForm] = useState({ analyte: '', site_code: '', lab_code: '', unit: '', low: '', high: '' });
+
+  const load = () => listReferenceRanges(user).then(setState).catch((e) => setMsg(e.message));
+  useEffect(() => {
+    load();
+  }, []);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.analyte || (form.low === '' && form.high === '')) {
+      setMsg('Select an analyte and provide at least a low or high bound.');
+      return;
+    }
+    try {
+      await upsertReferenceRange(
+        {
+          analyte: form.analyte,
+          site_code: form.site_code || null,
+          lab_code: form.lab_code || null,
+          unit: form.unit || null,
+          low: form.low === '' ? null : Number(form.low),
+          high: form.high === '' ? null : Number(form.high)
+        },
+        user
+      );
+      setMsg('Reference range saved.');
+      setForm({ analyte: '', site_code: '', lab_code: '', unit: '', low: '', high: '' });
+      load();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  return (
+    <Page title="Lab Reference Ranges" desc="Configure per-site / per-lab Normal vs. Abnormal thresholds used by the Issues column. Leave Site/Lab blank to set a study-wide default.">
+      <form onSubmit={submit} className="monitor-toolbar" style={{ flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+        <select value={form.analyte} onChange={(e) => setForm({ ...form, analyte: e.target.value })}>
+          <option value="">-- Analyte --</option>
+          {state.analytes.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
+        <input placeholder="Site code (optional)" value={form.site_code} onChange={(e) => setForm({ ...form, site_code: e.target.value })} />
+        <input placeholder="Lab code (optional)" value={form.lab_code} onChange={(e) => setForm({ ...form, lab_code: e.target.value })} />
+        <input placeholder="Unit" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} />
+        <input placeholder="Low" type="number" step="any" value={form.low} onChange={(e) => setForm({ ...form, low: e.target.value })} style={{ width: '90px' }} />
+        <input placeholder="High" type="number" step="any" value={form.high} onChange={(e) => setForm({ ...form, high: e.target.value })} style={{ width: '90px' }} />
+        <button className="a-primary" type="submit">
+          Save Range
+        </button>
+      </form>
+
+      {msg && (
+        <div className="a-notice" style={{ marginBottom: '16px' }}>
+          <I.Info size={18} />
+          <span>{msg}</span>
+        </div>
+      )}
+
+      <Table
+        cols={['Analyte', 'Scope', 'Unit', 'Low', 'High', 'Active', 'Action']}
+        rows={state.items.map((r) => ({
+          id: r.id,
+          cells: [
+            r.analyte,
+            r.site_code ? `Site: ${r.site_code}${r.lab_code ? ` / Lab: ${r.lab_code}` : ''}` : 'Study-wide default',
+            r.unit || '—',
+            r.low ?? '—',
+            r.high ?? '—',
+            <span style={{ color: r.is_active ? '#16a34a' : '#94a3b8', fontWeight: 700 }}>{r.is_active ? 'Active' : 'Inactive'}</span>,
+            r.is_active ? (
+              <button
+                className="a-link"
+                onClick={() => {
+                  if (confirm('Deactivate this reference range?')) deactivateReferenceRange(r.id, user).then(load);
+                }}
+              >
+                Deactivate
+              </button>
+            ) : (
+              '—'
+            )
+          ]
+        }))}
+      />
+    </Page>
+  );
+}
+
 export default function MonitorPortal({ user, onLogout }) {
   const [path, setPath] = useState(location.pathname);
   const [selected, setSelected] = useState(null);
@@ -618,6 +787,8 @@ export default function MonitorPortal({ user, onLogout }) {
     <Assignments user={user} onOpen={open} />
   ) : path === '/monitor/patients' || path === '/monitor/longitudinal' ? (
     <Patients user={user} onOpen={open} />
+  ) : path === '/monitor/reference-ranges' ? (
+    <ReferenceRanges user={user} />
   ) : (
     <Page
       title="Monitor / QC Dashboard"

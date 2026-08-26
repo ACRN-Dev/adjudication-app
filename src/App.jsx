@@ -11,6 +11,7 @@ import RecusalModal from './components/RecusalModal';
 import DataQueryModal from './components/DataQueryModal';
 import CommitteeDashboard from './components/CommitteeDashboard';
 import LoginPage from './components/LoginPage';
+import ForceChangePassword from './components/ForceChangePassword';
 import AdminPortal from './admin/AdminPortal';
 import MonitorPortal from './monitor/MonitorPortal';
 import ChairpersonPortal from './chairperson/ChairpersonPortal';
@@ -54,7 +55,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated || user?.portal !== 'adjudicator') return;
+    if (!isAuthenticated || user?.must_change_password || user?.portal !== 'adjudicator') return;
     let cancelled = false;
     listAssigned(user).then(items => Promise.all(items.map(x => getAssigned(x.id, user))))
       .then(items => { if (!cancelled) setCases(items.map(item => asWorkbenchCase(item, user))); })
@@ -123,6 +124,16 @@ export default function App() {
 
   if (!isAuthenticated) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  if (user?.must_change_password) {
+    return (
+      <ForceChangePassword
+        user={user}
+        onChanged={(updatedUser) => setUser(updatedUser)}
+        onLogout={handleLogout}
+      />
+    );
   }
 
   if (currentPath.startsWith('/admin')) {

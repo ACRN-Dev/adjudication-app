@@ -29,6 +29,12 @@ RULES = [
  ("AEDF", (r"absent end.diastolic",)), ("REDF", (r"reversed end.diastolic",)), ("AFI", (r"amniotic fluid index", r"^afi$")),
  ("DELIVERY_DATE", (r"date of delivery", r"delivery date")), ("GA_AT_DELIVERY", (r"gestational age at delivery",)),
  ("DELIVERY_OUTCOME", (r"delivery outcome",)), ("MATERNAL_OUTCOME", (r"maternal outcome",)), ("NEONATAL_OUTCOME", (r"neonatal outcome",)),
+ ("MEDICATION_NAME", (r"medication name", r"drug name", r"concomitant medication", r"name of (?:the )?medication")),
+ ("MEDICATION_DOSE", (r"medication dose", r"\bdose\b", r"dosage")),
+ ("MEDICATION_ROUTE", (r"route of administration", r"\broute\b")),
+ ("MEDICATION_INDICATION", (r"indication for medication", r"reason for (?:medication|drug)")),
+ ("MEDICATION_START_DATE", (r"medication start date", r"start date.*medication")),
+ ("MEDICATION_ONGOING", (r"medication ongoing", r"is.*medication.*ongoing")),
 ]
 RULES=[(canonical,tuple(re.compile(p,re.I) for p in patterns)) for canonical,patterns in RULES]
 

@@ -27,6 +27,11 @@ LOCK_MINUTES = int(os.getenv("LOGIN_LOCK_MINUTES", "15"))
 DEFAULT_PASSWORD_ENV = "DEMO_DEFAULT_PASSWORD"
 AUTH_COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", "false").lower() == "true"
 AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE") or ("none" if AUTH_COOKIE_SECURE else "lax")
+PASSWORD_MIN_LENGTH = int(os.getenv("PASSWORD_MIN_LENGTH", "12"))
+# Endpoints reachable while must_change_password is set, so a user can escape the forced-change gate.
+PASSWORD_CHANGE_EXEMPT_PATHS = {"/api/auth/me", "/api/auth/logout", "/api/auth/change-password"}
+# Keys that must never be echoed into logs, audit details or error responses.
+SENSITIVE_KEYS = {"password", "reviewer_password", "current_password", "new_password", "password_hash", "reviewer_signature", "signature"}
 
 DEMO_ACCOUNTS = [
     ("admin@acrnhealth.com", "ACRN Demo Administrator", ROLE_ADMIN, "ADMIN"),
@@ -70,6 +75,33 @@ def verify_password(password: str, stored_hash: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
 
 
+def redact(value):
+    """Recursively strip sensitive credential values before logging/returning them."""
+    if isinstance(value, dict):
+        return {k: ("***REDACTED***" if k.lower() in SENSITIVE_KEYS else redact(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact(v) for v in value]
+    return value
+
+
+def validate_password_strength(password: str, email: str = "") -> None:
+    if not password or len(password) < PASSWORD_MIN_LENGTH:
+        raise HTTPException(422, f"Password must be at least {PASSWORD_MIN_LENGTH} characters long.")
+    classes = sum([
+        any(c.islower() for c in password),
+        any(c.isupper() for c in password),
+        any(c.isdigit() for c in password),
+        any(not c.isalnum() for c in password),
+    ])
+    if classes < 3:
+        raise HTTPException(422, "Password must include at least 3 of: lowercase, uppercase, digit, symbol.")
+    local_part = normalize_email(email).split("@")[0]
+    if local_part and local_part in password.lower():
+        raise HTTPException(422, "Password must not contain your email address.")
+    if password.lower() == default_password().lower():
+        raise HTTPException(422, "Password must not match the shared default password.")
+
+
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -102,7 +134,8 @@ def audit_auth(db: Session, event_type: str, outcome: str = "SUCCESS", actor: Op
 
 
 def seed_demo_accounts(db: Session, force_password_reset: bool = False) -> int:
-    must_change = os.getenv("DEMO_FORCE_PASSWORD_CHANGE", "false").lower() == "true"
+    # Default to true: shared demo credentials must never persist past first login.
+    must_change = os.getenv("DEMO_FORCE_PASSWORD_CHANGE", "true").lower() == "true"
     created = 0
     for email, display_name, role, portal_role in DEMO_ACCOUNTS:
         normalized = normalize_email(email)
@@ -237,7 +270,7 @@ def logout(db: Session, token: Optional[str], response: Response, request: Reque
     response.delete_cookie(AUTH_COOKIE, path="/", secure=AUTH_COOKIE_SECURE, samesite=AUTH_COOKIE_SAMESITE)
 
 
-def current_user(acrn_demo_session: Optional[str] = Cookie(None), db: Session = Depends(get_db)) -> PortalUser:
+def current_user(request: Request, acrn_demo_session: Optional[str] = Cookie(None), db: Session = Depends(get_db)) -> PortalUser:
     if not acrn_demo_session:
         raise HTTPException(401, "Authentication required")
     session = db.query(AuthSession).filter_by(token_hash=_hash_token(acrn_demo_session), revoked_at=None).first()
@@ -246,7 +279,25 @@ def current_user(acrn_demo_session: Optional[str] = Cookie(None), db: Session = 
     user = db.get(PortalUser, session.user_id)
     if not user or user.status != ACTIVE or (user.locked_until and user.locked_until > datetime.utcnow()):
         raise HTTPException(401, "Authentication required")
+    if user.must_change_password and request is not None and request.url.path not in PASSWORD_CHANGE_EXEMPT_PATHS:
+        raise HTTPException(403, detail={"code": "PASSWORD_CHANGE_REQUIRED", "message": "You must set a new password before continuing."})
     return user
+
+
+def change_password(db: Session, user: PortalUser, current_password: str, new_password: str, request: Optional[Request] = None) -> dict:
+    if not user.password_hash or not verify_password(current_password, user.password_hash):
+        audit_auth(db, "PASSWORD_CHANGE_FAILURE", "FAILURE", actor=user, affected=user, request=request, reason="Current password incorrect")
+        db.commit()
+        raise HTTPException(401, "Current password is incorrect.")
+    validate_password_strength(new_password, user.email)
+    if verify_password(new_password, user.password_hash):
+        raise HTTPException(422, "New password must differ from your current password.")
+    user.password_hash = hash_password(new_password)
+    user.must_change_password = False
+    user.updated_at = datetime.utcnow()
+    audit_auth(db, "PASSWORD_CHANGED", "SUCCESS", actor=user, affected=user, request=request)
+    db.commit()
+    return _public_user(user)
 
 
 def identity(user: PortalUser = Depends(current_user)) -> AuthIdentity:

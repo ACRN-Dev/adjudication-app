@@ -9,10 +9,11 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Any
 from datetime import datetime
 import hashlib
+from services.case_finalization import finalize_case_pdf, record_determination_activity
 
 from database import get_db
 from models.canonical import (
-    Participant, AdjudicationRecord, CommitteeDecision, SubjectAssignment, AuditEvent, ReviewerRole,
+    Participant, AdjudicationVisit, AdjudicationRecord, CommitteeDecision, SubjectAssignment, AuditEvent, ReviewerRole,
     DiagnosisCode, OnsetClass, SeverityGrade, CertaintyLevel, AdjudicationStatus
 )
 
@@ -28,6 +29,8 @@ class ReviewerCSubmissionRequest(BaseModel):
     severity: SeverityGrade
     certainty: CertaintyLevel
     rationale: str = Field(min_length=5, description="Mandatory clinical rationale")
+    comment: Optional[str] = None
+    other_rationale: Optional[str] = None
     visit_number: int = 1
 
 
@@ -92,9 +95,21 @@ def submit_reviewer_c(subject_id: str, req: ReviewerCSubmissionRequest, db: Sess
     if not participant:
         raise HTTPException(status_code=404, detail="Participant not found.")
 
-    records = db.query(AdjudicationRecord).filter_by(participant_id=participant.id).all()
+    visit = db.query(AdjudicationVisit).filter_by(
+        participant_id=participant.id, visit_number=req.visit_number
+    ).first()
+    if not visit:
+        raise HTTPException(status_code=404, detail="The subject visit does not exist.")
+
+    records = db.query(AdjudicationRecord).filter_by(visit_id=visit.id).all()
     rec_a = next((r for r in records if r.reviewer_role == ReviewerRole.REVIEWER_A), None)
     rec_b = next((r for r in records if r.reviewer_role == ReviewerRole.REVIEWER_B), None)
+    if not rec_a or not rec_b or not rec_a.signed or not rec_b.signed:
+        raise HTTPException(status_code=409, detail="Reviewer C is available only after both A and B have signed this visit.")
+    if rec_a.diagnosis == rec_b.diagnosis:
+        raise HTTPException(status_code=409, detail="Reviewer A and B agree; Reviewer C escalation is not permitted.")
+    if req.diagnosis == DiagnosisCode.OTHER and (not req.other_rationale or not req.other_rationale.strip()):
+        raise HTTPException(status_code=422, detail="other_rationale is mandatory when Reviewer C selects Other.")
 
     # Reviewer C must be different from both A and B
     assignment = db.query(SubjectAssignment).filter_by(participant_id=participant.id).first()
@@ -132,11 +147,12 @@ def submit_reviewer_c(subject_id: str, req: ReviewerCSubmissionRequest, db: Sess
 
     # Save Reviewer C record
     rec_c = db.query(AdjudicationRecord).filter_by(
-        participant_id=participant.id, reviewer_role=ReviewerRole.REVIEWER_C
+        visit_id=visit.id, reviewer_role=ReviewerRole.REVIEWER_C
     ).first()
     if not rec_c:
         rec_c = AdjudicationRecord(
             participant_id=participant.id,
+            visit_id=visit.id,
             reviewer_role=ReviewerRole.REVIEWER_C,
             reviewer_upn=req.reviewer_upn,
             reviewer_name=req.reviewer_name,
@@ -150,14 +166,20 @@ def submit_reviewer_c(subject_id: str, req: ReviewerCSubmissionRequest, db: Sess
     rec_c.severity = req.severity
     rec_c.certainty = req.certainty
     rec_c.rationale = req.rationale
+    rec_c.comment = req.comment
+    rec_c.other_rationale = req.other_rationale.strip() if req.other_rationale else None
     rec_c.signed = True
     rec_c.signed_at = datetime.utcnow()
+    rec_c.signature_hash = hashlib.sha256(
+        f"{subject_id}|{req.reviewer_upn}|{req.diagnosis.value}|{req.visit_number}|{rec_c.signed_at.isoformat()}".encode()
+    ).hexdigest()
+    record_determination_activity(db, participant, visit, rec_c)
 
     if is_three_way_divergent:
-        participant.status = AdjudicationStatus.THREE_WAY_DIVERGENT
-        concordance_state = "THREE_WAY_DIVERGENT"
+        participant.status = AdjudicationStatus.FINALIZED
+        concordance_state = "RESOLVED_BY_REVIEWER_C"
     else:
-        participant.status = AdjudicationStatus.COMMITTEE_PENDING
+        participant.status = AdjudicationStatus.RESOLVED_BY_MAJORITY
         concordance_state = "CONCORDANT_WITH_A" if matches_a else "CONCORDANT_WITH_B"
 
     # Audit event for Reviewer C submission
@@ -180,6 +202,12 @@ def submit_reviewer_c(subject_id: str, req: ReviewerCSubmissionRequest, db: Sess
         timestamp=datetime.utcnow(),
     ))
 
+    db.flush()
+    try:
+        artifact = finalize_case_pdf(db, participant, visit, rec_c)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=f"Reviewer C outcome was not finalized because SharePoint filing failed: {exc}")
     db.commit()
     return {
         "status": "success",
@@ -188,6 +216,8 @@ def submit_reviewer_c(subject_id: str, req: ReviewerCSubmissionRequest, db: Sess
         "participant_status": participant.status.value if hasattr(participant.status, "value") else str(participant.status),
         "three_way_divergent": is_three_way_divergent,
         "message": "Reviewer C determination submitted successfully."
+        ,"pdf_filed": True
+        ,"pdf_sha256": artifact.pdf_sha256
     }
 
 
@@ -200,13 +230,24 @@ def lock_committee_decision(subject_id: str, req: CommitteeLockRequest, db: Sess
     if not participant:
         raise HTTPException(status_code=404, detail="Participant not found.")
 
+    if req.final_diagnosis == DiagnosisCode.OTHER:
+        raise HTTPException(
+            status_code=422,
+            detail="Other may only be submitted through the Reviewer C escalation path with mandatory rationale.",
+        )
+
     if not req.quorum_met or req.members_present < 3:
         raise HTTPException(
             status_code=400,
             detail="Quorum must be met (minimum 3 members present) to lock committee decision."
         )
 
-    decision = db.query(CommitteeDecision).filter_by(participant_id=participant.id).first()
+    visit = db.query(AdjudicationVisit).filter_by(
+        participant_id=participant.id, visit_number=req.visit_number
+    ).first()
+    if not visit:
+        raise HTTPException(status_code=404, detail="The subject visit does not exist.")
+    decision = db.query(CommitteeDecision).filter_by(visit_id=visit.id).first()
     if decision and decision.locked:
         raise HTTPException(
             status_code=409,
@@ -217,7 +258,10 @@ def lock_committee_decision(subject_id: str, req: CommitteeLockRequest, db: Sess
     sig_hash = hashlib.sha256(raw_sig.encode()).hexdigest()
 
     if not decision:
-        decision = CommitteeDecision(participant_id=participant.id, chair_rationale=req.chair_rationale)
+        decision = CommitteeDecision(
+            participant_id=participant.id, visit_id=visit.id,
+            visit_number=req.visit_number, chair_rationale=req.chair_rationale,
+        )
         db.add(decision)
 
 

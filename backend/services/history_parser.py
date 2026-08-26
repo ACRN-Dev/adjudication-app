@@ -10,7 +10,10 @@ HISTORY_DOMAINS = {
     "Family history": "family",
     "Allergies": "allergy_surgery",
     "Social History": "social",
-    "Demographics": "baseline"
+    "Demographics": "baseline",
+    "Concomitant Medications": "medications",
+    "Prior Medications": "medications",
+    "Medications": "medications",
 }
 
 def is_history_form(form_title):

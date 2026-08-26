@@ -26,6 +26,10 @@ Outstanding external dependency:
 import abc
 import os
 import hashlib
+import json
+from urllib.parse import quote, urlencode, urlparse
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 from datetime import datetime
 from pathlib import Path
 
@@ -59,8 +63,7 @@ class ETMFAdapter(abc.ABC):
     def _naming(study: str, blinded_id: str, subject_id: str, ts: datetime) -> str:
         """Deterministic filename per naming convention SOP-ADJ-002 §7."""
         study_safe = study.replace(" ", "_").replace("/", "-")
-        ts_str = ts.strftime("%Y%m%dT%H%M%SZ")
-        return f"FORM_ADJ_15A_{blinded_id}_{ts_str}.pdf"
+        return f"FORM_ADJ_15A_{blinded_id}.pdf"
 
     @staticmethod
     def _path_parts(study: str, blinded_id: str) -> tuple[str, str]:
@@ -155,17 +158,67 @@ class SharePointAdapter(ETMFAdapter):
     Raises NotImplementedError at runtime until the dependency is wired.
     """
 
-    def write(self, subject_id, blinded_id, study, pdf_bytes, timestamp=None):
-        raise NotImplementedError(
-            "SharePointAdapter is not yet configured. "
-            "Set ETMF_ADAPTER=local for development/test. "
-            "To enable SharePoint, provide ETMF_SHAREPOINT_SITE_URL, "
-            "ETMF_SHAREPOINT_LIBRARY, and Azure app credentials. "
-            "See backend/services/etmf_adapter.py for full requirements."
+    def __init__(self):
+        required = ["ETMF_SHAREPOINT_SITE_URL", "ETMF_SHAREPOINT_LIBRARY", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID"]
+        missing = [name for name in required if not os.getenv(name)]
+        if missing:
+            raise RuntimeError(f"SharePoint configuration missing: {', '.join(missing)}")
+        self.site_url = os.environ["ETMF_SHAREPOINT_SITE_URL"].rstrip("/")
+        self.library = os.environ["ETMF_SHAREPOINT_LIBRARY"]
+        self._token = None
+
+    def _access_token(self):
+        if self._token:
+            return self._token
+        token_url = f"https://login.microsoftonline.com/{os.environ['AZURE_TENANT_ID']}/oauth2/v2.0/token"
+        body = urlencode({"client_id": os.environ["AZURE_CLIENT_ID"], "client_secret": os.environ["AZURE_CLIENT_SECRET"], "scope": "https://graph.microsoft.com/.default", "grant_type": "client_credentials"}).encode()
+        with urlopen(Request(token_url, data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}), timeout=30) as response:
+            self._token = json.loads(response.read())["access_token"]
+        return self._token
+
+    def _request(self, url, method="GET", body=None, content_type="application/json"):
+        headers = {"Authorization": f"Bearer {self._access_token()}", "Content-Type": content_type}
+        payload = json.dumps(body).encode() if isinstance(body, dict) else body
+        with urlopen(Request(url, data=payload, headers=headers, method=method), timeout=60) as response:
+            return json.loads(response.read())
+
+    def _drive_id(self):
+        parsed = urlparse(self.site_url)
+        site = self._request(f"https://graph.microsoft.com/v1.0/sites/{parsed.hostname}:{parsed.path}")
+        drives = self._request(f"https://graph.microsoft.com/v1.0/sites/{site['id']}/drives")["value"]
+        drive = next((item for item in drives if item["name"].lower() == self.library.lower()), None)
+        if not drive:
+            raise RuntimeError(f"SharePoint document library not found: {self.library}")
+        return drive["id"]
+
+    def _upload(self, folder, filename, content):
+        drive_id = self._drive_id()
+        parent = ""
+        for part in folder.split("/"):
+            endpoint = (
+                f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/children"
+                if not parent else
+                f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{quote(parent, safe='/')}:/children"
+            )
+            try:
+                self._request(endpoint, method="POST", body={"name": part, "folder": {}, "@microsoft.graph.conflictBehavior": "fail"})
+            except HTTPError as exc:
+                if exc.code != 409:
+                    raise
+            parent = f"{parent}/{part}" if parent else part
+        path = quote(f"{folder}/{filename}", safe="/")
+        result = self._request(
+            f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{path}:/content",
+            method="PUT", body=content, content_type="application/pdf",
         )
+        return result.get("webUrl") or result["id"]
+
+    def write(self, subject_id, blinded_id, study, pdf_bytes, timestamp=None):
+        filename = self._naming(study, blinded_id, subject_id, timestamp or datetime.utcnow())
+        return self._upload(f"{study}/{blinded_id}", filename, pdf_bytes)
 
     def write_meeting_report(self, meeting_id, meeting_title, study, report_bytes, timestamp=None):
-        raise NotImplementedError("SharePointAdapter is not yet configured.")
+        return self._upload(f"{study}/MEETINGS", f"MEETING_REPORT_{meeting_id}.pdf", report_bytes)
 
 
 

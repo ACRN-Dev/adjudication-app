@@ -61,6 +61,18 @@ export default function PatientHistoryPanel({ caseData }) {
     return 0;
   });
 
+  // Group Medications (Prior & Concomitant Medications form) by instance, pulled straight from source data.
+  const medicationsRaw = history.medications || [];
+  const medicationInstances = {};
+  medicationsRaw.forEach(f => {
+    if (f.instance !== null) {
+      if (!medicationInstances[f.instance]) medicationInstances[f.instance] = { instance: f.instance, amber: false };
+      medicationInstances[f.instance][f.key] = f.value;
+      if (f.amber_flag) medicationInstances[f.instance].amber = true;
+    }
+  });
+  const medications = Object.values(medicationInstances);
+
   const getVal = (domain, key) => {
     const f = (history[domain] || []).find(x => x.key === key);
     return f ? { val: f.value, amber: f.amber_flag, reason: f.flag_reason } : { val: null };
@@ -116,6 +128,12 @@ export default function PatientHistoryPanel({ caseData }) {
                   </div>
                 );
               })}
+              {typeof risk_summary.stillbirths === 'number' && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #e2e8f0', paddingBottom: '4px' }}>
+                  <span style={{ color: '#475569' }}>Prior stillbirth</span>
+                  <TriStateBadge value={risk_summary.stillbirths > 0 ? `Yes (${risk_summary.stillbirths})` : 'No'} />
+                </div>
+              )}
             </div>
           </div>
 
@@ -144,6 +162,37 @@ export default function PatientHistoryPanel({ caseData }) {
                     {mc.amber && <div style={{ marginTop: '4px' }}><AmberFlag reason="Incomplete detail" /></div>}
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* Medications — pulled straight from source RealTime data (Prior & Concomitant Medications form) */}
+          <div style={{ gridColumn: '1 / -1' }}>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <I.Pill size={16} color="#7c3aed" /> Medications
+            </h3>
+            {medications.length === 0 ? (
+              <span style={{ fontSize: '12px', color: '#64748b' }}>No prior or concomitant medications reported in source data.</span>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {medications.map(m => {
+                  const name = m.medication_name || m.drug_name || m.name_of_medication || 'Unspecified medication';
+                  const skip = new Set(['instance', 'amber', 'medication_name', 'drug_name', 'name_of_medication']);
+                  const details = Object.entries(m).filter(([k, v]) => !skip.has(k) && v != null && v !== '');
+                  return (
+                    <div key={m.instance} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 12px', fontSize: '12px' }}>
+                      <strong style={{ color: '#0f172a' }}>{name}</strong>
+                      {details.length > 0 && (
+                        <div style={{ color: '#475569', display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '4px' }}>
+                          {details.map(([k, v]) => (
+                            <span key={k}>{k.replace(/_/g, ' ')}: {String(v)}</span>
+                          ))}
+                        </div>
+                      )}
+                      {m.amber && <div style={{ marginTop: '4px' }}><AmberFlag reason="Incomplete detail" /></div>}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

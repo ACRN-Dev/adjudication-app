@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import (
     Column, String, Integer, Float, Boolean,
-    DateTime, Text, ForeignKey, JSON, Enum as SAEnum
+    DateTime, Text, ForeignKey, JSON, Enum as SAEnum, UniqueConstraint, CheckConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -74,13 +74,11 @@ class ReviewerRole(str, enum.Enum):
 
 
 class DiagnosisCode(str, enum.Enum):
-    PREECLAMPSIA = "Pre-eclampsia"
-    GESTATIONAL_HTN = "Gestational hypertension"
-    CHRONIC_HTN = "Chronic HTN"
-    SUPERIMPOSED_PE = "Superimposed PE"
+    PE = "PE"
+    SEVERE_PE = "Severe PE"
     ECLAMPSIA = "Eclampsia"
-    HELLP = "HELLP Syndrome"
-    NOT_PE = "Not PE"
+    HELLP = "HELLP"
+    OTHER = "Other"
 
 
 class OnsetClass(str, enum.Enum):
@@ -186,10 +184,65 @@ class Participant(Base):
                               cascade="all, delete-orphan")
     adjudication_records = relationship("AdjudicationRecord", back_populates="participant",
                                         cascade="all, delete-orphan")
-    committee_decision = relationship("CommitteeDecision", back_populates="participant",
-                                      uselist=False, cascade="all, delete-orphan")
+    committee_decisions = relationship("CommitteeDecision", back_populates="participant",
+                                       cascade="all, delete-orphan")
     subject_assignment = relationship("SubjectAssignment", back_populates="participant",
                                       uselist=False, cascade="all, delete-orphan")
+    visits = relationship("AdjudicationVisit", back_populates="participant",
+                          cascade="all, delete-orphan", order_by="AdjudicationVisit.visit_number")
+
+
+class AdjudicationVisit(Base):
+    """The adjudication unit: one independently adjudicated visit per subject."""
+    __tablename__ = "adjudication_visits"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    participant_id = Column(UUID(as_uuid=True), ForeignKey("participants.id"), nullable=False, index=True)
+    visit_number = Column(Integer, nullable=False)
+    visit_code = Column(String(40), nullable=False)
+    visit_date = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    participant = relationship("Participant", back_populates="visits")
+    measurement_dates = relationship(
+        "VisitMeasurementDate", back_populates="visit", cascade="all, delete-orphan",
+        order_by="VisitMeasurementDate.measured_at",
+    )
+    adjudication_records = relationship("AdjudicationRecord", back_populates="visit")
+    committee_decision = relationship("CommitteeDecision", back_populates="visit", uselist=False)
+    __table_args__ = (
+        UniqueConstraint("participant_id", "visit_number", name="uq_subject_visit_number"),
+        UniqueConstraint("participant_id", "visit_code", name="uq_subject_visit_code"),
+        CheckConstraint("visit_number > 0", name="ck_visit_number_positive"),
+    )
+
+
+class VisitMeasurementDate(Base):
+    """Dated visit evidence retained and sequenced by the actual measurement timestamp."""
+    __tablename__ = "visit_measurement_dates"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    visit_id = Column(UUID(as_uuid=True), ForeignKey("adjudication_visits.id"), nullable=False, index=True)
+    measurement_type = Column(String(50), nullable=False)
+    measured_at = Column(DateTime, nullable=False, index=True)
+    source_reference = Column(String(255))
+    visit = relationship("AdjudicationVisit", back_populates="measurement_dates")
+    __table_args__ = (
+        UniqueConstraint("visit_id", "measurement_type", "measured_at", name="uq_visit_measurement_timestamp"),
+    )
+
+
+class SignedCaseArtifact(Base):
+    """Exactly one immutable signed PDF output for a subject visit."""
+    __tablename__ = "signed_case_artifacts"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    participant_id = Column(UUID(as_uuid=True), ForeignKey("participants.id"), nullable=False, index=True)
+    visit_id = Column(UUID(as_uuid=True), ForeignKey("adjudication_visits.id"), nullable=False, unique=True)
+    determination_record_id = Column(UUID(as_uuid=True), ForeignKey("adjudication_records.id"), nullable=False)
+    pdf_sha256 = Column(String(64), nullable=False)
+    storage_provider = Column(String(30), nullable=False)
+    storage_reference = Column(String(1000), nullable=False)
+    filed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 # ── Canonical Field ────────────────────────────────────────────────────────
@@ -329,6 +382,7 @@ class AdjudicationRecord(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     participant_id = Column(UUID(as_uuid=True), ForeignKey("participants.id"), nullable=False)
+    visit_id = Column(UUID(as_uuid=True), ForeignKey("adjudication_visits.id"), nullable=False, index=True)
     visit_number = Column(Integer, default=1, index=True)
 
     reviewer_role = Column(SAEnum(ReviewerRole), nullable=False)
@@ -344,6 +398,8 @@ class AdjudicationRecord(Base):
     certainty = Column(SAEnum(CertaintyLevel))
     differential_diagnosis = Column(String(500))
     rationale = Column(Text)
+    comment = Column(Text)
+    other_rationale = Column(Text)
     narrative_id = Column(UUID(as_uuid=True), ForeignKey("narratives.id"))
 
     # 21 CFR Part 11 e-signature
@@ -355,6 +411,14 @@ class AdjudicationRecord(Base):
     submitted_at = Column(DateTime, default=datetime.utcnow)
 
     participant = relationship("Participant", back_populates="adjudication_records")
+    visit = relationship("AdjudicationVisit", back_populates="adjudication_records")
+    __table_args__ = (
+        UniqueConstraint("visit_id", "reviewer_role", name="uq_visit_reviewer_role"),
+        CheckConstraint(
+            "diagnosis <> 'OTHER' OR (reviewer_role = 'REVIEWER_C' AND other_rationale IS NOT NULL AND length(trim(other_rationale)) > 0)",
+            name="ck_other_reviewer_c_rationale",
+        ),
+    )
 
 
 # ── Committee Decision ─────────────────────────────────────────────────────
@@ -368,7 +432,8 @@ class CommitteeDecision(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     participant_id = Column(UUID(as_uuid=True), ForeignKey("participants.id"), nullable=False,
-                            unique=True)
+                            index=True)
+    visit_id = Column(UUID(as_uuid=True), ForeignKey("adjudication_visits.id"), nullable=False, unique=True)
     visit_number = Column(Integer, default=1)
 
     adopted_reviewer = Column(SAEnum(ReviewerRole))  # REVIEWER_A, REVIEWER_B, REVIEWER_C, or CHAIR
@@ -403,7 +468,14 @@ class CommitteeDecision(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    participant = relationship("Participant", back_populates="committee_decision")
+    participant = relationship("Participant", back_populates="committee_decisions")
+    visit = relationship("AdjudicationVisit", back_populates="committee_decision")
+    __table_args__ = (
+        CheckConstraint(
+            "final_diagnosis <> 'OTHER' OR (adopted_reviewer = 'REVIEWER_C' AND reviewer_c_rationale IS NOT NULL AND length(trim(reviewer_c_rationale)) > 0)",
+            name="ck_committee_other_from_reviewer_c",
+        ),
+    )
 
 
 # ── Subject Assignment (adjudicator stickiness + pairing) ─────────────────────
@@ -455,6 +527,10 @@ class CommitteeMeeting(Base):
     convened_at = Column(DateTime, default=datetime.utcnow)
     chair_upn = Column(String(255), nullable=False)
     chair_name = Column(String(255))
+    delegated_to_upn = Column(String(255), nullable=True)
+    delegated_by_upn = Column(String(255), nullable=True)
+    delegation_note = Column(Text, nullable=True)
+    delegated_at = Column(DateTime, nullable=True)
     attendees = Column(JSON, default=list)  # list of attendee strings or objects
     quorum_met = Column(Boolean, default=True)
     minutes = Column(Text)

@@ -134,3 +134,26 @@ class LongitudinalAuditEvent(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4); timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
     actor = Column(String(255), nullable=False); actor_role = Column(String(80)); action = Column(String(80), nullable=False, index=True)
     entity_type = Column(String(50)); entity_id = Column(String(80)); safe_details = Column(JSON, default=dict); record_hash = Column(String(64), nullable=False)
+
+
+class LabReferenceRange(Base):
+    """Configurable Normal/Abnormal thresholds for a lab analyte.
+
+    A row with site_code=NULL is the global default for that analyte; a row
+    with site_code set overrides the default for that site only. lab_code
+    optionally scopes a range to a specific reporting laboratory when a site
+    uses more than one lab with different assay ranges.
+    """
+    __tablename__ = "lab_reference_ranges"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    analyte = Column(String(80), nullable=False, index=True)  # canonical_variable, e.g. PLATELETS, CREATININE, AST
+    site_code = Column(String(30), nullable=True, index=True)  # NULL = global default
+    lab_code = Column(String(60), nullable=True)  # optional reporting-lab override
+    unit = Column(String(40))
+    low = Column(Float, nullable=True)   # inclusive lower bound of normal range; NULL = no lower bound
+    high = Column(Float, nullable=True)  # inclusive upper bound of normal range; NULL = no upper bound
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_by = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    __table_args__ = (UniqueConstraint("analyte", "site_code", "lab_code", name="uq_lab_reference_scope"),)

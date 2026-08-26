@@ -56,6 +56,14 @@ def process_batch(batch_id):
             f.seek(header_pos if found else 0)
             reader=csv.DictReader(f)
             fieldnames_clean={x.strip() for x in (reader.fieldnames or [])}
+            # Reject EDC exports explicitly (wide-form, one row per visit) rather than
+            # letting them silently fail deep inside row processing with a confusing error.
+            edc_shape_cols={"SUBJID","SiteName","GA_EVENT","SBP","DBP","EVENT_DT"}
+            if edc_shape_cols.issubset(fieldnames_clean) and not {"Form Title","Field Label"}.issubset(fieldnames_clean):
+                raise ValueError(
+                    "This file matches the EDC export format (SUBJID/SiteName/GA_EVENT columns), not a "
+                    "RealTime long-form snapshot. Upload it via the EDC import (/api/import/edc) instead."
+                )
             missing={"MRN","Screening #","Form Title","Field Label"}-fieldnames_clean
             if missing and not ({"MRN","Form Title"}.issubset(fieldnames_clean)):
                 raise ValueError(f"Missing required headers: {sorted(missing)}")

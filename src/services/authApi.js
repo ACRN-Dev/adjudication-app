@@ -25,11 +25,13 @@ async function request(path, options = {}) {
 export const login = (email, password) => request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
 export const logout = () => request('/auth/logout', { method: 'POST', body: '{}' });
 export const me = () => request('/auth/me');
+export const changePassword = (currentPassword, newPassword) => request('/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) });
 export const listUsers = (params = {}) => request(`/auth/users?${new URLSearchParams(params)}`);
 export const setUserStatus = (id, status, reason) => request(`/auth/users/${id}/status`, { method: 'POST', body: JSON.stringify({ status, reason }) });
 export const unlockUser = (id, reason) => request(`/auth/users/${id}/unlock`, { method: 'POST', body: JSON.stringify({ reason }) });
 export const resetDemoPassword = (id, reason) => request(`/auth/users/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ reason }) });
 export const setUserRole = (id, role, reason) => request(`/auth/users/${id}/role`, { method: 'POST', body: JSON.stringify({ role, reason }) });
+export const setPortalRole = (id, portal_role, reason) => request(`/auth/users/${id}/portal-role`, { method: 'POST', body: JSON.stringify({ portal_role, reason }) });
 export const createUser = (data) => request('/auth/users', { method: 'POST', body: JSON.stringify(data) });
 export const getAuthConfig = () => request('/auth/config');
 export const SSO_LOGIN_URL = `${BASE}/auth/sso/login`;

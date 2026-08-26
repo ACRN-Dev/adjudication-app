@@ -19,7 +19,7 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
     setIsSubmitting(true);
     setErrorMsg('');
     const onset = submission?.onset?.includes('LOPE') ? 'LOPE' : 'EOPE';
-    const diagnosis = submission?.diagnosis || 'Pre-eclampsia';
+    const diagnosis = submission?.diagnosis || 'PE';
     fetch(`/api/adjudication/${encodeURIComponent(caseData.id)}/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -29,14 +29,18 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
         reviewer_upn: user?.email,
         reviewer_name: submission?.reviewerName || user?.display_name || user?.email,
         reviewer_password: password,
-        visit_number: 1,
-        meets_criteria: submission?.certainty !== 'Not PE',
+        visit_number: caseData?.visitNumber || caseData?.activeVisit?.visit_number || 1,
+        visit_code: caseData?.activeVisit?.visit_code,
+        visit_date: caseData?.activeVisit?.visit_date,
+        meets_criteria: true,
         diagnosis,
         date_of_diagnosis: submission?.dateOfDiagnosis,
         onset_class: onset,
         severity: submission?.severity === 'Eclampsia / severe SAE' ? 'Eclampsia / SAE' : submission?.severity,
         certainty: submission?.certainty || 'Probable',
         rationale: submission?.rationale || 'Adjudication completed after review of the available evidence.',
+        comment: submission?.comment || null,
+        other_rationale: submission?.otherRationale || null,
       }),
     })
       .then(async response => {

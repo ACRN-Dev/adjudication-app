@@ -1,10 +1,10 @@
 import React,{useEffect,useMemo,useState} from 'react'
 import * as Icon from 'lucide-react'
 import * as data from './adminData'
-import { listUsers,setUserStatus,unlockUser,resetDemoPassword,setUserRole,createUser } from '../services/authApi'
+import { listUsers,setUserStatus,unlockUser,resetDemoPassword,setUserRole,setPortalRole,createUser } from '../services/authApi'
 import './admin.css'
 
-const NAV=[['OVERVIEW',[['/admin','Dashboard','LayoutDashboard']]],['ACCESS & PEOPLE',[['/admin/users','Users','Users'],['/admin/committee-assignments','Committee Assignments','UserCog'],['/admin/access','Roles and Permissions','ShieldCheck'],['/admin/access-reviews','Access Reviews','UserCheck'],['/admin/training','Training and COI','GraduationCap']]],['STUDY CONFIGURATION',[['/admin/studies','Studies','BookOpen'],['/admin/sites','Sites','MapPin'],['/admin/endpoints','Endpoints and Windows','CalendarRange'],['/admin/workflows','Workflow Configuration','Workflow']]],['DATA CONFIGURATION',[['/admin/mappings','Canonical Field Mappings','GitCompare'],['/admin/terminology','Units and Terminology','Languages'],['/admin/dictionaries','Clinical Dictionaries','Library'],['/admin/import-contracts','Import Contracts','FileInput']]],['CONTROLLED CONTENT',[['/admin/rules','DV Rule Versions','Binary'],['/admin/forms','Forms and Templates','Files'],['/admin/sops','SOP References','FileCheck2']]],['SYSTEM',[['/admin/integrations','Integrations','PlugZap'],['/admin/audit','Audit Trail','ScrollText'],['/admin/reports','Reports','FileBarChart'],['/admin/health','Environment and Health','Activity']]]]
+const NAV=[['OVERVIEW',[['/admin','Dashboard','LayoutDashboard']]],['ACCESS & PEOPLE',[['/admin/users','Users','Users'],['/admin/adjudicator-profiles','Adjudicator Profiles','ContactRound'],['/admin/committee-assignments','Committee Assignments','UserCog'],['/admin/access','Roles and Permissions','ShieldCheck'],['/admin/access-reviews','Access Reviews','UserCheck'],['/admin/training','Training and COI','GraduationCap']]],['STUDY CONFIGURATION',[['/admin/studies','Studies','BookOpen'],['/admin/sites','Sites','MapPin'],['/admin/endpoints','Endpoints and Windows','CalendarRange'],['/admin/workflows','Workflow Configuration','Workflow']]],['DATA CONFIGURATION',[['/admin/mappings','Canonical Field Mappings','GitCompare'],['/admin/terminology','Units and Terminology','Languages'],['/admin/dictionaries','Clinical Dictionaries','Library'],['/admin/import-contracts','Import Contracts','FileInput']]],['CONTROLLED CONTENT',[['/admin/rules','DV Rule Versions','Binary'],['/admin/forms','Forms and Templates','Files'],['/admin/sops','SOP References','FileCheck2']]],['SYSTEM',[['/admin/integrations','Integrations','PlugZap'],['/admin/audit','Audit Trail','ScrollText'],['/admin/reports','Reports','FileBarChart'],['/admin/health','Environment and Health','Activity']]]]
 const TITLES=Object.fromEntries(NAV.flatMap(([,x])=>x.map(([p,l])=>[p,l])))
 const DEFAULT_DASH={environment:'DEMO / STANDALONE',api:'Checking',database:'Checking',metrics:{active_studies:1,configured_sites:2,active_users:3,pending_approval:1,expiring_access:2,incomplete_training:1,open_access_reviews:1,integration_warnings:2},action_queue:[{type:'access',label:'Approve pending user access',count:1},{type:'expiry',label:'Review expiring access',count:2},{type:'training',label:'Review incomplete training',count:1},{type:'integration',label:'Resolve integration warnings',count:2}]}
 const apiHeaders={'X-Demo-User':'clinical.ops.demo@acrnhealth.com','X-Demo-Role':'CLINICAL_OPS_ADMIN','X-Study-Scope':'PROTECT-Africa,LOPE-Nigeria'}
@@ -13,6 +13,14 @@ function goTo(path){history.pushState({},'',path);dispatchEvent(new PopStateEven
 function downloadCsv(name,columns,rows){const quote=v=>`"${String(v??'').replaceAll('"','""')}"`;const csv=[columns,...rows].map(r=>r.map(quote).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=`${name}-DEMO.csv`;a.click();URL.revokeObjectURL(url)}
 function controlledAction(label){if(!confirm(`${label}? This demonstration action will not affect production data.`))return;const reason=prompt('Enter the required reason for this demonstration action:');if(reason?.trim())alert(`${label} completed in demo mode.\n\nReason: ${reason}\nAn immutable demonstration audit event would be created.`)}
 function demoInfo(label){alert(`${label}\n\nThis function is operating on synthetic demonstration data. A production deployment will apply server-side permission, approval and audit controls.`)}
+
+function AdjudicatorProfiles(){
+  const [rows,setRows]=useState([]),[msg,setMsg]=useState('');
+  const load=()=>fetch('/api/admin/adjudicator-profiles',{credentials:'include'}).then(r=>r.ok?r.json():Promise.reject(new Error('Profile request failed'))).then(x=>setRows(x.items||[])).catch(e=>setMsg(e.message));
+  useEffect(()=>{load()},[]);
+  const edit=async row=>{const study=prompt('Study code (PROTECT-Africa or LOPE-Nigeria)');if(!study)return;const contract=prompt('Contract signing date (YYYY-MM-DD)');const reference=prompt('Contract reference');const tor=prompt('Terms of Reference link (optional)')||'';const reason=prompt('Reason for contract update');if(!contract||!reference||!reason?.trim())return;try{const res=await fetch(`/api/admin/adjudicator-profiles/${encodeURIComponent(row.adjudicator_upn)}/contract`,{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({study_code:study,contract_signed_at:`${contract}T00:00:00`,contract_reference:reference,terms_of_reference_url:tor,reason})});if(!res.ok){const x=await res.json();throw new Error(x.detail||'Update failed')}setMsg('Study contract versioned.');load()}catch(e){setMsg(e.message)}};
+  return <Page title="Adjudicator Profiles" desc="Clinical identity, study contracts, committee membership and ledger-derived workload. Finance data is restricted to Finance users.">{msg&&<div className="a-success" role="status">{msg}</div>}<Table caption="Adjudicator profile register" columns={['Name','Email','Role','Study contracts','Committee membership','A/B signed','C signed','Active assignments','Account']} rows={rows.map(r=>[r.display_name,r.adjudicator_upn,'ADJUDICATOR',(r.contracts||[]).map(c=>`${c.study_code}: ${c.contract_signed_at?new Date(c.contract_signed_at).toLocaleDateString():'Not signed'}`).join(' · ')||'Not configured',(r.committee_memberships||[]).map(m=>`${m.committee_name} (${m.membership_role})`).join(' · ')||'None',r.cases_reviewed_by_role?.REVIEWER_A+r.cases_reviewed_by_role?.REVIEWER_B||0,r.cases_reviewed_by_role?.REVIEWER_C||0,r.active_assignments,r.account_status])} actions={r=><button className="a-link" onClick={()=>edit(rows.find(x=>x.adjudicator_upn===r[1]))}>Manage contract</button>}/></Page>
+}
 
 function Badge({children}){let s=String(children).toLowerCase(),c=s.includes('active')||s.includes('healthy')||s.includes('passed')||s.includes('current')||s.includes('success')?'ok':s.includes('pending')||s.includes('warning')||s.includes('validation')?'warn':s.includes('failed')?'bad':'';return <span className={'a-badge '+c}>{children}</span>}
 function Table({caption,columns,rows,actions}){const [filter,setFilter]=useState({query:'',status:''});useEffect(()=>{const f=e=>setFilter(e.detail);addEventListener('admin-table-filter',f);return()=>removeEventListener('admin-table-filter',f)},[]);const shown=useMemo(()=>rows.filter(r=>{const text=r.join(' ').toLowerCase();return (!filter.query||text.includes(filter.query.toLowerCase()))&&(!filter.status||text.includes(filter.status.toLowerCase()))}),[rows,filter]);return <div className="a-table-wrap"><table className="a-table"><caption>{caption} — {shown.length} record{shown.length===1?'':'s'}</caption><thead><tr>{columns.map(c=><th scope="col" key={c}>{c}</th>)}{actions&&<th>Actions</th>}</tr></thead><tbody>{shown.map((r,i)=><tr key={i}>{r.map((v,j)=><td key={j}>{/status|training|tests|outcome/i.test(columns[j])?<Badge>{v}</Badge>:v}</td>)}{actions&&<td>{actions(r)}</td>}</tr>)}{!shown.length&&<tr><td colSpan={columns.length+(actions?1:0)}>No demonstration records match the current filters.</td></tr>}</tbody></table></div>}
@@ -35,7 +43,7 @@ function Users(){
           email:'',
           display_name:'',
           role:'MONITOR',
-          password:'ACRN@2026',
+          password:'',
           study_scope:'*',
           reason:'Initial user onboarding via Admin Portal'
         });
@@ -69,7 +77,7 @@ function Users(){
         email:newUser.email.trim(),
         display_name:newUser.display_name.trim(),
         role:newUser.role,
-        password:newUser.password||'ACRN@2026',
+        password:newUser.password||undefined,
         study_scope:newUser.study_scope||'*',
         reason:newUser.reason.trim()
       });
@@ -77,14 +85,14 @@ function Users(){
         email:res.email,
         name:res.display_name,
         role:res.role,
-        password:res.default_password||newUser.password||'ACRN@2026'
+        password:res.temporary_password
       });
       setShowAddModal(false);
       setNewUser({
         email:'',
         display_name:'',
         role:'MONITOR',
-        password:'ACRN@2026',
+        password:'',
         study_scope:'*',
         reason:'Initial user onboarding via Admin Portal'
       });
@@ -101,6 +109,7 @@ function Users(){
     u.display_name,
     u.email,
     u.roleCode,
+    u.portal_role || 'Not configured',
     u.status,
     u.is_demo_account?'Yes':'No',
     u.last_login_at?new Date(u.last_login_at).toLocaleString():'Never',
@@ -139,9 +148,9 @@ function Users(){
             <div><strong>Name:</strong> {createdNotice.name}</div>
             <div><strong>Email:</strong> {createdNotice.email}</div>
             <div><strong>Assigned Role:</strong> <span className="a-badge ok">{createdNotice.role}</span></div>
-            <div><strong>Initial Default Password:</strong> <code style={{background:'#dcfce7', padding:'2px 6px', borderRadius:'4px', fontWeight:700, color:'#14532d'}}>{createdNotice.password}</code></div>
+            <div><strong>Temporary Password:</strong> <code style={{background:'#dcfce7', padding:'2px 6px', borderRadius:'4px', fontWeight:700, color:'#14532d'}}>{createdNotice.password}</code></div>
           </div>
-          <p style={{fontSize:'11px', color:'#475569', margin:'8px 0 0'}}>Share these credentials with the user. They can sign in immediately on the Sign In page using their email and default password.</p>
+          <p style={{fontSize:'11px', color:'#475569', margin:'8px 0 0'}}>Share this temporary password with the user out-of-band. It is unique to this account and they will be required to set their own password on first login.</p>
         </div>
       )}
 
@@ -172,8 +181,8 @@ function Users(){
                   </select>
                 </div>
                 <div>
-                  <label style={{display:'block', fontSize:'11px', fontWeight:600, color:'#334155', marginBottom:'4px'}}>Default Password</label>
-                  <input value={newUser.password} onChange={e=>setNewUser({...newUser, password:e.target.value})} placeholder="ACRN@2026" style={{width:'100%', padding:'8px 10px', fontSize:'12px', border:'1px solid #cbd5e1', borderRadius:'4px', boxSizing:'border-box'}}/>
+                  <label style={{display:'block', fontSize:'11px', fontWeight:600, color:'#334155', marginBottom:'4px'}}>Temporary Password (optional)</label>
+                  <input value={newUser.password} onChange={e=>setNewUser({...newUser, password:e.target.value})} placeholder="Leave blank to auto-generate a unique password" style={{width:'100%', padding:'8px 10px', fontSize:'12px', border:'1px solid #cbd5e1', borderRadius:'4px', boxSizing:'border-box'}}/>
                 </div>
               </div>
               <div>
@@ -213,8 +222,8 @@ function Users(){
 
       <Table
         caption="User account register"
-        columns={['Name','Email','Role','Status','Demo','Last login','Lock state']}
-        rows={tableRows.map(r=>r.slice(0,7))}
+        columns={['Name','Email','Role','Portal role','Status','Demo','Last login','Lock state']}
+        rows={tableRows.map(r=>[r[0],r[1],r[2],r[3],r[4],r[5],r[6],r[7]])}
         actions={(r)=>{
           const u=rows.find(x=>x.email===r[1]);
           if(!u)return null;
@@ -226,7 +235,7 @@ function Users(){
               <button onClick={()=>action(why=>unlockUser(u.id,why),'Unlock account')}>
                 Unlock
               </button>
-              <button onClick={()=>{if(confirm(`Reset password for ${u.email} to default?`))action(why=>resetDemoPassword(u.id,why),'Reset password')}}>
+              <button onClick={()=>{if(confirm(`Reset password for ${u.email}? They will be required to set a new password on next login.`))action(why=>resetDemoPassword(u.id,why),'Reset password')}}>
                 Reset password
               </button>
               <select value={u.roleCode} onChange={e=>action(why=>setUserRole(u.id,e.target.value,why),'Change role')}>
@@ -235,6 +244,12 @@ function Users(){
                 <option value="ADJUDICATOR">Adjudicator</option>
                 <option value="CHAIRPERSON">Chairperson</option>
               </select>
+              {u.roleCode==='MONITOR' && <select value={u.portal_role||'MONITOR_QC_REVIEWER'} onChange={e=>action(why=>setPortalRole(u.id,e.target.value,why),'Change monitor portal role')}>
+                <option value="MONITOR_QC_REVIEWER">Monitor QC Reviewer</option>
+                <option value="ADJUDICATION_COORDINATOR">Adjudication Coordinator</option>
+                <option value="QA_REVIEWER">QA Reviewer</option>
+                <option value="RELEASE_OPERATOR">Release Operator</option>
+              </select>}
             </span>
           );
         }}
@@ -254,7 +269,7 @@ function Reviews(){return <Page title="Access Reviews" desc="Periodic certificat
 function Reports(){let r=['User access register','Role-permission matrix','Study configuration register','Active rule versions','Active mapping versions','Form/template register','Access-review status','Training compliance','Configuration changes','Integration incidents','Import failures','Audit-event summary'];return <Page title="Administrative Reports" desc="Controlled exports constrained by role and delegated study scope."><div className="a-reports">{r.map(x=><button key={x} onClick={()=>downloadCsv(x.toLowerCase().replaceAll(' ','-'),['Report','Environment','Scope','Generated'],[[x,'DEMO','Delegated studies only',new Date().toISOString()]])}><Icon.FileSpreadsheet/><strong>{x}</strong><small>Demo data · scoped export</small><Icon.Download size={14}/></button>)}</div></Page>}
 function Health(){const [msg,setMsg]=useState('');const [busy,setBusy]=useState(false);const doReset=async()=>{if(!confirm('Delete ALL imported batches, participants, adjudication records and demo data, then re-seed default accounts?\n\nThis cannot be undone.'))return;const reason=prompt('Enter reason for the full reset (required for audit trail):');if(!reason?.trim())return;setBusy(true);setMsg('');try{const r=await fetch('/api/admin/demo/reset-all',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason:reason.trim()})});const body=await r.json();if(!r.ok)throw new Error(body.detail||'Reset failed');const total=Object.values(body.reset||{}).reduce((a,b)=>a+(b||0),0);setMsg(`Reset complete — ${total} demo records cleared and re-seeded.`)}catch(e){setMsg('Error: '+e.message)}finally{setBusy(false)}};return <Page title="Environment and Health" desc="Platform health, database status and demonstration environment controls."><Notice title="Demonstration environment">All data below is synthetic. Reset does not affect any production system.</Notice><div className="a-grid2"><section className="a-panel"><h2>Database / migration</h2><dl><div><dt>Mode</dt><dd>SQLite (demo) or PostgreSQL (production)</dd></div><div><dt>Auth tables</dt><dd>portal_users · auth_sessions · auth_audit_events</dd></div><div><dt>Longitudinal tables</dt><dd>rt_import_batches · longitudinal_participants · visit_instances</dd></div><div><dt>Adjudication tables</dt><dd>participants · adjudication_records · committee_decisions</dd></div></dl></section><section className="a-panel"><h2>Reset demo database</h2><p style={{fontSize:'13px',color:'var(--text-muted)',marginBottom:'12px'}}>Clears all imported batches, participants, adjudication records, narratives and admin demo fixtures, then re-seeds default demo accounts and configuration.</p>{msg&&<div className={msg.startsWith('Error')?'a-notice danger':'a-success'} role="status" style={{marginBottom:'12px'}}>{msg}</div>}<button onClick={doReset} disabled={busy} style={{background:'#dc2626',color:'#fff',border:'none',borderRadius:'6px',padding:'10px 20px',fontWeight:700,fontSize:'14px',cursor:busy?'wait':'pointer',opacity:busy?0.7:1,display:'flex',alignItems:'center',gap:'8px'}}><Icon.Trash2 size={15}/>{busy?'Resetting…':'Reset All Demo Data'}</button><p style={{fontSize:'11px',color:'var(--text-muted)',marginTop:'8px'}}>Requires admin role · Audited · Irreversible in demo session</p></section></div></Page>}
 function CommitteeAssignments(){const [rows,setRows]=useState([]),[users,setUsers]=useState([]),[msg,setMsg]=useState('');const load=()=>Promise.all([fetch('/api/auth/committee-assignments',{credentials:'include'}).then(r=>r.ok?r.json():{items:[]}),listUsers({role:'CHAIRPERSON',page_size:100})]).then(([a,u])=>{setRows(a.items||[]);setUsers(u.items||[])}).catch(e=>setMsg(e.message));useEffect(()=>{load()},[]);const reason=label=>prompt(`${label}\n\nEnter the required audit reason:`);const assignChair=async(u)=>{const why=reason(`Assign committee chairperson: ${u.display_name}`);if(!why?.trim())return;try{await fetch(`/api/auth/users/${u.id}/committee-assignment`,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason:why.trim(),committee_name:'PROTECT-Africa Committee'})}).then(r=>{if(!r.ok)return r.json().then(b=>{throw new Error(b.detail||'Assignment failed')})});setMsg(`${u.display_name} assigned as committee chairperson.`);load()}catch(e){setMsg(e.message)}};const deactivate=async(row)=>{const why=reason(`Deactivate assignment for user ${row.email}`);if(!why?.trim())return;try{await fetch(`/api/auth/committee-assignments/${row.id}/deactivate`,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason:why.trim()})}).then(r=>{if(!r.ok)return r.json().then(b=>{throw new Error(b.detail||'Deactivation failed')})});setMsg('Assignment deactivated.');load()}catch(e){setMsg(e.message)}};const tableRows=rows.map(r=>[r.display_name||r.email||'—',r.email||'—',r.assignment_type,r.committee_name||'—',r.is_active?'Active':'Inactive',r.expires_at?new Date(r.expires_at).toLocaleDateString():'No expiry',r.assigned_at?new Date(r.assigned_at).toLocaleString():'—',r.id]);const unassignedChairs=users.filter(u=>!rows.some(r=>r.email===u.email&&r.is_active));return <Page title="Committee Assignments" desc="Manage active chairperson committee assignments. Assignments gate access to the Chairperson Portal."><Notice kind="warn" title="Governance control">Only CHAIRPERSON role users can be assigned. Deactivation is audited and immediate.</Notice>{msg&&<div className="a-success" role="status">{msg}</div>}{unassignedChairs.length>0&&<section className="a-panel" style={{marginBottom:'16px'}}><h2>Assign Chairperson</h2><p style={{fontSize:'13px',color:'var(--text-muted)',marginBottom:'8px'}}>The following CHAIRPERSON users have no active committee assignment and cannot access chairperson endpoints.</p>{unassignedChairs.map(u=><div key={u.id} style={{display:'flex',alignItems:'center',gap:'12px',marginBottom:'6px'}}><span style={{flex:1,fontSize:'13px'}}>{u.display_name} <small style={{color:'var(--text-muted)'}}>{u.email}</small></span><button className="a-primary" onClick={()=>assignChair(u)} style={{fontSize:'12px',padding:'4px 10px'}}><Icon.UserCog size={13}/> Assign Chair</button></div>)}</section>}<Table caption="Committee assignment register" columns={['Name','Email','Type','Committee','Status','Expires','Assigned at']} rows={tableRows.map(r=>r.slice(0,7))} actions={(r)=>{const row=rows.find(x=>x.id===r[7]||tableRows.find(t=>t[7]===x.id&&t[0]===r[0]));const found=rows.find(x=>x.email===r[1]&&x.assignment_type===r[2]);return found&&found.is_active?<button onClick={()=>deactivate(found)} style={{color:'#dc2626',fontWeight:600,fontSize:'12px',background:'none',border:'1px solid #dc2626',borderRadius:'4px',padding:'2px 8px',cursor:'pointer'}}>Deactivate</button>:<span style={{color:'var(--text-muted)',fontSize:'12px'}}>Inactive</span>}}/></Page>}
-function Generic({path}){return <Page title={TITLES[path]||'Administration'} desc="Governed administrative configuration for the ACRN adjudication platform."><section className="a-panel a-empty"><Icon.Settings2/><h2>{TITLES[path]}</h2><p>This controlled register is ready in demonstration mode. Production activation depends on approved dictionaries, integration contracts and governance ownership.</p><Primary>Create draft record</Primary></section></Page>}
+function Generic({path}){if(path==='/admin/adjudicator-profiles')return <AdjudicatorProfiles/>;return <Page title={TITLES[path]||'Administration'} desc="Governed administrative configuration for the ACRN adjudication platform."><section className="a-panel a-empty"><Icon.Settings2/><h2>{TITLES[path]}</h2><p>This controlled register is ready in demonstration mode. Production activation depends on approved dictionaries, integration contracts and governance ownership.</p><Primary>Create draft record</Primary></section></Page>}
 
 export default function AdminPortal({user,onLogout}){const [path,setPath]=useState(location.pathname.startsWith('/admin')?location.pathname:'/admin'),[collapsed,setCollapsed]=useState(false),[dash,setDash]=useState(DEFAULT_DASH);useEffect(()=>{let pop=()=>setPath(location.pathname);addEventListener('popstate',pop);fetch('/api/admin/dashboard',{credentials:'include'}).then(r=>r.ok?r.json():Promise.reject()).then(setDash).catch(()=>setDash(x=>({...x,api:'Offline demo data',database:'Local synthetic fixtures'})));return()=>removeEventListener('popstate',pop)},[]);let go=p=>{history.pushState({},'',p);setPath(p)};let view=path==='/admin'?<Dashboard dash={dash}/>:path==='/admin/users'?<Users/>:path==='/admin/committee-assignments'?<CommitteeAssignments/>:path==='/admin/access'?<Roles/>:path==='/admin/studies'?<Register type="studies"/>:path==='/admin/sites'?<Register type="sites"/>:path==='/admin/rules'?<Register type="rules"/>:path==='/admin/mappings'?<Register type="mappings"/>:path==='/admin/forms'?<Register type="forms"/>:path==='/admin/integrations'?<Register type="integrations"/>:path==='/admin/workflows'?<Workflow/>:path==='/admin/audit'?<Audit/>:path==='/admin/access-reviews'?<Reviews/>:path==='/admin/reports'?<Reports/>:path==='/admin/health'?<Health/>:<Generic path={path}/>;return <div className="admin-app"><header className="a-header"><div className="a-brand"><span><img src="/acrn-logo.png" alt="Africa Clinical Research Network"/></span><div><strong>ACRN Adjudication Platform</strong><small>Administration Portal</small></div></div><div className="a-boundary"><Icon.Shield size={14}/> Operational metadata only · clinical case access disabled</div><div className="a-user"><div><strong>{user.name}</strong><small>{user.role}</small></div><Badge>DEMO IDENTITY</Badge><button onClick={onLogout} aria-label="Sign out"><Icon.LogOut size={16}/></button></div></header><div className="a-body"><aside className={'a-nav '+(collapsed?'collapsed':'')}><button className="a-collapse" onClick={()=>setCollapsed(!collapsed)} aria-label="Toggle navigation"><span>ADMINISTRATION</span>{collapsed?<Icon.ChevronsRight/>:<Icon.ChevronsLeft/>}</button>{NAV.map(([g,x])=><section key={g}><h2>{g}</h2>{x.map(([p,l,ic])=>{let C=Icon[ic];return <button key={p} title={l} className={path===p?'active':''} onClick={()=>go(p)}><C size={15}/><span>{l}</span></button>})}</section>)}<div className="a-env"><Icon.Database size={14}/><span>DEMO DATA<br/><small>{dash.api}</small></span></div></aside><main className="a-main"><div className="a-crumb"><button onClick={()=>go('/admin')}>Admin</button><Icon.ChevronRight size={12}/><span>{TITLES[path]||'Dashboard'}</span></div>{view}</main></div></div>}
 

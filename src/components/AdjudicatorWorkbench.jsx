@@ -1,9 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowRight, ArrowLeft, CheckCircle2, Activity, Database, ShieldCheck, FileText, Lock, Download, EyeOff, UserX, AlertCircle, RefreshCw, Info, ExternalLink, ChevronDown, Bot, FilePlus, LogOut, Copy, Save, Server, Search, Calendar, ChevronRight, X, UserCheck, Stethoscope, AlertTriangle } from 'lucide-react';
 import PatientHistoryPanel from './PatientHistoryPanel';
+import VisitEvidenceSections from './VisitEvidenceSections';
 import { generateNarrative, generateSummary, AI_ENGINE_MODEL } from '../services/demoNarrative';
 import { runDvEngine } from '../services/dvEngine';
 import { downloadPdfReport } from '../services/api';
+
+const DEFAULT_VISIT_CODES = ['V01', 'V02', 'V03', 'V04', 'V05', 'V06'];
+function visitPages(caseData) {
+  if (caseData?.visits?.length) return caseData.visits;
+  // Legacy/aggregated packets are deliberately represented as empty visit
+  // pages until the coordinator reconciles evidence; raw aggregates are never
+  // silently shown as if they belonged to one visit.
+  return DEFAULT_VISIT_CODES.map((code, index) => ({
+    id: `${caseData?.id || 'case'}-${code}`,
+    name: `Visit ${index + 1}`,
+    visit_code: code,
+    evidence: {},
+    packet_status: 'AWAITING_VISIT_RECONCILIATION',
+  }));
+}
 
 export default function AdjudicatorWorkbench({ 
   currentStep, 
@@ -17,11 +33,12 @@ export default function AdjudicatorWorkbench({
   onOpenDataQueryModal,
   user
 }) {
-  const [selectedDiagnosis, setSelectedDiagnosis] = useState('Pre-eclampsia');
+  const [selectedDiagnosis, setSelectedDiagnosis] = useState('PE');
   const [otherDiagnosis, setOtherDiagnosis] = useState('');
   const [selectedOnset, setSelectedOnset] = useState('Early-onset pre-eclampsia (EOPE)');
   const [selectedSeverity, setSelectedSeverity] = useState('With severe features');
   const [selectedCertainty, setSelectedCertainty] = useState('Probable');
+  const [selectedVisitIndex, setSelectedVisitIndex] = useState(0);
   const [narrativeText, setNarrativeText] = useState('');
   const [narrativeViewMode, setNarrativeViewMode] = useState('TABLE'); // 'TABLE' | 'PROSE'
   const [formCode, setFormCode] = useState('FORM-ADJ-15A');
@@ -29,7 +46,11 @@ export default function AdjudicatorWorkbench({
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [pdfDownloadError, setPdfDownloadError] = useState('');
   const isSigned = activeCase?.status?.includes('Finalized');
-  const finalDiagnosis = selectedDiagnosis === 'Other' ? otherDiagnosis.trim() : selectedDiagnosis;
+  const isReviewerC = activeCase?.reviewerRole === 'REVIEWER_C';
+  const finalDiagnosis = selectedDiagnosis;
+  const pages = visitPages(activeCase);
+  const selectedVisit = pages[selectedVisitIndex] || pages[0] || null;
+  const isVisitFive = /V05|visit\s*5/i.test(selectedVisit?.name || selectedVisit?.visit_code || '');
 
   const getVisitLabel = (bp, index) => {
     if (bp.visitName) return bp.visitName;
@@ -53,6 +74,7 @@ export default function AdjudicatorWorkbench({
 
   useEffect(() => {
     if (activeCase) {
+      setSelectedVisitIndex(0);
       const generated = generateNarrative(activeCase);
       setNarrativeText(generated.fullText);
       setFormCode(generated.formCode);
@@ -273,9 +295,9 @@ export default function AdjudicatorWorkbench({
             <span className="badge-tag">BLINDED</span>
           </div>
 
-          <PatientHistoryPanel caseData={activeCase} />
+            {false && <PatientHistoryPanel caseData={activeCase} />}
 
-          <div className="summary-card-grid">
+          {false && <div className="summary-card-grid">
             {/* Box 1: Blood Pressure */}
             <div className="summary-feature-card">
               <h4>
@@ -283,18 +305,23 @@ export default function AdjudicatorWorkbench({
                 1. Blood Pressure Timeline &amp; Visit Schedule
               </h4>
               <div style={{ marginTop: '8px' }}>
-                {activeCase.bpLog && activeCase.bpLog.length > 0 ? (
-                  activeCase.bpLog.map((bp, i) => (
-                    <div key={i} className="data-summary-row" style={{ background: bp.severe ? '#f8fafc' : 'transparent', padding: '5px 8px', borderRadius: '4px', marginBottom: '4px', border: '1px solid #f1f5f9' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#0f172a' }}>{getVisitLabel(bp, i)}</span>
-                        <span style={{ fontSize: '11px', color: '#64748b' }}>{bp.date || 'GA ' + bp.ga}</span>
+                {(activeCase.bpLog && activeCase.bpLog.length > 0 ? activeCase.bpLog : activeCase.bp_readings) && (activeCase.bpLog || activeCase.bp_readings).length > 0 ? (
+                  (activeCase.bpLog || activeCase.bp_readings).map((bp, i) => {
+                    const severe = bp.severe ?? (bp.sbp >= 160 || bp.dbp >= 110);
+                    const dateVal = bp.date || bp.datetime;
+                    const when = dateVal ? new Date(dateVal).toLocaleString() : (bp.ga ? `GA ${bp.ga}` : '—');
+                    return (
+                      <div key={i} className="data-summary-row" style={{ background: severe ? '#f8fafc' : 'transparent', padding: '5px 8px', borderRadius: '4px', marginBottom: '4px', border: '1px solid #f1f5f9' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#0f172a' }}>{getVisitLabel(bp, i)}</span>
+                          <span style={{ fontSize: '11px', color: '#64748b' }}>{when}</span>
+                        </div>
+                        <span style={{ fontWeight: severe ? 700 : 500, color: severe ? '#991b1b' : '#162035', fontSize: '12px' }}>
+                          {bp.sbp}/{bp.dbp} mmHg {severe ? ' [Severe]' : ''}
+                        </span>
                       </div>
-                      <span style={{ fontWeight: bp.severe ? 700 : 500, color: bp.severe ? '#991b1b' : '#162035', fontSize: '12px' }}>
-                        {bp.sbp}/{bp.dbp} mmHg {bp.severe ? ' [Severe]' : ''}
-                      </span>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div style={{ fontSize: '11.5px', color: '#94a3b8', fontStyle: 'italic' }}>
                     A confirmatory dated/timed BP or eligible severe-range recheck not documented
@@ -317,6 +344,11 @@ export default function AdjudicatorWorkbench({
                       <span style={{ fontWeight: 600 }}>{p.result}</span>
                     </div>
                   ))
+                ) : (activeCase.upcr != null || activeCase.dipstick_raw) ? (
+                  <div className="data-summary-row" style={{ background: '#f8fafc', padding: '4px 6px', borderRadius: '3px' }}>
+                    <span>Proteinuria (UPCR/Dipstick)</span>
+                    <span style={{ fontWeight: 600 }}>{activeCase.upcr != null ? `UPCR ${activeCase.upcr}` : activeCase.dipstick_raw}</span>
+                  </div>
                 ) : (
                   <div style={{ fontSize: '11.5px', color: '#94a3b8', fontStyle: 'italic', marginBottom: '6px' }}>
                     A dated UPCR, 24-hour protein or dipstick result not documented
@@ -329,6 +361,15 @@ export default function AdjudicatorWorkbench({
                       <span style={{ fontWeight: l.severe ? 700 : 500 }}>{l.result} {l.unit}</span>
                     </div>
                   ))
+                ) : [['Platelets', activeCase.platelet_count], ['Creatinine', activeCase.creatinine], ['AST', activeCase.ast], ['ALT', activeCase.alt], ['LDH', activeCase.ldh]].some(([, v]) => v != null) ? (
+                  [['Platelets', activeCase.platelet_count], ['Creatinine', activeCase.creatinine], ['AST', activeCase.ast], ['ALT', activeCase.alt], ['LDH', activeCase.ldh]]
+                    .filter(([, v]) => v != null)
+                    .map(([label, v]) => (
+                      <div key={label} className="data-summary-row">
+                        <span>{label}</span>
+                        <span style={{ fontWeight: 500 }}>{v}</span>
+                      </div>
+                    ))
                 ) : (
                   <div style={{ fontSize: '11.5px', color: '#94a3b8', fontStyle: 'italic' }}>
                     Dated platelet count with AST/ALT evidence not documented
@@ -379,6 +420,8 @@ export default function AdjudicatorWorkbench({
               </div>
             </div>
 
+            </div>}
+
             {/* Box 4: Clinical Summary — Clean Neutral Card */}
             <div className="summary-feature-card" style={{ gridColumn: '1 / -1' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -406,8 +449,8 @@ export default function AdjudicatorWorkbench({
               </div>
             </div>
 
-            {/* Box 5: Clinical Narrative Preview */}
-            <div className="summary-feature-card" style={{ gridColumn: '1 / -1' }}>
+            {/* Box 5: Clinical Narrative Preview (legacy raw-derived view retained only for non-visit packets) */}
+            <div className="summary-feature-card" style={{ gridColumn: '1 / -1', display: 'none' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
@@ -539,7 +582,7 @@ export default function AdjudicatorWorkbench({
               )}
             </div>
 
-          </div>
+            <VisitEvidenceSections visits={pages} selectedIndex={selectedVisitIndex} onSelectVisit={setSelectedVisitIndex} />
 
           <div className="wizard-footer">
             <button className="btn-large btn-back" onClick={() => setCurrentStep(1)}>
@@ -644,12 +687,20 @@ export default function AdjudicatorWorkbench({
     <div>
       <div className="wizard-card">
         <h2 className="wizard-title">Step 3: Approve Summary &amp; Sign Record ({activeCase.id})</h2>
-        <p className="wizard-subtitle">Review the 13-section narrative draft ({formCode}), confirm your final diagnosis, and sign.</p>
+        <p className="wizard-subtitle">Review the selected visit summary, confirm the closed-ended diagnosis, and sign the separate visit adjudication.</p>
+
+        {pages.length > 0 && <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '9px 12px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 6 }}>
+          <strong style={{ fontSize: 12 }}>Adjudicating:</strong>
+          <select aria-label="Selected visit" value={selectedVisitIndex} onChange={e => setSelectedVisitIndex(Number(e.target.value))} disabled={isSigned} style={{ minWidth: 220 }}>
+            {pages.map((visit, i) => <option key={visit.id || i} value={i}>{visit.name || visit.visit_code || `Visit ${i + 1}`}</option>)}
+          </select>
+          <span style={{ color: '#64748b', fontSize: 11 }}>Only this visit will be signed.</span>
+        </div>}
 
         {/* Narrative Box */}
         <div style={{ marginBottom: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
-            <label style={{ fontWeight: 700, fontSize: '12.5px', color: 'var(--acrn-navy-dark)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <label style={{ fontWeight: 700, fontSize: '12.5px', color: 'var(--acrn-navy-dark)', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Bot size={15} color="var(--acrn-navy-dark)" />
               {formCode} Blinded Case Narrative Draft
             </label>
@@ -667,7 +718,7 @@ export default function AdjudicatorWorkbench({
             </div>
           </div>
 
-          {isGeneratingAi ? (
+              {isGeneratingAi ? (
             <div style={{
               padding: '20px',
               textAlign: 'center',
@@ -690,6 +741,7 @@ export default function AdjudicatorWorkbench({
               disabled={isSigned}
             />
           )}
+          {isVisitFive && <div style={{ marginTop: 6, color: '#475569', fontSize: 11 }}><strong>Visit 5 narrative:</strong> open-ended clinical narrative is required; diagnosis selection remains restricted to the standard outcomes.</div>}
         </div>
 
         {/* Diagnosis Selection */}
@@ -702,13 +754,11 @@ export default function AdjudicatorWorkbench({
               onChange={(e) => setSelectedDiagnosis(e.target.value)}
               disabled={isSigned}
             >
-              <option value="Pre-eclampsia">Pre-eclampsia</option>
-              <option value="Gestational hypertension">Gestational hypertension</option>
-              <option value="Chronic HTN">Chronic HTN</option>
-              <option value="Superimposed PE">Superimposed PE</option>
+              <option value="PE">PE</option>
+              <option value="Severe PE">Severe PE</option>
               <option value="Eclampsia">Eclampsia</option>
-              <option value="HELLP Syndrome">HELLP Syndrome</option>
-              <option value="Other">Other</option>
+              <option value="HELLP">HELLP</option>
+              {isReviewerC && <option value="Other">Other</option>}
             </select>
             {selectedDiagnosis === 'Other' && (
               <input
@@ -717,8 +767,8 @@ export default function AdjudicatorWorkbench({
                 style={{ marginTop: '8px' }}
                 value={otherDiagnosis}
                 onChange={(e) => setOtherDiagnosis(e.target.value)}
-                placeholder="Enter the adjudication diagnosis"
-                aria-label="Other adjudication diagnosis"
+                placeholder="Mandatory rationale for Other"
+                aria-label="Rationale for Other diagnosis"
                 disabled={isSigned}
                 required
               />
@@ -805,9 +855,14 @@ export default function AdjudicatorWorkbench({
               severity: selectedSeverity,
               certainty: selectedCertainty,
               rationale: narrativeText,
-              dateOfDiagnosis: activeCase?.visits?.[0]?.date || new Date().toISOString(),
+              comment: narrativeText,
+              otherRationale: selectedDiagnosis === 'Other' ? otherDiagnosis.trim() : null,
+              visitNumber: selectedVisit?.visit_number || selectedVisit?.visitNumber || selectedVisitIndex + 1,
+              visitCode: selectedVisit?.visit_code || selectedVisit?.name,
+              visitDate: selectedVisit?.visit_date || selectedVisit?.date,
+              dateOfDiagnosis: selectedVisit?.visit_date || selectedVisit?.date || new Date().toISOString(),
             });
-          }} disabled={selectedDiagnosis === 'Other' && !finalDiagnosis}>
+          }} disabled={selectedDiagnosis === 'Other' && !otherDiagnosis.trim()}>
             <ShieldCheck size={16} /> Sign &amp; Lock Adjudication Record
           </button>
         </div>

@@ -33,7 +33,40 @@ export const approvePatient=(id,user)=>request(`/patients/${id}/approve`,user,{m
 export const assignPatient=(id,email,role,user)=>request(`/patients/${id}/assign?${new URLSearchParams({reviewer_upn:email,reviewer_role:role})}`,user,{method:'POST'});
 export const listAssigned=(user)=>request('/assigned',user);
 export const getAssigned=(id,user)=>request(`/assigned/${id}`,user);
-export async function uploadRealtime(file,user,onProgress){const body=new FormData();body.append('file',file);onProgress?.('Uploading');return request('/batches',user,{method:'POST',body})}
+
+// XHR (not fetch) so we get real upload progress events for the progress bar.
+function xhrUpload(path,formData,user,onProgress){
+  return new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST',BASE+path);
+    xhr.withCredentials=true;
+    const h=headers(user);
+    Object.entries(h).forEach(([k,v])=>xhr.setRequestHeader(k,v));
+    xhr.upload.onprogress=(e)=>{
+      if(e.lengthComputable&&onProgress) onProgress(Math.round((e.loaded/e.total)*100));
+    };
+    xhr.onload=()=>{
+      let body={};
+      try{body=JSON.parse(xhr.responseText||'{}')}catch{}
+      if(xhr.status>=200&&xhr.status<300){onProgress?.(100);resolve(body);}
+      else reject(new Error(typeof body.detail==='string'?body.detail:body.detail?.message||`Request failed (${xhr.status})`));
+    };
+    xhr.onerror=()=>reject(new Error('The backend API is unavailable. Start it on port 8000 and try again.'));
+    xhr.send(formData);
+  });
+}
+export async function uploadRealtime(file,user,onProgress){
+  const body=new FormData();body.append('file',file);
+  return xhrUpload('/batches',body,user,onProgress);
+}
+export async function uploadRealtimeBulk(files,user,onProgress){
+  const body=new FormData();
+  Array.from(files).forEach(f=>body.append('files',f));
+  return xhrUpload('/batches/bulk',body,user,onProgress);
+}
+export const listReferenceRanges=(user)=>request('/reference-ranges',user);
+export const upsertReferenceRange=(payload,user)=>request('/reference-ranges',user,{method:'POST',body:JSON.stringify(payload),headers:{'Content-Type':'application/json'}});
+export const deactivateReferenceRange=(id,user)=>request(`/reference-ranges/${id}/deactivate`,user,{method:'POST'});
 export function asWorkbenchCase(data, user){
  const values=(name)=>data.visits?.flatMap(v=>(v.evidence?.[name]||[]).map(x=>({...x,visit:v.name})))||[];
  const first=n=>values(n)[0]?.value;
