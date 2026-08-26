@@ -188,9 +188,18 @@ else:
 # ── 3. Apply the SQL migrations ─────────────────────────────────────────────────────
 step(3, "Applying SQL migrations")
 
-sql_files = sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(".sql"))
+# Forward migrations only. A *.down.sql file is a rollback script -- applying one here
+# would DROP the tables and columns the matching forward migration created, destroying
+# their data on every deployment.
+all_sql = sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(".sql"))
+sql_files = [f for f in all_sql if not f.endswith(".down.sql")]
+rollbacks = [f for f in all_sql if f.endswith(".down.sql")]
+
 if not sql_files:
-    fail(f"No migration files found in {MIGRATIONS_DIR}.")
+    fail(f"No forward migration files found in {MIGRATIONS_DIR}.")
+
+for filename in rollbacks:
+    say(f"      skipped  {filename}  (rollback script -- never applied automatically)")
 
 raw = engine.raw_connection()
 try:
@@ -211,6 +220,30 @@ try:
             cursor.close()
 finally:
     raw.close()
+
+# create_all() only ever CREATES MISSING TABLES -- it never adds a column to a table that
+# already exists. So a column added to a model after its table was first created is invisible
+# to it, and every query naming that column fails at runtime with UndefinedColumn. Catch that
+# here, at deploy time, instead of when a user hits the endpoint.
+inspector = inspect(engine)
+live_tables = set(inspector.get_table_names())
+schema_drift = []
+for table in Base.metadata.sorted_tables:
+    if table.name not in live_tables:
+        continue
+    live_columns = {c["name"] for c in inspector.get_columns(table.name)}
+    for column in table.columns:
+        if column.name not in live_columns:
+            ddl = column.type.compile(dialect=engine.dialect)
+            schema_drift.append((table.name, column.name, ddl))
+
+if schema_drift:
+    say()
+    say(f"      {len(schema_drift)} model column(s) missing from the database:")
+    for table_name, column_name, ddl in schema_drift:
+        say(f'        ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {ddl};')
+else:
+    say(f"      Schema matches the models across {len(live_tables)} tables.")
 
 
 # ── 4. Purge synthetic / demo data ──────────────────────────────────────────────────
@@ -367,6 +400,13 @@ if DRY_RUN:
     sys.exit(0)
 
 problems = []
+if schema_drift:
+    problems.append(
+        f"{len(schema_drift)} model column(s) missing from the database "
+        f"({', '.join(f'{t}.{c}' for t, c, _ in schema_drift)}) -- every query touching them "
+        "will fail at runtime. Add the ALTER statements printed in step 3 to a new migration "
+        "under backend/migrations/versions/ and re-run"
+    )
 if not active_admins:
     problems.append("no active ADMIN account exists -- nobody would be able to sign in")
 if remaining_demo:
