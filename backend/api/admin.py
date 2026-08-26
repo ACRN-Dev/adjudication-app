@@ -309,13 +309,13 @@ def demo_reset(req:ReasonedRequest,identity:Identity=Depends(require("integratio
 @router.post("/demo/reset-all")
 def demo_reset_all(req:ReasonedRequest,identity:Identity=Depends(require("integrations.manage")),db:Session=Depends(get_db)):
     if os.getenv("ENABLE_DEMO_DATA","false").lower()!="true": raise HTTPException(409,"Demo data is disabled in this environment.")
-    from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInstance,ReviewerAssignment,RestrictedIdentityCrosswalk
+    from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInstance,CanonicalObservation,ReviewerAssignment,RestrictedIdentityCrosswalk
     from models.canonical import ImportBatch,Participant,CanonicalField,DerivationResult,Narrative,AdjudicationRecord,CommitteeDecision,AuditEvent
     from models.auth import AuthSession,AuthAuditEvent
     counts={}
     # delete in FK-safe order
     for m in [CommitteeDecision,AdjudicationRecord,Narrative,DerivationResult,CanonicalField,Participant,ImportBatch,
-              RestrictedIdentityCrosswalk,ReviewerAssignment,VisitInstance,LongitudinalParticipant,RTImportBatch,
+              RestrictedIdentityCrosswalk,ReviewerAssignment,CanonicalObservation,VisitInstance,LongitudinalParticipant,RTImportBatch,
               AuthSession,AuthAuditEvent]:
         counts[m.__tablename__]=db.query(m).delete(synchronize_session=False)
     db.commit()
