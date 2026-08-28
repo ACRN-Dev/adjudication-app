@@ -1,8 +1,23 @@
+-- Migration: 20260826_09_per_visit_adjudication
+-- Forward: introduces the subject+visit adjudication unit and re-keys adjudication
+-- records and committee decisions onto it.
+--
+-- Every statement is guarded. init_prod.py runs Base.metadata.create_all() (step 2)
+-- BEFORE it replays these files (step 3), so on a production database the model tables
+-- -- adjudication_visits, visit_measurement_dates -- already exist by the time this file
+-- runs, and the whole set is replayed on every deployment. Bare CREATE TABLE /
+-- CREATE INDEX / ADD COLUMN / ADD CONSTRAINT aborts the deploy with
+-- 'relation "adjudication_visits" already exists', which is what this file used to do.
+
 BEGIN;
 
-CREATE TYPE diagnosis_code_v2 AS ENUM ('PE', 'SEVERE_PE', 'ECLAMPSIA', 'HELLP', 'OTHER');
+DO $$
+BEGIN
+    CREATE TYPE diagnosis_code_v2 AS ENUM ('PE', 'SEVERE_PE', 'ECLAMPSIA', 'HELLP', 'OTHER');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TABLE adjudication_visits (
+CREATE TABLE IF NOT EXISTS adjudication_visits (
     id UUID PRIMARY KEY,
     participant_id UUID NOT NULL REFERENCES participants(id),
     visit_number INTEGER NOT NULL CHECK (visit_number > 0),
@@ -13,10 +28,10 @@ CREATE TABLE adjudication_visits (
     CONSTRAINT uq_subject_visit_code UNIQUE (participant_id, visit_code)
 );
 
-CREATE INDEX ix_adjudication_visits_participant_id ON adjudication_visits(participant_id);
-CREATE INDEX ix_adjudication_visits_visit_date ON adjudication_visits(visit_date);
+CREATE INDEX IF NOT EXISTS ix_adjudication_visits_participant_id ON adjudication_visits(participant_id);
+CREATE INDEX IF NOT EXISTS ix_adjudication_visits_visit_date ON adjudication_visits(visit_date);
 
-CREATE TABLE visit_measurement_dates (
+CREATE TABLE IF NOT EXISTS visit_measurement_dates (
     id UUID PRIMARY KEY,
     visit_id UUID NOT NULL REFERENCES adjudication_visits(id) ON DELETE CASCADE,
     measurement_type VARCHAR(50) NOT NULL,
@@ -25,7 +40,7 @@ CREATE TABLE visit_measurement_dates (
     CONSTRAINT uq_visit_measurement_timestamp UNIQUE (visit_id, measurement_type, measured_at)
 );
 
-CREATE INDEX ix_visit_measurement_dates_sequence
+CREATE INDEX IF NOT EXISTS ix_visit_measurement_dates_sequence
     ON visit_measurement_dates(visit_id, measured_at, measurement_type);
 
 -- Backfill one durable subject+visit row for every legacy decision visit.
@@ -42,48 +57,103 @@ JOIN (
 GROUP BY p.id, n.visit_number
 ON CONFLICT (participant_id, visit_number) DO NOTHING;
 
-ALTER TABLE adjudication_records ADD COLUMN visit_id UUID;
-ALTER TABLE adjudication_records ADD COLUMN comment TEXT;
-ALTER TABLE adjudication_records ADD COLUMN other_rationale TEXT;
+ALTER TABLE adjudication_records ADD COLUMN IF NOT EXISTS visit_id UUID;
+ALTER TABLE adjudication_records ADD COLUMN IF NOT EXISTS comment TEXT;
+ALTER TABLE adjudication_records ADD COLUMN IF NOT EXISTS other_rationale TEXT;
 UPDATE adjudication_records r SET visit_id = v.id
 FROM adjudication_visits v
-WHERE v.participant_id = r.participant_id AND v.visit_number = COALESCE(r.visit_number, 1);
+WHERE r.visit_id IS NULL
+  AND v.participant_id = r.participant_id AND v.visit_number = COALESCE(r.visit_number, 1);
 ALTER TABLE adjudication_records ALTER COLUMN visit_id SET NOT NULL;
-ALTER TABLE adjudication_records ADD CONSTRAINT fk_adjudication_record_visit
-    FOREIGN KEY (visit_id) REFERENCES adjudication_visits(id);
-ALTER TABLE adjudication_records ADD CONSTRAINT uq_visit_reviewer_role UNIQUE (visit_id, reviewer_role);
 
-ALTER TABLE committee_decisions ADD COLUMN visit_id UUID;
+DO $$
+BEGIN
+    ALTER TABLE adjudication_records ADD CONSTRAINT fk_adjudication_record_visit
+        FOREIGN KEY (visit_id) REFERENCES adjudication_visits(id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+    ALTER TABLE adjudication_records ADD CONSTRAINT uq_visit_reviewer_role UNIQUE (visit_id, reviewer_role);
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
+END $$;
+
+ALTER TABLE committee_decisions ADD COLUMN IF NOT EXISTS visit_id UUID;
 UPDATE committee_decisions c SET visit_id = v.id
 FROM adjudication_visits v
-WHERE v.participant_id = c.participant_id AND v.visit_number = COALESCE(c.visit_number, 1);
+WHERE c.visit_id IS NULL
+  AND v.participant_id = c.participant_id AND v.visit_number = COALESCE(c.visit_number, 1);
 ALTER TABLE committee_decisions ALTER COLUMN visit_id SET NOT NULL;
-ALTER TABLE committee_decisions ADD CONSTRAINT fk_committee_decision_visit
-    FOREIGN KEY (visit_id) REFERENCES adjudication_visits(id);
-ALTER TABLE committee_decisions ADD CONSTRAINT uq_committee_decision_visit UNIQUE (visit_id);
+
+DO $$
+BEGIN
+    ALTER TABLE committee_decisions ADD CONSTRAINT fk_committee_decision_visit
+        FOREIGN KEY (visit_id) REFERENCES adjudication_visits(id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+    ALTER TABLE committee_decisions ADD CONSTRAINT uq_committee_decision_visit UNIQUE (visit_id);
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
+END $$;
+
 ALTER TABLE committee_decisions DROP CONSTRAINT IF EXISTS committee_decisions_participant_id_key;
 
-ALTER TABLE adjudication_records ALTER COLUMN diagnosis TYPE diagnosis_code_v2
-USING CASE diagnosis::text
-    WHEN 'PREECLAMPSIA' THEN 'PE'::diagnosis_code_v2
-    WHEN 'PE' THEN 'PE'::diagnosis_code_v2
-    WHEN 'SEVERE_PREECLAMPSIA' THEN 'SEVERE_PE'::diagnosis_code_v2
-    WHEN 'SEVERE_PE' THEN 'SEVERE_PE'::diagnosis_code_v2
-    WHEN 'ECLAMPSIA' THEN 'ECLAMPSIA'::diagnosis_code_v2
-    WHEN 'HELLP' THEN 'HELLP'::diagnosis_code_v2
-    ELSE diagnosis::text::diagnosis_code_v2
-END;
-ALTER TABLE committee_decisions ALTER COLUMN final_diagnosis TYPE diagnosis_code_v2
-USING CASE final_diagnosis::text
-    WHEN 'PREECLAMPSIA' THEN 'PE'::diagnosis_code_v2
-    WHEN 'PE' THEN 'PE'::diagnosis_code_v2
-    WHEN 'SEVERE_PREECLAMPSIA' THEN 'SEVERE_PE'::diagnosis_code_v2
-    WHEN 'SEVERE_PE' THEN 'SEVERE_PE'::diagnosis_code_v2
-    WHEN 'ECLAMPSIA' THEN 'ECLAMPSIA'::diagnosis_code_v2
-    WHEN 'HELLP' THEN 'HELLP'::diagnosis_code_v2
-    ELSE final_diagnosis::text::diagnosis_code_v2
-END;
+-- The models declare both diagnosis CHECKs, so create_all() may already have built them
+-- against the old enum. Their stored 'OTHER'::diagnosiscode literal does not survive the
+-- retype below -- Postgres rewrites the column but not the literal, and the constraint
+-- then fails to re-parse with 'operator does not exist: diagnosis_code_v2 <> diagnosiscode'.
+-- Drop them here and re-add them against the new type once the retype is done.
+ALTER TABLE adjudication_records DROP CONSTRAINT IF EXISTS ck_other_reviewer_c_rationale;
+ALTER TABLE committee_decisions DROP CONSTRAINT IF EXISTS ck_committee_other_from_reviewer_c;
 
+-- Retype the diagnosis columns onto diagnosis_code_v2. Skipped once already converted,
+-- so a redeploy does not pay for a full table rewrite on every run.
+DO $do$
+BEGIN
+    IF (SELECT atttypid FROM pg_attribute
+        WHERE attrelid = 'adjudication_records'::regclass AND attname = 'diagnosis')
+       <> 'diagnosis_code_v2'::regtype THEN
+        EXECUTE $sql$
+            ALTER TABLE adjudication_records ALTER COLUMN diagnosis TYPE diagnosis_code_v2
+            USING CASE diagnosis::text
+                WHEN 'PREECLAMPSIA' THEN 'PE'::diagnosis_code_v2
+                WHEN 'PE' THEN 'PE'::diagnosis_code_v2
+                WHEN 'SEVERE_PREECLAMPSIA' THEN 'SEVERE_PE'::diagnosis_code_v2
+                WHEN 'SEVERE_PE' THEN 'SEVERE_PE'::diagnosis_code_v2
+                WHEN 'ECLAMPSIA' THEN 'ECLAMPSIA'::diagnosis_code_v2
+                WHEN 'HELLP' THEN 'HELLP'::diagnosis_code_v2
+                ELSE diagnosis::text::diagnosis_code_v2
+            END
+        $sql$;
+    END IF;
+END
+$do$;
+
+DO $do$
+BEGIN
+    IF (SELECT atttypid FROM pg_attribute
+        WHERE attrelid = 'committee_decisions'::regclass AND attname = 'final_diagnosis')
+       <> 'diagnosis_code_v2'::regtype THEN
+        EXECUTE $sql$
+            ALTER TABLE committee_decisions ALTER COLUMN final_diagnosis TYPE diagnosis_code_v2
+            USING CASE final_diagnosis::text
+                WHEN 'PREECLAMPSIA' THEN 'PE'::diagnosis_code_v2
+                WHEN 'PE' THEN 'PE'::diagnosis_code_v2
+                WHEN 'SEVERE_PREECLAMPSIA' THEN 'SEVERE_PE'::diagnosis_code_v2
+                WHEN 'SEVERE_PE' THEN 'SEVERE_PE'::diagnosis_code_v2
+                WHEN 'ECLAMPSIA' THEN 'ECLAMPSIA'::diagnosis_code_v2
+                WHEN 'HELLP' THEN 'HELLP'::diagnosis_code_v2
+                ELSE final_diagnosis::text::diagnosis_code_v2
+            END
+        $sql$;
+    END IF;
+END
+$do$;
+
+-- Both were dropped above, so these always apply cleanly against diagnosis_code_v2.
 ALTER TABLE adjudication_records ADD CONSTRAINT ck_other_reviewer_c_rationale CHECK (
     diagnosis <> 'OTHER' OR
     (reviewer_role = 'REVIEWER_C' AND other_rationale IS NOT NULL AND length(trim(other_rationale)) > 0)
