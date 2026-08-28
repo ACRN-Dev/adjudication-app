@@ -167,6 +167,7 @@ from models import canonical as canonical_models  # noqa: F401,E402
 from models import longitudinal as longitudinal_models  # noqa: F401,E402
 from models import monitor as monitor_models  # noqa: F401,E402
 from models.auth import AuthAuditEvent, PortalUser  # noqa: E402
+from scripts.enum_sync import sync_enum_labels  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -183,6 +184,21 @@ if created:
     say(f"      Created {len(created)} table(s): {', '.join(created)}")
 else:
     say(f"      No new tables needed; {len(before)} already present.")
+
+# create_all() never adds a label to an enum type that already exists, exactly as it
+# never adds a column to a table that already exists -- see the schema drift check below.
+# So an enum member added to a model after production's tables were created is absent
+# from Postgres, and the first statement naming it fails with UndefinedObject. Reconcile
+# the labels here: it has to happen BEFORE the migrations, because Postgres refuses to
+# use a new enum label in the transaction that added it.
+enum_added, enum_extra = sync_enum_labels(engine, Base.metadata)
+if enum_added:
+    say(f"      Added {len(enum_added)} missing enum label(s): "
+        + ", ".join(f"{name}.{label}" for name, label in enum_added))
+else:
+    say("      Enum types already match the models.")
+for name, label in enum_extra:
+    say(f"      note: {name} has label '{label}' that no model declares (left in place)")
 
 
 # ── 3. Apply the SQL migrations ─────────────────────────────────────────────────────

@@ -43,6 +43,33 @@ CREATE TABLE IF NOT EXISTS visit_measurement_dates (
 CREATE INDEX IF NOT EXISTS ix_visit_measurement_dates_sequence
     ON visit_measurement_dates(visit_id, measured_at, measurement_type);
 
+-- When create_all() built adjudication_visits, it built it from the model, which declares
+-- status/filing_status/created_at NOT NULL but supplies their defaults in Python only --
+-- a SQLAlchemy default= never reaches the database. The backfill below is raw SQL and
+-- names none of those columns, so without a real server default it fails with
+--   null value in column "status" of relation "adjudication_visits" violates not-null
+-- on any database that already holds adjudication records. The CREATE TABLE above and
+-- 20260827_12 both give these columns a DEFAULT; assert the same on a table create_all()
+-- made, and on one this migration made before those columns existed.
+DO $$
+DECLARE
+    target_column text;
+    default_expr  text;
+BEGIN
+    FOR target_column, default_expr IN
+        SELECT * FROM (VALUES ('status', '''IN_REVIEW'''),
+                              ('filing_status', '''NOT_READY'''),
+                              ('created_at', 'CURRENT_TIMESTAMP')) AS d(c, e)
+    LOOP
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'adjudication_visits'
+                     AND column_name = target_column) THEN
+            EXECUTE format('ALTER TABLE adjudication_visits ALTER COLUMN %I SET DEFAULT %s',
+                           target_column, default_expr);
+        END IF;
+    END LOOP;
+END $$;
+
 -- Backfill one durable subject+visit row for every legacy decision visit.
 INSERT INTO adjudication_visits (id, participant_id, visit_number, visit_code, visit_date)
 SELECT gen_random_uuid(), p.id, n.visit_number, 'V' || LPAD(n.visit_number::text, 2, '0'),
