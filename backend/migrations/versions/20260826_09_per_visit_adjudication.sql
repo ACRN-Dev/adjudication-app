@@ -66,16 +66,22 @@ ALTER TABLE committee_decisions DROP CONSTRAINT IF EXISTS committee_decisions_pa
 ALTER TABLE adjudication_records ALTER COLUMN diagnosis TYPE diagnosis_code_v2
 USING CASE diagnosis::text
     WHEN 'PREECLAMPSIA' THEN 'PE'::diagnosis_code_v2
+    WHEN 'PE' THEN 'PE'::diagnosis_code_v2
+    WHEN 'SEVERE_PREECLAMPSIA' THEN 'SEVERE_PE'::diagnosis_code_v2
+    WHEN 'SEVERE_PE' THEN 'SEVERE_PE'::diagnosis_code_v2
     WHEN 'ECLAMPSIA' THEN 'ECLAMPSIA'::diagnosis_code_v2
     WHEN 'HELLP' THEN 'HELLP'::diagnosis_code_v2
-    ELSE NULL
+    ELSE diagnosis::text::diagnosis_code_v2
 END;
 ALTER TABLE committee_decisions ALTER COLUMN final_diagnosis TYPE diagnosis_code_v2
 USING CASE final_diagnosis::text
     WHEN 'PREECLAMPSIA' THEN 'PE'::diagnosis_code_v2
+    WHEN 'PE' THEN 'PE'::diagnosis_code_v2
+    WHEN 'SEVERE_PREECLAMPSIA' THEN 'SEVERE_PE'::diagnosis_code_v2
+    WHEN 'SEVERE_PE' THEN 'SEVERE_PE'::diagnosis_code_v2
     WHEN 'ECLAMPSIA' THEN 'ECLAMPSIA'::diagnosis_code_v2
     WHEN 'HELLP' THEN 'HELLP'::diagnosis_code_v2
-    ELSE NULL
+    ELSE final_diagnosis::text::diagnosis_code_v2
 END;
 
 ALTER TABLE adjudication_records ADD CONSTRAINT ck_other_reviewer_c_rationale CHECK (

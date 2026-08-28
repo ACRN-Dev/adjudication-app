@@ -19,6 +19,15 @@ function AdjudicatorProfiles(){
   const load=()=>fetch('/api/admin/adjudicator-profiles',{credentials:'include'}).then(r=>r.ok?r.json():Promise.reject(new Error('Profile request failed'))).then(x=>setRows(x.items||[])).catch(e=>setMsg(e.message));
   useEffect(()=>{load()},[]);
   const edit=async row=>{const study=prompt('Study code (PROTECT-Africa or LOPE-Nigeria)');if(!study)return;const contract=prompt('Contract signing date (YYYY-MM-DD)');const reference=prompt('Contract reference');const tor=prompt('Terms of Reference link (optional)')||'';const reason=prompt('Reason for contract update');if(!contract||!reference||!reason?.trim())return;try{const res=await fetch(`/api/admin/adjudicator-profiles/${encodeURIComponent(row.adjudicator_upn)}/contract`,{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({study_code:study,contract_signed_at:`${contract}T00:00:00`,contract_reference:reference,terms_of_reference_url:tor,reason})});if(!res.ok){const x=await res.json();throw new Error(x.detail||'Update failed')}setMsg('Study contract versioned.');load()}catch(e){setMsg(e.message)}};
+  const requested=new URLSearchParams(location.search).get('upn');
+  const selected=rows.find(r=>r.adjudicator_upn===requested);
+  if(selected)return <Page title={selected.display_name} desc="Contract, committee and workload profile. Payee amounts remain restricted to Finance.">
+    <button className="a-link" onClick={()=>goTo('/admin/adjudicator-profiles')}>Back to profiles</button>
+    <Notice kind="warn" title="Finance governance boundary">IT Admin can see contracts and workload facts, but not rates, amounts, payment references or aging. Those require finance.read.</Notice>
+    <div className="a-metrics">{[['Cases reviewed',selected.cases_reviewed],['Meetings attended',selected.meetings_attended],['Work in progress',selected.active_assignments],['Overdue',selected.overdue_assignments],['Reviewer C cases',selected.cases_reviewed_by_role?.REVIEWER_C||0]].map(([l,v])=><div key={l}><strong>{v||0}</strong><span>{l}</span></div>)}</div>
+    <Table caption="Study contracts" columns={['Study','Signed','Reference','Effective from','Effective to','Status']} rows={(selected.contracts||[]).map(c=>[c.study_code,c.contract_signed_at?new Date(c.contract_signed_at).toLocaleDateString():'Not signed',c.contract_reference||'—',c.effective_from?new Date(c.effective_from).toLocaleDateString():'—',c.effective_to?new Date(c.effective_to).toLocaleDateString():'Open',c.status])}/>
+    <Table caption="Committee memberships" columns={['Committee','Role','Effective from','Effective to']} rows={(selected.committee_memberships||[]).map(m=>[m.committee_name,m.membership_role,m.effective_from?new Date(m.effective_from).toLocaleDateString():'—',m.effective_to?new Date(m.effective_to).toLocaleDateString():'Open'])}/>
+  </Page>;
   return <Page title="Adjudicator Profiles" desc="Clinical identity, study contracts, committee membership and ledger-derived workload. Finance data is restricted to Finance users.">{msg&&<div className="a-success" role="status">{msg}</div>}<Table caption="Adjudicator profile register" columns={['Name','Email','Role','Study contracts','Committee membership','A/B signed','C signed','Active assignments','Account']} rows={rows.map(r=>[r.display_name,r.adjudicator_upn,'ADJUDICATOR',(r.contracts||[]).map(c=>`${c.study_code}: ${c.contract_signed_at?new Date(c.contract_signed_at).toLocaleDateString():'Not signed'}`).join(' · ')||'Not configured',(r.committee_memberships||[]).map(m=>`${m.committee_name} (${m.membership_role})`).join(' · ')||'None',r.cases_reviewed_by_role?.REVIEWER_A+r.cases_reviewed_by_role?.REVIEWER_B||0,r.cases_reviewed_by_role?.REVIEWER_C||0,r.active_assignments,r.account_status])} actions={r=><button className="a-link" onClick={()=>edit(rows.find(x=>x.adjudicator_upn===r[1]))}>Manage contract</button>}/></Page>
 }
 
@@ -238,6 +247,7 @@ function Users(){
               <button onClick={()=>{if(confirm(`Reset password for ${u.email}? They will be required to set a new password on next login.`))action(why=>resetDemoPassword(u.id,why),'Reset password')}}>
                 Reset password
               </button>
+              {u.roleCode==='ADJUDICATOR' && <button onClick={()=>goTo(`/admin/adjudicator-profiles?upn=${encodeURIComponent(u.email)}`)}>View profile</button>}
               <select value={u.roleCode} onChange={e=>action(why=>setUserRole(u.id,e.target.value,why),'Change role')}>
                 <option value="ADMIN">Admin</option>
                 <option value="MONITOR">Monitor</option>

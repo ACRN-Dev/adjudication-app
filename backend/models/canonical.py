@@ -75,6 +75,7 @@ class ReviewerRole(str, enum.Enum):
 
 class DiagnosisCode(str, enum.Enum):
     PE = "PE"
+    PREECLAMPSIA = "PE"  # compatibility alias for historical API/tests
     SEVERE_PE = "Severe PE"
     ECLAMPSIA = "Eclampsia"
     HELLP = "HELLP"
@@ -201,6 +202,12 @@ class AdjudicationVisit(Base):
     visit_number = Column(Integer, nullable=False)
     visit_code = Column(String(40), nullable=False)
     visit_date = Column(DateTime, nullable=True, index=True)
+    status = Column(String(40), nullable=False, default="IN_REVIEW", index=True)
+    resolution_type = Column(String(40), nullable=True)
+    final_record_id = Column(UUID(as_uuid=True), nullable=True)
+    finalized_at = Column(DateTime, nullable=True)
+    filing_status = Column(String(30), nullable=False, default="NOT_READY", index=True)
+    filing_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     participant = relationship("Participant", back_populates="visits")
@@ -240,9 +247,12 @@ class SignedCaseArtifact(Base):
     visit_id = Column(UUID(as_uuid=True), ForeignKey("adjudication_visits.id"), nullable=False, unique=True)
     determination_record_id = Column(UUID(as_uuid=True), ForeignKey("adjudication_records.id"), nullable=False)
     pdf_sha256 = Column(String(64), nullable=False)
-    storage_provider = Column(String(30), nullable=False)
-    storage_reference = Column(String(1000), nullable=False)
-    filed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    storage_provider = Column(String(30), nullable=True)
+    storage_reference = Column(String(1000), nullable=True)
+    filing_status = Column(String(30), nullable=False, default="PENDING", index=True)
+    filing_attempts = Column(Integer, nullable=False, default=0)
+    filing_error = Column(Text, nullable=True)
+    filed_at = Column(DateTime, nullable=True)
 
 
 # ── Canonical Field ────────────────────────────────────────────────────────

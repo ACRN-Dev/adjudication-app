@@ -1,5 +1,13 @@
 import pytest
-from services.history_parser import parse_php_serialized_instances, parse_partial_date, sanitize_audit_trail, compute_risk_summary
+from services.history_parser import (
+    compute_risk_summary,
+    finalize_history,
+    history_domain,
+    make_field_key,
+    parse_partial_date,
+    parse_php_serialized_instances,
+    sanitize_audit_trail,
+)
 from models.history import PatientHistoryField
 
 def test_parse_php_serialized_instances():
@@ -26,6 +34,17 @@ def test_parse_php_serialized_instances():
     # Date string with space
     assert parse_php_serialized_instances('#1 - s:19:"6/16/2026 00:00:00 ";') == {1: "6/16/2026 00:00:00 "}
 
+def test_history_label_whitespace_collapses_for_keys():
+    assert make_field_key("Did the participant  have IUGR  in a previous  pregnancy?") == "did_the_participant_have_iugr_in_a_previous_pregnancy"
+
+def test_realtime_history_page_routing_uses_three_adjudicator_domains():
+    assert history_domain("Screening |V01", "Obstetric history") == "obstetric"
+    assert history_domain("Screening |V01", "Medical History") == "conditions"
+    assert history_domain("Screening |V01", "Family History") == "conditions"
+    assert history_domain("Screening |V01", "Allergies / Surgeries") == "conditions"
+    assert history_domain("Medical History / Prior & Concomitant Medications + Sync", "Medical Conditions") == "conditions"
+    assert history_domain("Medical History / Prior & Concomitant Medications + Sync", "Medications / Treatments") == "medications"
+
 def test_parse_partial_date():
     assert parse_partial_date("0") == (None, None)
     assert parse_partial_date("0/0/2014") == ("2014", "year-only")
@@ -40,6 +59,7 @@ def test_sanitize_audit_trail():
     # No staff names should be in the hash
     assert "Makaha" not in str(ahash)
     assert "Edward" not in str(ahash)
+    assert dt is not None
 
 def test_compute_risk_summary():
     fields = [
@@ -55,3 +75,7 @@ def test_compute_risk_summary():
     assert summary["stillbirths"] == 1
     assert "P2" in summary["parity_summary"]
     assert "+1SB" in summary["parity_summary"]
+
+def test_not_known_remains_distinct_value():
+    field = PatientHistoryField(field_key="family_history_known", value="Not known", domain="conditions")
+    assert field.value == "Not known"

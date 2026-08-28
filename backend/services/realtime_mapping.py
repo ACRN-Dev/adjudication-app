@@ -3,6 +3,14 @@ import re
 from datetime import datetime
 
 MAPPING_VERSION = "RT-MAP-1.0"
+DIRECT_ALIASES = {
+    "event_dt":"VISIT_DATE", "visit_date":"VISIT_DATE", "ga_event":"GA_WEEKS",
+    "sbp":"SBP", "dbp":"DBP", "platelets":"PLATELETS", "plt":"PLATELETS",
+    "creatinine":"CREATININE", "ast":"AST", "alt":"ALT", "ldh":"LDH",
+    "upcr":"UPCR", "dipstick_protein":"DIPSTICK_PROTEIN", "headache":"HEADACHE",
+    "visual_disturbance":"VISUAL_DISTURBANCE", "epigastric_pain":"EPIGASTRIC_PAIN",
+    "pulmonary_edema":"PULMONARY_EDEMA", "eclampsia":"ECLAMPSIA",
+}
 PROHIBITED_PATTERNS = tuple(re.compile(p,re.I) for p in (
     r"s\s*flt[- ]?1", r"plgf", r"seng", r"biomarker", r"poc result",
     r"point.of.care", r"treatment allocation", r"randomi[sz]ation allocation", r"circa.?red",
@@ -48,6 +56,8 @@ def classify(row):
     if any(p.search(text) for p in RESTRICTED_PATTERNS): return "RESTRICTED_OPERATIONAL_METADATA"
     return "PERMITTED_CLINICAL_EVIDENCE" if map_variable(row) else "UNMAPPED"
 def map_variable(row):
+    export_name=norm(row.get("Export Variable Name")).replace(" ", "_")
+    if export_name in DIRECT_ALIASES: return DIRECT_ALIASES[export_name]
     text=" | ".join(norm(row.get(k)) for k in ("Page Title","Field Label","Export Variable Name"))
     for canonical,patterns in RULES:
         if any(p.search(text) for p in patterns): return canonical

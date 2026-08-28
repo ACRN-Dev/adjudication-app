@@ -31,11 +31,28 @@ try:
                 "qc_approved": "BOOLEAN NOT NULL DEFAULT 0",
                 "visit_count": "INTEGER DEFAULT 0",
             },
+            "adjudication_visits": {
+                "status": "VARCHAR(40) NOT NULL DEFAULT 'IN_REVIEW'",
+                "resolution_type": "VARCHAR(40)",
+                "final_record_id": "VARCHAR(36)",
+                "finalized_at": "TIMESTAMP",
+                "filing_status": "VARCHAR(30) NOT NULL DEFAULT 'NOT_READY'",
+                "filing_error": "TEXT",
+            },
             "adjudication_records": {
+                "visit_id": "VARCHAR(36)",
                 "visit_number": "INTEGER DEFAULT 1",
                 "date_of_diagnosis": "TIMESTAMP",
+                "comment": "TEXT",
+                "other_rationale": "TEXT",
+            },
+            "signed_case_artifacts": {
+                "filing_status": "VARCHAR(30) NOT NULL DEFAULT 'PENDING'",
+                "filing_attempts": "INTEGER NOT NULL DEFAULT 0",
+                "filing_error": "TEXT",
             },
             "committee_decisions": {
+                "visit_id": "VARCHAR(36)",
                 "visit_number": "INTEGER DEFAULT 1",
                 "date_of_diagnosis": "TIMESTAMP",
                 "reviewer_c_upn": "VARCHAR(255)",
@@ -57,6 +74,31 @@ try:
                 for column_name, definition in columns.items():
                     if column_name not in existing_columns:
                         connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"))
+            # Legacy demo rows may contain historical enum labels. SQLAlchemy
+            # validates enum names when reading records, so normalize old labels
+            # before adjudication queries load them.
+            connection.execute(text(
+                "UPDATE adjudication_records "
+                "SET diagnosis = CASE diagnosis "
+                "WHEN 'PREECLAMPSIA' THEN 'PE' "
+                "WHEN 'SEVERE_PREECLAMPSIA' THEN 'SEVERE_PE' "
+                "WHEN 'Severe PE' THEN 'SEVERE_PE' "
+                "WHEN 'Eclampsia' THEN 'ECLAMPSIA' "
+                "WHEN 'Other' THEN 'OTHER' "
+                "ELSE diagnosis END "
+                "WHERE diagnosis IN ('PREECLAMPSIA', 'SEVERE_PREECLAMPSIA', 'Severe PE', 'Eclampsia', 'Other')"
+            ))
+            connection.execute(text(
+                "UPDATE committee_decisions "
+                "SET final_diagnosis = CASE final_diagnosis "
+                "WHEN 'PREECLAMPSIA' THEN 'PE' "
+                "WHEN 'SEVERE_PREECLAMPSIA' THEN 'SEVERE_PE' "
+                "WHEN 'Severe PE' THEN 'SEVERE_PE' "
+                "WHEN 'Eclampsia' THEN 'ECLAMPSIA' "
+                "WHEN 'Other' THEN 'OTHER' "
+                "ELSE final_diagnosis END "
+                "WHERE final_diagnosis IN ('PREECLAMPSIA', 'SEVERE_PREECLAMPSIA', 'Severe PE', 'Eclampsia', 'Other')"
+            ))
     from database import SessionLocal
     db = SessionLocal()
     try:

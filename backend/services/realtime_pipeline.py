@@ -8,6 +8,7 @@ from models.longitudinal import RTImportBatch,LongitudinalParticipant,Restricted
 from services.realtime_mapping import classify,map_variable,source_value,parse_datetime,parse_numeric,parse_coded,visit_code,MAPPING_VERSION
 from services.longitudinal_derivation import derive_participant
 from services.history_parser import is_history_form, process_history_row, finalize_history
+from services.edc_mapping import is_edc_schema, normalize_edc_rows
 
 REQUIRED_HEADERS={"MRN","Screening #","Randomization #","Form Title","Form Version","Page Title","Field type","Field Label","Data Input","Data Value","Audit Trails","Export Variable Name"}
 PSEUDO_SECRET=os.getenv("RT_PSEUDONYM_SECRET","acrn-demo-only-change-in-production").encode()
@@ -56,18 +57,14 @@ def process_batch(batch_id):
             f.seek(header_pos if found else 0)
             reader=csv.DictReader(f)
             fieldnames_clean={x.strip() for x in (reader.fieldnames or [])}
-            # Reject EDC exports explicitly (wide-form, one row per visit) rather than
-            # letting them silently fail deep inside row processing with a confusing error.
-            edc_shape_cols={"SUBJID","SiteName","GA_EVENT","SBP","DBP","EVENT_DT"}
-            if edc_shape_cols.issubset(fieldnames_clean) and not {"Form Title","Field Label"}.issubset(fieldnames_clean):
-                raise ValueError(
-                    "This file matches the EDC export format (SUBJID/SiteName/GA_EVENT columns), not a "
-                    "RealTime long-form snapshot. Upload it via the EDC import (/api/import/edc) instead."
-                )
+            edc_schema = is_edc_schema(reader.fieldnames)
             missing={"MRN","Screening #","Form Title","Field Label"}-fieldnames_clean
-            if missing and not ({"MRN","Form Title"}.issubset(fieldnames_clean)):
+            if missing and not edc_schema and not ({"MRN","Form Title"}.issubset(fieldnames_clean)):
                 raise ValueError(f"Missing required headers: {sorted(missing)}")
-            batch.validation_result={"passed":True,"headers":len(reader.fieldnames or [])}; batch.status="ROWS_STAGED"; db.commit()
+            if edc_schema:
+                reader = normalize_edc_rows(reader)
+                batch.source_system="EDC"; batch.mapping_version="EDC-MAP-1.0"
+            batch.validation_result={"passed":True,"schema":"EDC_WIDE" if edc_schema else "REALTIME_LONG","headers":len(fieldnames_clean)}; batch.status="ROWS_STAGED"; db.commit()
             resume_at=batch.rows_processed or 0
             existing_participants=db.query(LongitudinalParticipant).filter_by(source_batch_id=batch.id).all()
             participants={p.blinded_subject_id:p for p in existing_participants}
@@ -96,6 +93,8 @@ def process_batch(batch_id):
                     code,seq,vtype=visit_code(form); visits[vkey]=VisitInstance(participant_id=p.id,source_batch_id=batch.id,form_title=form,form_version=(row.get("Form Version") or "").strip(),scheduled_visit_code=code,visit_type=vtype,visit_occurrence=occ,visit_sequence=seq,reconstruction_method="FORM_BLOCK_SOURCE_ORDER",reconstruction_confidence="MEDIUM" if vtype in {"UNSCHEDULED","EVENT"} else "HIGH",qc_status="PENDING")
                     db.add(visits[vkey]); db.flush()
                 visit=visits[vkey]; category=classify(row)
+                if row.get("_EDC_MISSING_VISIT_KEY"):
+                    visit.qc_status="EXCLUDED_MISSING_KEY_FIELDS"
                 if category=="PROHIBITED_BLINDED": batch.prohibited_count+=1; prohibited_labels.add(hashlib.sha256((row.get("Field Label") or "").encode()).hexdigest()[:12]); continue
                 canonical=map_variable(row)
                 if is_history_form(form): process_history_row(db, batch, p, row, row_no)

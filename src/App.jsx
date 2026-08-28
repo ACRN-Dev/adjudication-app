@@ -34,6 +34,7 @@ export default function App() {
   const [showSourceDocs, setShowSourceDocs] = useState(false);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [signatureSubmission, setSignatureSubmission] = useState(null);
+  const [advanceToVisitIndex, setAdvanceToVisitIndex] = useState(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showSopLibrary, setShowSopLibrary] = useState(false);
   const [showRecusalModal, setShowRecusalModal] = useState(false);
@@ -88,6 +89,7 @@ export default function App() {
 
   const handleSelectCase = (id) => {
     setActiveCaseId(id);
+    setAdvanceToVisitIndex(null);
   };
 
   const handleCsvParsed = (newCase) => {
@@ -97,17 +99,35 @@ export default function App() {
 
   const handleSignatureSuccess = (sigData) => {
     setShowSignatureModal(false);
+    const signedVisit=Number(sigData.visit_number||signatureSubmission?.visitNumber||1);
+    const updatedActiveVisits=(activeCase?.visits||[]).map((visit,index)=>index+1===signedVisit?{...visit,status:sigData.visit_status||'SIGNED',signed:true,filing_status:sigData.filing_status,signature:sigData}:visit);
+    const visitCount = Math.max(6, updatedActiveVisits.length || 0);
+    const finalVisitStates = ['CONCORDANT', 'RESOLVED_BY_MAJORITY', 'FINALIZED', 'CLOSED', 'SIGNED'];
+    const allVisitsComplete = Array.from({ length: visitCount }, (_, index) => {
+      const visit = updatedActiveVisits[index];
+      return Boolean(
+        visit
+        && (finalVisitStates.includes(String(visit.resolution_status || visit.final_status || visit.status).toUpperCase())
+          || visit.final_record
+          || visit.finalized
+          || visit.signed)
+      );
+    }).every(Boolean);
+    const nextVisitIndex = Math.min(Math.max(signedVisit, 0), visitCount);
     setCases(prev => prev.map(c => {
       if (c && c.id === activeCaseId) {
+        const visits=(c.visits||[]).map((visit,index)=>index+1===signedVisit?{...visit,status:sigData.visit_status||'SIGNED',signed:true,filing_status:sigData.filing_status,signature:sigData}:visit);
         return {
           ...c,
-          status: sigData.participant_status || 'Finalized & Signed',
+          visits,
+          status: allVisitsComplete ? 'Finalized & Signed' : 'Adjudication In Progress',
           signature: sigData,
         };
       }
       return c;
     }));
-    setCurrentStep(4);
+    setAdvanceToVisitIndex(allVisitsComplete ? null : nextVisitIndex);
+    setCurrentStep(allVisitsComplete ? 4 : 3);
   };
 
   const handleConfirmRecusal = (recusalData) => {
@@ -237,6 +257,7 @@ export default function App() {
               onOpenSourceDocs={() => setShowSourceDocs(true)}
               onOpenRecusalModal={() => setShowRecusalModal(true)}
               onOpenDataQueryModal={() => setShowDataQueryModal(true)}
+              advanceToVisitIndex={advanceToVisitIndex}
             />
             )}
           </>

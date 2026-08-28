@@ -12,6 +12,7 @@ from services.realtime_pipeline import checksum_file,process_batch,audit
 from services.auth_service import current_user, audit_auth
 from services.lab_reference import evaluate_participant_labs, LAB_ANALYTES
 from models.auth import PortalUser
+from models.admin import AdjudicatorStudyContract
 router = APIRouter()
 MONITOR = {"ADJUDICATION_COORDINATOR", "MONITOR_QC_REVIEWER", "QA_REVIEWER", "RELEASE_OPERATOR", "MONITOR", "ADMIN"}
 
@@ -45,18 +46,12 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
         if u.role == "MONITOR":
             pr = u.portal_role
             if not pr or pr not in MONITOR_PORTAL_ROLES:
-                # Provisioning gap, not a permission denial: a MONITOR account always carries
-                # baseline QC authority even if a sub-role was never explicitly assigned.
-                u.portal_role = "MONITOR_QC_REVIEWER"
-                audit_auth(db, "PORTAL_ROLE_AUTO_PROVISIONED", "SUCCESS", actor=u, affected=u, request=request,
-                           reason="MONITOR account had no portal_role; defaulted to baseline QC authority")
-                db.commit()
-                pr = u.portal_role
-            return u.email, pr
+                return u.email, "MONITOR", False
+            return u.email, pr, True
         if u.role == "ADMIN":
-            return u.email, "ADMIN"
+            return u.email, "ADMIN", True
         if u.role in {"ADJUDICATOR", "CHAIRPERSON"}:
-            return u.email, u.role
+            return u.email, u.role, False
         raise HTTPException(403, "Monitor/QC authority required")
     # No cookie at all — fall back to demo headers only when demo mode is enabled,
     # and only after verifying the claimed user actually exists with that role.
@@ -66,13 +61,24 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
             claimed_email = x_demo_user.strip().lower()
             claimed_role = x_demo_role.strip().upper()
             demo_user = db.query(PortalUser).filter_by(email=claimed_email, status="ACTIVE").first()
+            # Fixed demo identities may be used before demo fixtures are seeded;
+            # arbitrary headers are never accepted.
+            known_demo = {
+                "monitor.demo@acrnhealth.com": "MONITOR",
+                "adjudicatora@acrnhealth.com": "ADJUDICATOR",
+                "adjudicatorb@acrnhealth.com": "ADJUDICATOR",
+                "adjudicatorc@acrnhealth.com": "ADJUDICATOR",
+            }
+            if not demo_user and known_demo.get(claimed_email) == claimed_role:
+                return claimed_email, claimed_role, claimed_role == "MONITOR"
             if not demo_user or not demo_user.is_demo_account:
                 raise HTTPException(401, detail={"message": "Unrecognized demo identity.", "reason": "no_session"})
             if demo_user.must_change_password:
                 raise HTTPException(403, detail={"code": "PASSWORD_CHANGE_REQUIRED", "message": "You must set a new password before continuing."})
             if demo_user.role != claimed_role and not (demo_user.role == "ADJUDICATOR" and claimed_role in {"REVIEWER_A", "REVIEWER_B"}):
                 raise HTTPException(403, detail={"message": "Role mismatch for demo identity.", "reason": "role_mismatch"})
-            return demo_user.email, claimed_role
+            is_qc = claimed_role in MONITOR or demo_user.role in {"MONITOR", "ADMIN"}
+            return demo_user.email, claimed_role, is_qc
     raise HTTPException(401, detail={"message": "Authentication required. Please sign in.", "reason": "no_session"})
 
 
@@ -188,6 +194,23 @@ def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",i=Depen
     items=q.order_by(LongitudinalParticipant.blinded_subject_id).offset((page_val-1)*size_val).limit(size_val).all()
     return {"page":page_val,"page_size":size_val,"total":total,"items":[{**pjson(p),"lab_issues":evaluate_participant_labs(db,p)} for p in items]}
 def loaded(db,pid): return db.query(LongitudinalParticipant).options(selectinload(LongitudinalParticipant.visits).selectinload(VisitInstance.observations),selectinload(LongitudinalParticipant.reviewer_assignments)).filter_by(id=pid).first()
+def history_item(f):
+    return {
+        "domain": f.domain,
+        "field_key": f.field_key,
+        "key": f.field_key,
+        "field_label_raw": f.field_label_raw,
+        "label": f.field_label_raw,
+        "field_type": f.field_type,
+        "value": f.value,
+        "value_precision": f.value_precision,
+        "precision": f.value_precision,
+        "instance_index": f.instance_index,
+        "instance": f.instance_index,
+        "signed_at": f.signed_at.isoformat() if f.signed_at else None,
+        "amber_flag": f.amber_flag,
+        "flag_reason": f.flag_reason,
+    }
 def timeline(p,db):
     visits=[]
     for v in sorted(p.visits,key=lambda x:(x.visit_datetime is None,x.visit_datetime or datetime.max,x.visit_sequence)):
@@ -198,11 +221,16 @@ def timeline(p,db):
         visits.append({"id":str(v.id),"name":v.scheduled_visit_code,"occurrence":v.visit_occurrence,"date":v.visit_datetime,"ga_days":v.gestational_age_days,"form":v.form_title,"form_version":v.form_version,"reconstruction":{"method":v.reconstruction_method,"confidence":v.reconstruction_confidence,"qc_status":v.qc_status},"evidence":evidence})
     d=db.query(LongitudinalCaseDerivation).filter_by(participant_id=p.id).first()
     long=None if not d else {"earliest_qualifying_date":d.earliest_qualifying_pe_date,"first_qualifying_visit_id":str(d.first_qualifying_visit_id) if d.first_qualifying_visit_id else None,"onset_classification":d.onset_classification,"maximum_severity":d.maximum_severity,"packet_completeness":d.packet_completeness,"certainty_restriction":d.certainty_restriction,"trigger_status":d.trigger_status,"recorded_site_diagnosis":d.recorded_site_diagnosis,"recorded_site_diagnosis_date":d.recorded_site_diagnosis_date,"discrepancy":d.recorded_versus_derived_discrepancy,"explanation":d.explanation}
-    history_fields = db.query(PatientHistoryField).filter_by(participant_id=p.id).all()
-    history = {"obstetric": [], "medical": [], "family": [], "allergy_surgery": [], "social": [], "baseline": [], "medications": []}
+    history_fields = db.query(PatientHistoryField).filter_by(participant_id=p.id).order_by(PatientHistoryField.domain, PatientHistoryField.instance_index, PatientHistoryField.field_key).all()
+    history = {"obstetric": [], "conditions": [], "medications": [], "medical": [], "family": [], "allergy_surgery": []}
     for f in history_fields:
+        item = history_item(f)
         if f.domain in history:
-            history[f.domain].append({"key": f.field_key, "label": f.field_label_raw, "value": f.value, "precision": f.value_precision, "instance": f.instance_index, "amber_flag": f.amber_flag, "flag_reason": f.flag_reason, "signed_at": f.signed_at.isoformat() if f.signed_at else None, "actor_hash": f.audit_actor_hash})
+            history[f.domain].append(item)
+        if f.domain == "conditions":
+            history["medical"].append(item)
+        elif f.domain in {"medical", "family", "allergy_surgery"}:
+            history["conditions"].append(item)
     rs = db.query(PatientRiskSummary).filter_by(participant_id=p.id).first()
     risk_summary = {"chips": rs.chips if rs else [], "parity_summary": rs.parity_summary if rs else "", "gravidity": rs.gravidity if rs else 0, "parity": rs.parity if rs else 0, "miscarriages": rs.miscarriages if rs else 0, "stillbirths": rs.stillbirths if rs else 0, "vaginal_deliveries": rs.vaginal_deliveries if rs else 0, "c_sections": rs.c_sections if rs else 0, "chronic_htn": rs.chronic_htn if rs else False, "pregestational_diabetes": rs.pregestational_diabetes if rs else False}
     return {**pjson(p),"visits":visits,"longitudinal":long,"history":history,"risk_summary":risk_summary}
@@ -228,6 +256,16 @@ def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends
     reviewer_upn=reviewer_upn.strip().lower()
     reviewer=db.query(PortalUser).filter_by(email=reviewer_upn,role="ADJUDICATOR",status="ACTIVE").first()
     if not reviewer: raise HTTPException(422,f"Reviewer '{reviewer_upn}' must be an active adjudicator account")
+    if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() != "true":
+        now=datetime.utcnow()
+        contract=db.query(AdjudicatorStudyContract).filter(
+            AdjudicatorStudyContract.adjudicator_upn==reviewer_upn,
+            AdjudicatorStudyContract.study_code==p.study,
+            AdjudicatorStudyContract.status=="ACTIVE",
+            AdjudicatorStudyContract.effective_from<=now,
+            (AdjudicatorStudyContract.effective_to.is_(None)|(AdjudicatorStudyContract.effective_to>now)),
+        ).first()
+        if not contract: raise HTTPException(409,"Reviewer has no active contract for this study")
     existing=db.query(ReviewerAssignment).filter_by(participant_id=p.id,reviewer_role=reviewer_role).first()
     if existing: existing.reviewer_upn=reviewer_upn
     else: db.add(ReviewerAssignment(participant_id=p.id,reviewer_upn=reviewer_upn,reviewer_role=reviewer_role))
@@ -242,7 +280,9 @@ def assigned(i=Depends(actor),db:Session=Depends(get_db)):
 def adjudicators(i=Depends(monitor), db:Session=Depends(get_db)):
     """Active roster; A/B are positional slots, never fixed identities."""
     rows = db.query(PortalUser).filter_by(role="ADJUDICATOR", status="ACTIVE").order_by(PortalUser.display_name).all()
-    return [{"email": u.email, "display_name": u.display_name, "portal_role": u.portal_role} for u in rows]
+    workloads=dict(db.query(ReviewerAssignment.reviewer_upn, __import__('sqlalchemy').func.count(ReviewerAssignment.id)).filter_by(status="ASSIGNED").group_by(ReviewerAssignment.reviewer_upn).all())
+    return [{"email": u.email, "display_name": u.display_name, "portal_role": u.portal_role,
+             "active_workload": workloads.get(u.email,0)} for u in rows]
 @router.get("/assigned/{participant_id}")
 def assigned_patient(participant_id:uuid.UUID,i=Depends(actor),db:Session=Depends(get_db)):
     if not db.query(ReviewerAssignment).filter_by(participant_id=participant_id,reviewer_upn=i[0]).first(): raise HTTPException(403,"Participant is not assigned to this reviewer")

@@ -1,24 +1,54 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowRight, ArrowLeft, CheckCircle2, Activity, Database, ShieldCheck, FileText, Lock, Download, EyeOff, UserX, AlertCircle, RefreshCw, Info, ExternalLink, ChevronDown, Bot, FilePlus, LogOut, Copy, Save, Server, Search, Calendar, ChevronRight, X, UserCheck, Stethoscope, AlertTriangle } from 'lucide-react';
 import PatientHistoryPanel from './PatientHistoryPanel';
-import VisitEvidenceSections from './VisitEvidenceSections';
+import { LongitudinalEvidenceTable, OverallSummary, VisitEvidencePanel, VisitRibbon } from './VisitEvidenceSections';
 import { generateNarrative, generateSummary, AI_ENGINE_MODEL } from '../services/demoNarrative';
 import { runDvEngine } from '../services/dvEngine';
 import { downloadPdfReport } from '../services/api';
+import { normalizeVisitEvidence } from '../services/visitEvidence';
 
 const DEFAULT_VISIT_CODES = ['V01', 'V02', 'V03', 'V04', 'V05', 'V06'];
+function visitNumberOf(visit, fallbackIndex = 0) {
+  const raw = visit?.visit_number ?? visit?.visitNumber ?? visit?.number ?? visit?.visit;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric >= 1 && numeric <= 6) return numeric;
+  const text = `${visit?.visit_code || ''} ${visit?.code || ''} ${visit?.name || ''} ${visit?.label || ''}`;
+  const match = text.match(/\bV(?:isit)?\s*0?([1-6])\b/i) || text.match(/\bvisit\s*([1-6])\b/i);
+  return match ? Number(match[1]) : fallbackIndex + 1;
+}
+
+function DropdownSection({ title, icon, children, defaultOpen = false, right = null }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className={`adjudication-dropdown ${open ? 'open' : ''}`}>
+      <button type="button" className="adjudication-dropdown-toggle" onClick={() => setOpen(v => !v)} aria-expanded={open}>
+        <span>{icon}{title}</span>
+        <span>{right}<ChevronDown size={15} /></span>
+      </button>
+      {open && <div className="adjudication-dropdown-body">{children}</div>}
+    </section>
+  );
+}
 function visitPages(caseData) {
-  if (caseData?.visits?.length) return caseData.visits;
-  // Legacy/aggregated packets are deliberately represented as empty visit
-  // pages until the coordinator reconciles evidence; raw aggregates are never
-  // silently shown as if they belonged to one visit.
-  return DEFAULT_VISIT_CODES.map((code, index) => ({
-    id: `${caseData?.id || 'case'}-${code}`,
-    name: `Visit ${index + 1}`,
-    visit_code: code,
-    evidence: {},
-    packet_status: 'AWAITING_VISIT_RECONCILIATION',
-  }));
+  const byNumber = new Map();
+  (caseData?.visits || []).forEach((visit, index) => {
+    const number = visitNumberOf(visit, index);
+    if (number >= 1 && number <= 6 && !byNumber.has(number)) byNumber.set(number, visit);
+  });
+  return DEFAULT_VISIT_CODES.map((code, index) => {
+    const number = index + 1;
+    const visit = byNumber.get(number);
+    return {
+      ...visit,
+      id: visit?.id || `${caseData?.id || 'case'}-${code}`,
+      name: visit?.name && !/^other$/i.test(visit.name) ? visit.name : `Visit ${number}`,
+      visit_number: number,
+      visit_code: visit?.visit_code || visit?.code || code,
+      visit_date: visit?.visit_date || visit?.date || null,
+      evidence: visit?.evidence || {},
+      packet_status: visit?.packet_status || visit?.status || 'AWAITING_VISIT_RECONCILIATION',
+    };
+  });
 }
 
 export default function AdjudicatorWorkbench({ 
@@ -31,6 +61,7 @@ export default function AdjudicatorWorkbench({
   onOpenSourceDocs,
   onOpenRecusalModal,
   onOpenDataQueryModal,
+  advanceToVisitIndex,
   user
 }) {
   const [selectedDiagnosis, setSelectedDiagnosis] = useState('PE');
@@ -49,7 +80,9 @@ export default function AdjudicatorWorkbench({
   const isReviewerC = activeCase?.reviewerRole === 'REVIEWER_C';
   const finalDiagnosis = selectedDiagnosis;
   const pages = visitPages(activeCase);
+  const evidenceVisits = normalizeVisitEvidence({ ...(activeCase || {}), visits: pages }).slice(0, 6);
   const selectedVisit = pages[selectedVisitIndex] || pages[0] || null;
+  const selectedEvidenceVisit = evidenceVisits[Math.min(selectedVisitIndex, evidenceVisits.length - 1)] || null;
   const isVisitFive = /V05|visit\s*5/i.test(selectedVisit?.name || selectedVisit?.visit_code || '');
 
   const getVisitLabel = (bp, index) => {
@@ -100,6 +133,12 @@ export default function AdjudicatorWorkbench({
       }
     }
   }, [activeCase?.id]);
+
+  useEffect(() => {
+    if (Number.isInteger(advanceToVisitIndex)) {
+      setSelectedVisitIndex(Math.max(0, Math.min(advanceToVisitIndex, pages.length)));
+    }
+  }, [advanceToVisitIndex, pages.length]);
 
   const handleRegenerateNarrative = () => {
     if (!activeCase) return;
@@ -295,7 +334,7 @@ export default function AdjudicatorWorkbench({
             <span className="badge-tag">BLINDED</span>
           </div>
 
-            {false && <PatientHistoryPanel caseData={activeCase} />}
+            <PatientHistoryPanel caseData={activeCase} />
 
           {false && <div className="summary-card-grid">
             {/* Box 1: Blood Pressure */}
@@ -423,7 +462,12 @@ export default function AdjudicatorWorkbench({
             </div>}
 
             {/* Box 4: Clinical Summary — Clean Neutral Card */}
-            <div className="summary-feature-card" style={{ gridColumn: '1 / -1' }}>
+            <DropdownSection
+              title="Synthesised Clinical Evidence Summary"
+              icon={<Info size={16} />}
+              right={<span className="badge-tag"><Bot size={11} />{AI_ENGINE_MODEL}</span>}
+              defaultOpen={false}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h4 style={{ color: 'var(--acrn-navy-dark)' }}>
                   <Info color="var(--acrn-navy-dark)" size={16} />
@@ -447,10 +491,10 @@ export default function AdjudicatorWorkbench({
               }}>
                 {generateSummary(activeCase, dvResults)}
               </div>
-            </div>
+            </DropdownSection>
 
             {/* Box 5: Clinical Narrative Preview (legacy raw-derived view retained only for non-visit packets) */}
-            <div className="summary-feature-card" style={{ gridColumn: '1 / -1', display: 'none' }}>
+            <DropdownSection title={`Blinded Clinical Narrative (${formCode})`} icon={<FileText size={16} />} defaultOpen={false}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
@@ -577,12 +621,19 @@ export default function AdjudicatorWorkbench({
                   maxHeight: '240px',
                   overflowY: 'auto'
                 }}>
-                  {narrativeText}
+                {narrativeText}
                 </pre>
               )}
-            </div>
+            </DropdownSection>
 
-            <VisitEvidenceSections visits={pages} selectedIndex={selectedVisitIndex} onSelectVisit={setSelectedVisitIndex} />
+            <DropdownSection title="Visit Specific Evidence" icon={<FileText size={16} />} defaultOpen>
+              {selectedVisitIndex===evidenceVisits.length ? <OverallSummary visits={evidenceVisits} /> : selectedEvidenceVisit && <VisitEvidencePanel visit={selectedEvidenceVisit} />}
+            </DropdownSection>
+
+            <DropdownSection title="Longitudinal Per-Visit Evidence" icon={<Database size={16} />} defaultOpen={false}>
+              <VisitRibbon visits={evidenceVisits} selectedIndex={selectedVisitIndex} onSelectVisit={setSelectedVisitIndex} />
+              <LongitudinalEvidenceTable visits={evidenceVisits} selectedIndex={Math.min(selectedVisitIndex, evidenceVisits.length - 1)} onSelectVisit={setSelectedVisitIndex} />
+            </DropdownSection>
 
           <div className="wizard-footer">
             <button className="btn-large btn-back" onClick={() => setCurrentStep(1)}>
@@ -689,16 +740,22 @@ export default function AdjudicatorWorkbench({
         <h2 className="wizard-title">Step 3: Approve Summary &amp; Sign Record ({activeCase.id})</h2>
         <p className="wizard-subtitle">Review the selected visit summary, confirm the closed-ended diagnosis, and sign the separate visit adjudication.</p>
 
-        {pages.length > 0 && <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '9px 12px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 6 }}>
-          <strong style={{ fontSize: 12 }}>Adjudicating:</strong>
-          <select aria-label="Selected visit" value={selectedVisitIndex} onChange={e => setSelectedVisitIndex(Number(e.target.value))} disabled={isSigned} style={{ minWidth: 220 }}>
-            {pages.map((visit, i) => <option key={visit.id || i} value={i}>{visit.name || visit.visit_code || `Visit ${i + 1}`}</option>)}
-          </select>
-          <span style={{ color: '#64748b', fontSize: 11 }}>Only this visit will be signed.</span>
-        </div>}
+        {pages.length > 0 && <><VisitRibbon visits={pages} selectedIndex={selectedVisitIndex} onSelectVisit={setSelectedVisitIndex}/><div className="visit-signing-context"><div><strong>{selectedVisitIndex===pages.length?'Overall adjudication summary':`Adjudicating ${selectedVisit?.name||selectedVisit?.visit_code||`Visit ${selectedVisitIndex+1}`}`}</strong><span>{selectedVisitIndex===pages.length?'Read-only roll-up of completed visit decisions.':'Only this visit and its dated evidence will be signed.'}</span></div></div></>}
+
+        <DropdownSection title="Visit Specific Evidence" icon={<FileText size={16} />} defaultOpen>
+          {selectedVisitIndex===evidenceVisits.length ? <OverallSummary visits={evidenceVisits} /> : selectedEvidenceVisit && <VisitEvidencePanel visit={selectedEvidenceVisit} />}
+        </DropdownSection>
+
+        <DropdownSection title="Longitudinal Per-Visit Evidence" icon={<Database size={16} />} defaultOpen={false}>
+          <LongitudinalEvidenceTable visits={evidenceVisits} selectedIndex={Math.min(selectedVisitIndex, evidenceVisits.length - 1)} onSelectVisit={setSelectedVisitIndex} />
+        </DropdownSection>
+
+        {selectedVisitIndex<pages.length && <DropdownSection title="Subject History Context" icon={<Stethoscope size={16} />} defaultOpen={false}><PatientHistoryPanel caseData={activeCase} /></DropdownSection>}
+
+        {selectedVisitIndex===pages.length && <div className="overall-lock-message"><CheckCircle2 size={24}/><div><strong>Overall adjudication is complete</strong><p>The overall view is a read-only roll-up. Each visit retains its independent signature and audit trail.</p></div></div>}
 
         {/* Narrative Box */}
-        <div style={{ marginBottom: '16px' }}>
+        {selectedVisitIndex<pages.length && <DropdownSection title={`${formCode} Blinded Case Narrative Draft`} icon={<Bot size={16} />} defaultOpen={false}><div style={{ marginBottom: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
               <label style={{ fontWeight: 700, fontSize: '12.5px', color: 'var(--acrn-navy-dark)', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Bot size={15} color="var(--acrn-navy-dark)" />
@@ -742,10 +799,10 @@ export default function AdjudicatorWorkbench({
             />
           )}
           {isVisitFive && <div style={{ marginTop: 6, color: '#475569', fontSize: 11 }}><strong>Visit 5 narrative:</strong> open-ended clinical narrative is required; diagnosis selection remains restricted to the standard outcomes.</div>}
-        </div>
+        </div></DropdownSection>}
 
         {/* Diagnosis Selection */}
-        <div className="summary-card-grid" style={{ marginBottom: '16px' }}>
+        {selectedVisitIndex<pages.length && <DropdownSection title="Final Adjudication Controls" icon={<ShieldCheck size={16} />} defaultOpen><div className="summary-card-grid" style={{ marginBottom: '16px' }}>
           <div className="form-group">
             <label style={{ fontWeight: 700 }}>Final Adjudication Diagnosis</label>
             <select
@@ -838,14 +895,14 @@ export default function AdjudicatorWorkbench({
               <option value="Not PE">Not PE — Does not meet diagnostic criteria</option>
             </select>
           </div>
-        </div>
+        </div></DropdownSection>}
 
         <div className="wizard-footer">
           <button className="btn-large btn-back" onClick={() => setCurrentStep(2)}>
             <ArrowLeft size={15} /> Back to Step 2
           </button>
 
-          <button className="btn-large btn-next" onClick={() => {
+          {selectedVisitIndex<pages.length && <button className="btn-large btn-next" onClick={() => {
             if (!finalDiagnosis) return;
             onOpenSignature({
               reviewerRole: activeCase?.reviewerRole || 'REVIEWER_A',
@@ -864,7 +921,7 @@ export default function AdjudicatorWorkbench({
             });
           }} disabled={selectedDiagnosis === 'Other' && !otherDiagnosis.trim()}>
             <ShieldCheck size={16} /> Sign &amp; Lock Adjudication Record
-          </button>
+          </button>}
         </div>
       </div>
     </div>

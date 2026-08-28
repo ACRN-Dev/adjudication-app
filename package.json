@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-      "dev:api": "set \"ENABLE_DEMO_ACCOUNTS=false\"&& set \"AUTH_COOKIE_SECURE=false\"&& .venv\\Scripts\\python.exe -m uvicorn main:app --app-dir backend --reload --port 8000",
+      "dev:api": "set \"ENABLE_DEMO_ACCOUNTS=true\"&& set \"AUTH_COOKIE_SECURE=false\"&& .venv\\Scripts\\python.exe -m uvicorn main:app --app-dir backend --reload --port 8000",
       "dev:api:demo": "set \"ENABLE_DEMO_ACCOUNTS=true\"&& set \"AUTH_COOKIE_SECURE=false\"&& .venv\\Scripts\\python.exe -m uvicorn main:app --app-dir backend --reload --port 8000",
     "build": "vite build",
     "preview": "vite preview"

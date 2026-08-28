@@ -402,8 +402,9 @@ function Assignments({ user, onOpen }) {
     try {
       if (roster.length < 2) { setMsg('At least two active adjudicators are required.'); return; }
       for (const p of data.items) {
-        await assignPatient(p.id, roster[0].email, 'REVIEWER_A', user);
-        await assignPatient(p.id, roster[1].email, 'REVIEWER_B', user);
+        const ordered=[...roster].sort((a,b)=>(a.active_workload||0)-(b.active_workload||0)||a.email.localeCompare(b.email));
+        await assignPatient(p.id, ordered[0].email, 'REVIEWER_A', user);
+        await assignPatient(p.id, ordered[1].email, 'REVIEWER_B', user);
       }
       setMsg('Auto-assigned Adjudicator A & Adjudicator B to all participants!');
       load();

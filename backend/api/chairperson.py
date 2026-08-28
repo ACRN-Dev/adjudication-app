@@ -63,25 +63,13 @@ def delegate_meeting(req: MeetingDelegationRequest, db: Session = Depends(get_db
     )
     db.add(meeting)
     db.flush()
-    # Attendance and chair sign-off are ledger facts; attendee labels that are
-    # not email addresses are intentionally ignored to avoid misattribution.
-    for attendee in req.attendees:
-        attendee_upn = str(attendee).strip().lower()
-        if "@" not in attendee_upn:
-            continue
-        if not db.query(PortalUser).filter_by(email=attendee_upn, role="ADJUDICATOR").first():
-            continue
-        db.add(AdjudicationActivityLedger(
-            adjudicator_upn=attendee_upn, study_code="PROTECT-Africa",
-            blinded_case_reference=f"MEETING-{meeting.id}", role_served="COMMITTEE_MEMBER",
-            event_type="COMMITTEE_MEETING_ATTENDED", event_at=now_dt, billable=False,
-            source_record_id=str(meeting.id), idempotency_key=f"MEETING_ATTENDED:{meeting.id}:{attendee_upn}",
-        ))
+    # Delegation is not attendance or chair sign-off. Those ledger facts are
+    # recorded only after the meeting actually occurs and is signed.
     db.add(AdjudicationActivityLedger(
-        adjudicator_upn=chair_upn.lower(), study_code="PROTECT-Africa",
-        blinded_case_reference=f"MEETING-{meeting.id}", role_served="CHAIR",
-        event_type="CHAIR_SIGNOFF", event_at=now_dt, billable=False,
-        source_record_id=str(meeting.id), idempotency_key=f"CHAIR_SIGNOFF:{meeting.id}",
+        adjudicator_upn=delegate.email, study_code="PROTECT-Africa",
+        blinded_case_reference=f"MEETING-{meeting.id}", role_served="DELEGATE_CHAIR",
+        event_type="MEETING_DELEGATED", event_at=meeting.delegated_at, billable=False,
+        source_record_id=str(meeting.id), idempotency_key=f"MEETING_DELEGATED:{meeting.id}",
     ))
     db.commit()
     return {"status": "delegated", "meeting_id": str(meeting.id), "delegate_upn": delegate.email}

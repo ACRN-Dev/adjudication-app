@@ -3,21 +3,29 @@ import hashlib
 from datetime import datetime
 from models.history import PatientHistory, PatientHistoryField, PatientRiskSummary
 
-HISTORY_FORMS = {"Screening |V01", "Medical History / Prior & Concomitant Medications + Sync"}
-HISTORY_DOMAINS = {
-    "Obstetric history": "obstetric",
-    "Medical Conditions": "medical",
-    "Family history": "family",
-    "Allergies": "allergy_surgery",
-    "Social History": "social",
-    "Demographics": "baseline",
-    "Concomitant Medications": "medications",
-    "Prior Medications": "medications",
-    "Medications": "medications",
-}
+SCREENING_FORM = "Screening |V01"
+HISTORY_FORM = "Medical History / Prior & Concomitant Medications + Sync"
+HISTORY_FORMS = {SCREENING_FORM, HISTORY_FORM}
+
+CONDITION_PAGES = {"Medical History", "Family History", "Allergies / Surgeries", "Medical Conditions", "Surgeries", "Allergies"}
+MEDICATION_PAGES = {"Medications / Treatments"}
+MEDICATION_GATE_PAGE = "Medical History"
 
 def is_history_form(form_title):
     return form_title in HISTORY_FORMS
+
+def history_domain(form_title, page_title):
+    if form_title == SCREENING_FORM and page_title == "Obstetric history":
+        return "obstetric"
+    if form_title == SCREENING_FORM and page_title in {"Medical History", "Family History", "Allergies / Surgeries"}:
+        return "conditions"
+    if form_title == HISTORY_FORM and page_title in CONDITION_PAGES:
+        return "conditions"
+    if form_title == HISTORY_FORM and page_title in MEDICATION_PAGES:
+        return "medications"
+    if form_title == HISTORY_FORM and page_title == MEDICATION_GATE_PAGE:
+        return "medications"
+    return None
 
 def normalize_field_label(label):
     if not label:
@@ -64,33 +72,25 @@ def parse_php_serialized_instances(text):
         
     results = {}
     
-    # Split by instance prefixes
-    parts = re.split(r'(#\d+\s*-)', text)
-    
-    current_idx = None
-    for p in parts:
-        p = p.strip()
-        if not p:
+    matches = list(re.finditer(r'#(\d+)\s*-\s*', text))
+    for pos, match in enumerate(matches):
+        idx = int(match.group(1))
+        start = match.end()
+        end = matches[pos + 1].start() if pos + 1 < len(matches) else len(text)
+        val = text[start:end].strip()
+        if val in {"N;", "N"}:
+            results[idx] = None
             continue
-        m = re.match(r'#(\d+)\s*-', p)
-        if m:
-            current_idx = int(m.group(1))
+        sm = re.fullmatch(r's:(\d+):"(.*)";?', val, re.DOTALL)
+        if sm:
+            declared_len = int(sm.group(1))
+            parsed = sm.group(2)
+            if len(parsed.encode("utf-8")) != declared_len and len(parsed) != declared_len:
+                results[idx] = parsed
+            else:
+                results[idx] = parsed
         else:
-            if current_idx is not None:
-                val = p
-                # Check for N; or N
-                if val == 'N;' or val == 'N':
-                    results[current_idx] = None
-                else:
-                    # Extract string from s:<len>:"<val>";
-                    sm = re.search(r's:\d+:"(.*?)";?', val, re.DOTALL)
-                    if sm:
-                        results[current_idx] = sm.group(1)
-                    else:
-                        # Fallback for plain text or missing quotes
-                        val = re.sub(r';$', '', val)
-                        results[current_idx] = val
-                current_idx = None
+            results[idx] = re.sub(r';$', '', val)
                 
     return results
 
@@ -98,12 +98,13 @@ def sanitize_audit_trail(audit_str):
     if not audit_str or audit_str == "0":
         return None, None
     # Usually: "Surname, Firstname - 04/Mar/2026 01:20:21 PM CAT"
-    parts = audit_str.split(' - ')
-    if len(parts) == 2:
-        actor, dt_str = parts
+    m = re.search(r'([^,]+,\s*[^-]+)\s*-\s*(\d{1,2}/[A-Za-z]{3}/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M(?:\s+[A-Z]{2,4})?)', audit_str)
+    if m:
+        actor, dt_str = m.groups()
         actor_hash = hashlib.sha256(actor.strip().encode()).hexdigest()
+        clean_dt = re.sub(r'\s+[A-Z]{2,4}$', '', dt_str.strip())
         try:
-            dt = datetime.strptime(dt_str.strip(), "%d/%b/%Y %I:%M:%S %p %Z")
+            dt = datetime.strptime(clean_dt, "%d/%b/%Y %I:%M:%S %p")
             return dt, actor_hash
         except ValueError:
             # Fallback format or timezone issues
@@ -111,8 +112,9 @@ def sanitize_audit_trail(audit_str):
     return None, None
 
 def process_history_row(db, batch, participant, row, row_no):
+    form_title = (row.get("Form Title") or "").strip()
     page_title = (row.get("Page Title") or "").strip()
-    domain = HISTORY_DOMAINS.get(page_title)
+    domain = history_domain(form_title, page_title)
     if not domain:
         return
         
@@ -200,6 +202,12 @@ def get_field_val(fields, key, idx=None):
                 return f.value
     return None
 
+def is_yes(value):
+    return str(value or "").strip().lower() == "yes"
+
+def missing_detail(value):
+    return value is None or str(value).strip() in {"", "0"}
+
 def compute_risk_summary(fields):
     chips = set()
     
@@ -259,7 +267,7 @@ def compute_risk_summary(fields):
     # (Assuming a key exists for this, e.g., family_history_of_preeclampsia)
     # Check all fields in family domain
     for f in fields:
-        if f.domain == "family" and "preeclampsia" in str(f.value).lower():
+        if f.domain == "conditions" and "family" in f.field_key and "preeclampsia" in str(f.value).lower():
             chips.add("Family history PE")
             break
             
@@ -322,19 +330,23 @@ def finalize_history(db, participant):
     if not fields:
         return
         
-    # Evaluate Amber flags:
-    # Example: If "Did the participant have any Cesarean sections?" == "Yes", but "Number of Cesarean sections" == 0 or empty.
-    # Group fields by instance or globally.
     for f in fields:
         f.amber_flag = False
         f.flag_reason = None
-        
-        # Example condition logic:
-        if f.field_key == "did_the_participant_have_any_cesarean_sections" and f.value == "Yes":
-            cs = get_field_val(fields, "number_of_cesarean_sections", f.instance_index)
-            if not cs or cs == "0":
-                f.amber_flag = True
-                f.flag_reason = "Gate is Yes but detail is empty"
+
+    gate_detail_rules = {
+        "has_participant_had_any_previous_pregnancies": ["if_yes_how_many_previous_pregnancies"],
+        "did_the_participant_have_any_cesarean_sections": ["number_of_cesarean_sections", "reason_for_cesarean_section"],
+        "did_the_participant_have_any_previous_stillbirths_iufd": ["number_of_still_births"],
+        "did_the_participant_have_iugr_in_a_previous_pregnancy": ["iugr_in_a_previous_pregnancy"],
+        "did_the_participant_take_any_prior_or_concomitant_medications_including_supplements_in_the_past_30_days": ["drug_name", "medication_name", "name_of_medication"],
+    }
+    for gate_key, detail_keys in gate_detail_rules.items():
+        for gate in [f for f in fields if f.field_key == gate_key and is_yes(f.value)]:
+            has_detail = any(not missing_detail(get_field_val(fields, key, gate.instance_index)) for key in detail_keys)
+            if not has_detail:
+                gate.amber_flag = True
+                gate.flag_reason = "Gate is Yes but detail field is empty"
                 
     db.commit()
 

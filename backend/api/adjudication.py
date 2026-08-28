@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import random
 
@@ -29,8 +29,18 @@ from models.auth import PortalUser
 from models.longitudinal import LongitudinalParticipant, ReviewerAssignment
 from services.auth_service import verify_password
 from services.case_finalization import finalize_case_pdf, record_determination_activity
+from services.adjudication_resolution import apply_visit_resolution
 
 router = APIRouter()
+
+
+def _naive_utc(value: datetime | None) -> datetime | None:
+    """Normalize API and SQLite datetimes for safe comparison/storage."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _audit(db: Session, event_type: str, participant_id, actor_upn: str,
@@ -80,6 +90,9 @@ def submit_adjudication(
     Submit a blinded adjudication determination for a specific visit.
     subject_id is the BLINDED case reference (e.g. ADJ-E2E-001).
     """
+    sub.visit_date = _naive_utc(sub.visit_date)
+    sub.date_of_diagnosis = _naive_utc(sub.date_of_diagnosis)
+
     # ── 1. Locate participant by blinded case_number ──────────────────────────
     participant = (
         db.query(Participant)
@@ -132,14 +145,14 @@ def submit_adjudication(
         )
         db.add(visit)
         db.flush()
-    elif sub.visit_date and visit.visit_date and sub.visit_date != visit.visit_date:
+    elif sub.visit_date and visit.visit_date and sub.visit_date != _naive_utc(visit.visit_date):
         raise HTTPException(status_code=409, detail="visit_date conflicts with the established subject-visit date.")
 
     # Store measurement dates as distinct evidence timestamps. Sorting is by
     # parsed datetime on retrieval, never by source row or formatted text.
     for item in sub.measurement_dates:
         try:
-            measured_at = datetime.fromisoformat(str(item["measured_at"]).replace("Z", "+00:00"))
+            measured_at = _naive_utc(datetime.fromisoformat(str(item["measured_at"]).replace("Z", "+00:00")))
             measurement_type = str(item["measurement_type"]).strip().upper()
         except (KeyError, TypeError, ValueError):
             raise HTTPException(status_code=422, detail="Each measurement date requires measurement_type and an ISO-8601 measured_at value.")
@@ -288,12 +301,13 @@ def submit_adjudication(
             .all()
         )
         for pr in prior_records:
-            if pr.date_of_diagnosis and sub.date_of_diagnosis < pr.date_of_diagnosis:
+            prior_diagnosis_date = _naive_utc(pr.date_of_diagnosis)
+            if prior_diagnosis_date and sub.date_of_diagnosis < prior_diagnosis_date:
                 raise HTTPException(
                     status_code=422,
                     detail=(
                         f"date_of_diagnosis ({sub.date_of_diagnosis.isoformat()}) at visit {sub.visit_number} "
-                        f"cannot precede the established diagnosis date ({pr.date_of_diagnosis.isoformat()}) "
+                        f"cannot precede the established diagnosis date ({prior_diagnosis_date.isoformat()}) "
                         f"from visit {pr.visit_number}."
                     ),
                 )
@@ -490,18 +504,8 @@ def submit_adjudication(
         )
 
 
-    artifact = None
-    if participant.status in (
-        AdjudicationStatus.CONCORDANT,
-        AdjudicationStatus.RESOLVED_BY_MAJORITY,
-        AdjudicationStatus.FINALIZED,
-    ):
-        determination = rev_c or rev_b or rev_a
-        try:
-            artifact = finalize_case_pdf(db, participant, visit, determination)
-        except Exception as exc:
-            db.rollback()
-            raise HTTPException(status_code=502, detail=f"Signature was not finalized because SharePoint filing failed: {exc}")
+    visit_status, determination, resolution = apply_visit_resolution(participant, visit, visit_records)
+    artifact = finalize_case_pdf(db, participant, visit, determination) if determination else None
 
     db.commit()
 
@@ -514,7 +518,9 @@ def submit_adjudication(
         "signed_at": rec.signed_at.isoformat(),
         "date_of_diagnosis": rec.date_of_diagnosis.isoformat() if rec.date_of_diagnosis else None,
         "participant_status": participant.status.value,
-        "pdf_filed": artifact is not None,
+        "visit_status": visit_status,
+        "pdf_filed": bool(artifact and artifact.filing_status == "FILED"),
+        "filing_status": artifact.filing_status if artifact else visit.filing_status,
         "pdf_sha256": artifact.pdf_sha256 if artifact else None,
     }
 
@@ -587,6 +593,10 @@ def get_adjudication_status(
                 "visit_number": v.visit_number,
                 "visit_code": v.visit_code,
                 "visit_date": v.visit_date.isoformat() if v.visit_date else None,
+                "status": v.status,
+                "resolution_type": v.resolution_type,
+                "filing_status": v.filing_status,
+                "filing_error": v.filing_error,
                 "measurement_dates": [
                     {
                         "measurement_type": m.measurement_type,

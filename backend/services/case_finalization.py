@@ -59,22 +59,42 @@ def finalize_case_pdf(db: Session, participant, visit, determination) -> SignedC
     }
     pdf_bytes = generate_adjudication_pdf(case_data)
     digest = hashlib.sha256(pdf_bytes).hexdigest()
-    adapter = get_etmf_adapter()
-    destination = adapter.write(
-        subject_id=participant.subject_id,
-        blinded_id=f"{case_reference}-{visit.visit_code}",
-        study=participant.study.value,
-        pdf_bytes=pdf_bytes,
-        timestamp=determination.signed_at,
-    )
     artifact = SignedCaseArtifact(
         participant_id=participant.id,
         visit_id=visit.id,
         determination_record_id=determination.id,
         pdf_sha256=digest,
-        storage_provider=adapter.__class__.__name__,
-        storage_reference=destination,
+        # Older local SQLite demo databases created these fields as NOT NULL.
+        # Keep neutral placeholders until the eTMF adapter confirms filing; the
+        # explicit filing_status remains the source of truth for filed vs retry.
+        storage_provider="PENDING",
+        storage_reference="UNFILED",
+        filed_at=determination.signed_at,
+        filing_status="PENDING",
     )
     db.add(artifact)
     db.flush()
+    adapter = get_etmf_adapter()
+    artifact.filing_attempts += 1
+    try:
+        destination = adapter.write(
+            subject_id=participant.subject_id,
+            blinded_id=f"{case_reference}-{visit.visit_code}",
+            study=participant.study.value,
+            pdf_bytes=pdf_bytes,
+            timestamp=determination.signed_at,
+        )
+        artifact.storage_provider = adapter.__class__.__name__
+        artifact.storage_reference = destination
+        artifact.filing_status = "FILED"
+        artifact.filed_at = determination.signed_at
+        visit.filing_status = "FILED"
+        visit.filing_error = None
+    except Exception as exc:
+        # The signed determination remains durable. A monitor can retry filing
+        # without asking the adjudicator to sign the clinical decision again.
+        artifact.filing_status = "FAILED_RETRYABLE"
+        artifact.filing_error = str(exc)[:1000]
+        visit.filing_status = "FAILED_RETRYABLE"
+        visit.filing_error = artifact.filing_error
     return artifact
