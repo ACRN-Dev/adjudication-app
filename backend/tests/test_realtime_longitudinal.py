@@ -1,6 +1,7 @@
 """Synthetic RealTime-shaped privacy, mapping, reconstruction and temporal tests."""
 from services.realtime_mapping import classify,map_variable,parse_datetime,parse_numeric,parse_coded,visit_code
 from services.realtime_pipeline import pseudonym,_fernet
+from api.realtime import _timeline_visit_number
 
 def row(label,page="Vital Signs / Weight Height",form="Visit 3",value="",field_type="numeric",export=""):
     return {"MRN":"TEST-MRN","Screening #":"ZWE999-0001","Randomization #":"R-TEST","Form Title":form,"Form Version":"1.0","Page Title":page,"Field type":field_type,"Field Label":label,"Data Input":value,"Data Value":value,"Audit Trails":"Synthetic User - 01/Jan/2026","Export Variable Name":export}
@@ -38,7 +39,17 @@ def test_scheduled_unscheduled_and_event_visits_remain_separate():
     assert visit_code("Unscheduled visit |01")[2]=="UNSCHEDULED"
     assert visit_code("Adverse Event |01")[2]=="EVENT"
 
+
+def test_timeline_signature_status_uses_scheduled_visit_number():
+    visit = type("Visit", (), {"scheduled_visit_code": "Visit 04"})()
+    assert _timeline_visit_number(visit, 2) == 4
+
 def test_controlled_parsers_preserve_missing_semantics():
     assert parse_numeric("168 mmHg")==168
     assert parse_coded("Flag: Not Done")=="NOT_DONE"
     assert parse_datetime("05/28/2026 08:20:03") is not None
+
+def test_source_datetime_parser_supports_real_time_date_variants():
+    assert parse_datetime("22/Apr/2026 10:57:00 SAST").isoformat() == "2026-04-22T10:57:00"
+    assert parse_datetime("22/04/2026 10:57").isoformat() == "2026-04-22T10:57:00"
+    assert parse_datetime("2026-04-22T10:57:00Z").isoformat() == "2026-04-22T10:57:00"

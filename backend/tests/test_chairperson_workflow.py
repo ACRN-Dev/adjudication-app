@@ -158,6 +158,69 @@ def test_chairperson_list_completed_adjudications():
     assert item_disc["concordance"] == "DISCORDANT_A_NEQ_B"
 
 
+def test_chairperson_lists_each_visit_with_its_own_concordance():
+    subject_id = _seed_completed_case(concordant=True)
+    db = TestingSession()
+    participant = db.query(Participant).filter_by(subject_id=subject_id).one()
+    visit_two = AdjudicationVisit(
+        participant_id=participant.id,
+        visit_number=2,
+        visit_code="VISIT-2",
+        status="AWAITING_REVIEWER_C",
+        resolution_type="A_B_DISCORDANT",
+    )
+    db.add(visit_two)
+    db.flush()
+    common = {
+        "participant_id": participant.id,
+        "visit_id": visit_two.id,
+        "visit_number": 2,
+        "onset_class": OnsetClass.EOPE,
+        "severity": SeverityGrade.WITH_SEVERE,
+        "certainty": CertaintyLevel.DEFINITE,
+        "meets_criteria": True,
+        "rationale": "Complete clinical rationale for visit two.",
+        "signed": True,
+    }
+    db.add_all([
+        AdjudicationRecord(
+            **common,
+            reviewer_role=ReviewerRole.REVIEWER_A,
+            reviewer_upn="adjudicatora@acrnhealth.com",
+            reviewer_name="Reviewer A",
+            diagnosis=DiagnosisCode.PREECLAMPSIA,
+        ),
+        AdjudicationRecord(
+            **common,
+            reviewer_role=ReviewerRole.REVIEWER_B,
+            reviewer_upn="adjudicatorb@acrnhealth.com",
+            reviewer_name="Reviewer B",
+            diagnosis=DiagnosisCode.HELLP,
+        ),
+    ])
+    db.commit()
+    db.close()
+
+    user = _chairperson_user_with_assignment()
+    previous = app.dependency_overrides.get(current_user)
+    app.dependency_overrides[current_user] = lambda: user
+    try:
+        response = client.get("/api/chairperson/completed-adjudications")
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(current_user, None)
+        else:
+            app.dependency_overrides[current_user] = previous
+
+    assert response.status_code == 200
+    rows = [item for item in response.json()["items"] if item["subject_id"] == subject_id]
+    assert [(row["visit_number"], row["concordance"]) for row in rows] == [
+        (1, "CONCORDANT_A_EQUALS_B"),
+        (2, "DISCORDANT_A_NEQ_B"),
+    ]
+    assert len({row["id"] for row in rows}) == 2
+
+
 def test_chairperson_requires_active_assignment():
     user = PortalUser(
         id="chair-assignment-test-user",

@@ -48,6 +48,7 @@ try:
                 "first_pe_visit_number": "INTEGER",
                 "first_pe_date": "TIMESTAMP",
                 "other_rationale": "TEXT",
+                "differential_diagnosis": "VARCHAR(500)",
             },
             "signed_case_artifacts": {
                 "filing_status": "VARCHAR(30) NOT NULL DEFAULT 'PENDING'",

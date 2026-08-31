@@ -107,6 +107,7 @@ def test_maybe_seed_demo_accounts_respects_enable_flag(monkeypatch):
 
 def test_admin_account_actions_audit_and_do_not_leak_default_password(monkeypatch):
     monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "true")
+    monkeypatch.setenv("DEMO_FORCE_PASSWORD_CHANGE", "false")
     db = reset_auth_tables()
     seed_demo_accounts(db)
     target = db.query(PortalUser).filter_by(email="adjudicatora@acrnhealth.com").first().id
@@ -141,6 +142,7 @@ def test_seeded_demo_monitor_accounts_have_a_valid_portal_role():
 
 def test_seeded_demo_monitor1_can_login_and_call_realtime_batches(monkeypatch):
     monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    monkeypatch.setenv("DEMO_FORCE_PASSWORD_CHANGE", "false")
     db = reset_auth_tables()
     seed_demo_accounts(db)
     db.close()

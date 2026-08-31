@@ -128,6 +128,8 @@ export default function App() {
     }));
     setAdvanceToVisitIndex(allVisitsComplete ? null : nextVisitIndex);
     setCurrentStep(allVisitsComplete ? 4 : 3);
+    // Start each newly loaded adjudication state at the top of the workbench.
+    requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'smooth' }));
   };
 
   const handleConfirmRecusal = (recusalData) => {

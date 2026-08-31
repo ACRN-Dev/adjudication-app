@@ -40,6 +40,10 @@ def apply_visit_resolution(participant, visit, records):
         participant.status = AdjudicationStatus.COMMITTEE_PENDING
     elif any(s == "IN_REVIEW" for s in statuses):
         participant.status = AdjudicationStatus.IN_REVIEW
-    elif all(s in {"CONCORDANT", "RESOLVED_BY_MAJORITY", "FINALIZED"} for s in statuses):
+    elif statuses and all(s == "CONCORDANT" for s in statuses):
+        participant.status = AdjudicationStatus.CONCORDANT
+    elif statuses and all(s in {"CONCORDANT", "RESOLVED_BY_MAJORITY"} for s in statuses):
+        participant.status = AdjudicationStatus.RESOLVED_BY_MAJORITY
+    elif statuses and all(s in {"CONCORDANT", "RESOLVED_BY_MAJORITY", "FINALIZED"} for s in statuses):
         participant.status = AdjudicationStatus.FINALIZED
     return status, adopted, resolution

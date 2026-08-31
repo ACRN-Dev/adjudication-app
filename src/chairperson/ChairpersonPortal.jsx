@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Users, FileText, CheckCircle, AlertTriangle, Scale, Lock, LogOut,
-  Calendar, Download, RefreshCw, Send, CheckSquare, ShieldCheck, ChevronRight
+  Calendar, Download, RefreshCw, Send, CheckSquare, ShieldCheck, ChevronRight, Eye, X
 } from 'lucide-react';
 import './chairperson.css';
 
@@ -24,6 +24,27 @@ export default function ChairpersonPortal({ user, onLogout }) {
   const [selectedCaseIds, setSelectedCaseIds] = useState([]);
   const [isSigning, setIsSigning] = useState(false);
   const [signSuccess, setSignSuccess] = useState(null);
+  const [inspectionItem, setInspectionItem] = useState(null);
+  const meetingCases = adjudications.filter((item, index, rows) =>
+    rows.findIndex(candidate => candidate.subject_id === item.subject_id) === index
+  );
+  const groupedAdjudications = adjudications.reduce((groups, item) => {
+    const key = item.subject_id || item.participant_id || 'Unknown participant';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(item);
+    return groups;
+  }, {});
+  const formatDate = (value) => value ? new Date(value).toLocaleString() : 'Not recorded';
+  const displayDiagnosis = (reviewer) => reviewer?.diagnosis || 'Pending';
+  const renderRationale = (rationale) => {
+    const sections = String(rationale || '').split(/\s*(?=SECTION\s+\d+)/i).filter(Boolean);
+    return sections.map((section, index) => {
+      const match = section.match(/^(SECTION\s+\d+\s*[—-]?\s*[^:]*)(?::)?\s*/i);
+      const title = match ? match[1].trim() : `Evidence detail ${index + 1}`;
+      const body = match ? section.slice(match[0].length).trim() : section.trim();
+      return <div className="rationale-section" key={`${title}-${index}`}><strong>{title}</strong><p>{body}</p></div>;
+    });
+  };
 
   const fetchAdjudications = async () => {
     setLoading(true);
@@ -35,7 +56,7 @@ export default function ChairpersonPortal({ user, onLogout }) {
         const items = Array.isArray(data.items) ? data.items : [];
         setAdjudications(items);
         setSummary(data.summary || { concordant: 0, discordant: 0, three_way_divergent: 0, closed: 0 });
-        setSelectedCaseIds(items.map(i => i.subject_id));
+        setSelectedCaseIds([...new Set(items.map(i => i.subject_id))]);
       } else {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail || `Chairperson data request failed (${res.status})`);
@@ -132,7 +153,7 @@ export default function ChairpersonPortal({ user, onLogout }) {
       {/* Chairperson Header */}
       <header className="chair-header">
         <div className="chair-header-title">
-          <img src="/acrn-logo.png" alt="ACRN" style={{ height: '32px', filter: 'brightness(0) invert(1)' }} />
+          <img src="/acrn-logo.png" alt="ACRN" style={{ height: '32px', width: 'auto', objectFit: 'contain' }} />
           <div>
             <h1>Adjudication Chairperson Workspace</h1>
             <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
@@ -258,30 +279,32 @@ export default function ChairpersonPortal({ user, onLogout }) {
             </div>
 
             <div className="chair-table-wrap">
-              <table className="chair-table">
+              <table className="chair-table chair-decision-table">
                 <thead>
                   <tr>
-                    <th style={{ minWidth: '110px' }}>Subject ID</th>
+                    <th style={{ minWidth: '150px' }}>Patient</th>
+                    <th style={{ minWidth: '85px' }}>Visit</th>
                     <th style={{ minWidth: '90px' }}>Site</th>
                     <th style={{ minWidth: '120px' }}>Study</th>
                     <th style={{ minWidth: '160px' }}>Reviewer A</th>
                     <th style={{ minWidth: '160px' }}>Reviewer B</th>
                     <th style={{ minWidth: '160px' }}>Reviewer C</th>
                     <th style={{ minWidth: '160px' }}>Concordance Status</th>
-                    <th style={{ minWidth: '140px' }}>Final Decision</th>
+                    <th style={{ minWidth: '140px' }}>Inspect</th>
                   </tr>
                 </thead>
                 <tbody>
                   {adjudications.length === 0 ? (
                     <tr>
-                      <td colSpan="8" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>
+                      <td colSpan="9" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>
                         No completed adjudication cases found in current batch.
                       </td>
                     </tr>
                   ) : (
-                    adjudications.map((adj) => {
+                    adjudications.map((adj, index) => {
                       const rawStatus = String(adj.concordance_status || adj.concordance || adj.status || '').toUpperCase();
                       const isLope = String(adj.study_code || '').toUpperCase().includes('LOPE');
+                      const isNewPatient = index === 0 || adjudications[index - 1].subject_id !== adj.subject_id;
                       
                       const renderBadge = () => {
                         if (rawStatus.includes('MAJORITY') || rawStatus === 'RESOLVED_BY_MAJORITY') {
@@ -292,6 +315,9 @@ export default function ChairpersonPortal({ user, onLogout }) {
                         }
                         if (rawStatus.includes('THREE_WAY') || rawStatus.includes('DIVERGENT')) {
                           return <span className="tag-divergent"><Scale size={12} /> 3-Way Divergent</span>;
+                        }
+                        if (rawStatus === 'RESOLVED_BY_REVIEWER_C') {
+                          return <span className="tag-concordant"><ShieldCheck size={12} /> Reviewer C Final</span>;
                         }
                         if (rawStatus.includes('ESCALATED') || rawStatus.includes('REVIEWER_C') || rawStatus === 'ESCALATED_TO_C') {
                           return <span className="tag-active-c"><Users size={12} /> Reviewer C Active</span>;
@@ -318,34 +344,72 @@ export default function ChairpersonPortal({ user, onLogout }) {
                           <div className="rev-cell">
                             <div className={`diag-title ${isC ? 'rev-c-diag' : ''}`}>{diag}</div>
                             {cert && <span className={`certainty-pill ${certCls}`}>{cert}</span>}
+                            {typeof rev === 'object' && (
+                              <div className="inline-evidence-details" style={{ marginTop: '5px', fontSize: '10px', color: '#475569', lineHeight: 1.35 }}>
+                                <div className="inline-evidence-details"><strong>Criteria:</strong> {rev.meets_criteria === true ? 'Yes' : rev.meets_criteria === false ? 'No' : 'Not recorded'}</div>
+                                <div><strong>Onset:</strong> {rev.onset_class || 'Not recorded'}</div>
+                                <div><strong>Severity:</strong> {rev.severity || 'Not recorded'}</div>
+                                <div><strong>Diagnosis date:</strong> {rev.date_of_diagnosis ? new Date(rev.date_of_diagnosis).toLocaleString() : 'Not recorded'}</div>
+                                {rev.differential_diagnosis && <div><strong>Differential:</strong> {rev.differential_diagnosis}</div>}
+                                {rev.rationale && <div title={rev.rationale}><strong>Rationale:</strong> {rev.rationale}</div>}
+                              </div>
+                            )}
                           </div>
                         );
                       };
 
                       return (
-                        <tr key={adj.id}>
-                          <td><span className="subj-id-cell">{adj.subject_id}</span></td>
+                        <React.Fragment key={adj.id}>
+                        {isNewPatient && <tr className="next-patient-divider"><td colSpan="9"><span className="next-patient-kicker">Next patient</span><strong>{adj.subject_id}</strong><span>{adj.study_code || 'Study not recorded'}</span></td></tr>}
+                        <tr className="patient-visit-row">
+                          <td><span className="patient-label">Patient</span><span className="subj-id-cell">{adj.subject_id}</span></td>
+                          <td><strong>{adj.visit_code || `Visit ${adj.visit_number || 1}`}</strong></td>
                           <td><span className="site-cell">{adj.site_code || 'HARARE_01'}</span></td>
                           <td><span className={`study-badge ${isLope ? 'lope' : ''}`}>{adj.study_code || 'PROTECT-Africa'}</span></td>
                           <td>{renderRev(adj.reviewer_a)}</td>
                           <td>{renderRev(adj.reviewer_b)}</td>
                           <td>{renderRev(adj.reviewer_c, true)}</td>
                           <td>{renderBadge()}</td>
-                          <td>
-                            {adj.final_outcome ? (
-                              <div className="rev-cell">
-                                <div className="diag-title">{adj.final_outcome.diagnosis || 'Locked'}</div>
-                                <div style={{ fontSize: '10.5px', color: '#64748b' }}>Adopted: {adj.final_outcome.adopted_reviewer}</div>
-                              </div>
-                            ) : <span className="cell-pending">Pending arbitration</span>}
-                          </td>
+                          <td><button className="chair-btn chair-btn-secondary inspect-btn" onClick={() => setInspectionItem(adj)}><Eye size={14} /> Inspect evidence</button></td>
                         </tr>
+                        </React.Fragment>
                       );
                     })
                   )}
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {inspectionItem && (
+          <div className="evidence-modal-backdrop" role="presentation" onClick={() => setInspectionItem(null)}>
+            <section className="evidence-modal" role="dialog" aria-modal="true" aria-labelledby="evidence-title" onClick={(e) => e.stopPropagation()}>
+              <div className="evidence-modal-header">
+                  <div><div className="evidence-kicker">Inspect evidence</div><h2 id="evidence-title">{inspectionItem.subject_id} - {inspectionItem.visit_code || `Visit ${inspectionItem.visit_number || 1}`}</h2></div>
+                <button className="icon-btn" onClick={() => setInspectionItem(null)} aria-label="Close evidence"><X size={18} /></button>
+              </div>
+              <div className="evidence-summary-grid">
+                <div><span>Visit date</span><strong>{formatDate(inspectionItem.visit_date)}</strong></div>
+                <div><span>Concordance</span><strong>{inspectionItem.concordance || 'Pending'}</strong></div>
+              </div>
+              <div className="evidence-reviewers">
+                {[['Reviewer A', inspectionItem.reviewer_a], ['Reviewer B', inspectionItem.reviewer_b], ['Reviewer C', inspectionItem.reviewer_c]].map(([label, reviewer]) => reviewer && (
+                  <article className="evidence-reviewer" key={label}>
+                    <h3>{label}</h3><p className="evidence-diagnosis">{reviewer.diagnosis || 'Pending'}</p>
+                    <dl>
+                      <dt>Criteria</dt><dd>{reviewer.meets_criteria === true ? 'Yes' : reviewer.meets_criteria === false ? 'No' : 'Not recorded'}</dd>
+                      <dt>Onset</dt><dd>{reviewer.onset_class || 'Not recorded'}</dd>
+                      <dt>Severity</dt><dd>{reviewer.severity || 'Not recorded'}</dd>
+                      <dt>Diagnosis date</dt><dd>{formatDate(reviewer.date_of_diagnosis)}</dd>
+                      {reviewer.differential_diagnosis && <><dt>Differential</dt><dd>{reviewer.differential_diagnosis}</dd></>}
+                      {reviewer.rationale && <><dt>Rationale</dt><dd className="evidence-rationale">{renderRationale(reviewer.rationale)}</dd></>}
+                    </dl>
+                  </article>
+                ))}
+              </div>
+              {inspectionItem.final_outcome && <div className="evidence-final"><b>Final decision:</b> {inspectionItem.final_outcome.diagnosis || 'Locked'} <span>({inspectionItem.final_outcome.adopted_reviewer || 'not recorded'})</span></div>}
+            </section>
           </div>
         )}
 
@@ -374,6 +438,7 @@ export default function ChairpersonPortal({ user, onLogout }) {
                   <thead>
                     <tr style={{ background: '#fff5f5' }}>
                       <th>Subject ID</th>
+                      <th>Visit</th>
                       <th>Reviewer A (Primary)</th>
                       <th>Reviewer B (Secondary)</th>
                       <th>Reviewer C (if escalated)</th>
@@ -384,6 +449,7 @@ export default function ChairpersonPortal({ user, onLogout }) {
                     {(agendaPack?.items_for_committee_arbitration || []).map(item => (
                       <tr key={item.id}>
                         <td><strong>{item.subject_id}</strong></td>
+                        <td>{item.visit_code || `Visit ${item.visit_number || 1}`}</td>
                         <td>{item.reviewer_a?.diagnosis} ({item.reviewer_a?.certainty})</td>
                         <td>{item.reviewer_b?.diagnosis} ({item.reviewer_b?.certainty})</td>
                         <td>{item.reviewer_c?.diagnosis || '—'}</td>
@@ -391,7 +457,7 @@ export default function ChairpersonPortal({ user, onLogout }) {
                       </tr>
                     ))}
                     {(!agendaPack?.items_for_committee_arbitration || agendaPack.items_for_committee_arbitration.length === 0) && (
-                      <tr><td colSpan="5" style={{ textAlign: 'center', color: '#94a3b8' }}>No discordant cases pending.</td></tr>
+                      <tr><td colSpan="6" style={{ textAlign: 'center', color: '#94a3b8' }}>No discordant cases pending.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -406,6 +472,7 @@ export default function ChairpersonPortal({ user, onLogout }) {
                   <thead>
                     <tr style={{ background: '#f0fdf4' }}>
                       <th>Subject ID</th>
+                      <th>Visit</th>
                       <th>Consensus Outcome</th>
                       <th>Certainty</th>
                       <th>Concordance</th>
@@ -415,13 +482,14 @@ export default function ChairpersonPortal({ user, onLogout }) {
                     {(agendaPack?.concordant_cases_consent_calendar || []).map(item => (
                       <tr key={item.id}>
                         <td><strong>{item.subject_id}</strong></td>
+                        <td>{item.visit_code || `Visit ${item.visit_number || 1}`}</td>
                         <td>{item.reviewer_a?.diagnosis}</td>
                         <td>{item.reviewer_a?.certainty}</td>
                         <td><span className="tag-concordant">A = B Concordant</span></td>
                       </tr>
                     ))}
                     {(!agendaPack?.concordant_cases_consent_calendar || agendaPack.concordant_cases_consent_calendar.length === 0) && (
-                      <tr><td colSpan="4" style={{ textAlign: 'center', color: '#94a3b8' }}>No concordant cases pending.</td></tr>
+                      <tr><td colSpan="5" style={{ textAlign: 'center', color: '#94a3b8' }}>No concordant cases pending.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -512,7 +580,7 @@ export default function ChairpersonPortal({ user, onLogout }) {
               <div className="chair-form-group">
                 <label>Select Cases Finalized &amp; Closed in this Session ({selectedCaseIds.length} selected):</label>
                 <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '10px', background: '#f8fafc' }}>
-                  {adjudications.map(adj => (
+                  {meetingCases.map(adj => (
                     <label key={adj.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', cursor: 'pointer', fontSize: '12.5px' }}>
                       <input
                         type="checkbox"

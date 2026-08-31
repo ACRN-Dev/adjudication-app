@@ -15,7 +15,7 @@ from database import get_db
 from models.auth import PortalUser, AuthAuditEvent
 from models.admin import AdjudicationActivityLedger
 from models.canonical import (
-    Participant, AdjudicationRecord, CommitteeDecision, CommitteeMeeting,
+    Participant, AdjudicationVisit, AdjudicationRecord, CommitteeDecision, CommitteeMeeting,
     ReviewerRole, DiagnosisCode, OnsetClass, SeverityGrade, CertaintyLevel, AdjudicationStatus
 )
 from models.longitudinal import LongitudinalParticipant, VisitInstance
@@ -83,91 +83,123 @@ def list_completed_adjudications(
     user: PortalUser = Depends(require_chairperson_assignment())
 ):
     """
-    Returns all signed adjudications with concordance analysis (A=B, A!=B, escalated to C, 3-way divergent, Closed).
+    Returns one concordance row per visit, including all signed A/B/C determinations.
+
+    Concordance is visit-level. Collapsing records at participant level can pair
+    Reviewer A from one visit with Reviewer B from another and hide later visits.
     """
     participants = db.query(Participant).all()
     results = []
 
     for p in participants:
-        records = db.query(AdjudicationRecord).filter_by(participant_id=p.id).all()
-        decision = db.query(CommitteeDecision).filter_by(participant_id=p.id).first()
+        visits = (
+            db.query(AdjudicationVisit)
+            .filter_by(participant_id=p.id)
+            .order_by(AdjudicationVisit.visit_number.asc())
+            .all()
+        )
+        for visit in visits:
+            records = (
+                db.query(AdjudicationRecord)
+                .filter_by(visit_id=visit.id, signed=True)
+                .all()
+            )
+            decision = db.query(CommitteeDecision).filter_by(visit_id=visit.id).first()
+            by_role = {record.reviewer_role: record for record in records}
+            rec_a = by_role.get(ReviewerRole.REVIEWER_A)
+            rec_b = by_role.get(ReviewerRole.REVIEWER_B)
+            rec_c = by_role.get(ReviewerRole.REVIEWER_C)
+            adopted_record = next(
+                (record for record in records if visit.final_record_id and record.id == visit.final_record_id),
+                None,
+            )
 
-        rec_a = next((r for r in records if r.reviewer_role == ReviewerRole.REVIEWER_A), None)
-        rec_b = next((r for r in records if r.reviewer_role == ReviewerRole.REVIEWER_B), None)
-        rec_c = next((r for r in records if r.reviewer_role == ReviewerRole.REVIEWER_C), None)
+            def signature(record):
+                return (
+                    record.meets_criteria, record.diagnosis, record.onset_class,
+                    record.severity, record.certainty, record.date_of_diagnosis,
+                )
 
-        diag_a = rec_a.diagnosis.value if rec_a and rec_a.diagnosis else None
-        diag_b = rec_b.diagnosis.value if rec_b and rec_b.diagnosis else None
-        diag_c = rec_c.diagnosis.value if rec_c and rec_c.diagnosis else None
-
-        # Determine concordance classification
-        if decision and decision.closed:
-            concordance = "CLOSED"
-        elif decision and decision.locked:
-            concordance = "CHAIR_FINALIZED"
-        elif p.status == AdjudicationStatus.THREE_WAY_DIVERGENT:
-            concordance = "THREE_WAY_DIVERGENT"
-        elif p.status == AdjudicationStatus.RESOLVED_BY_MAJORITY:
-            concordance = "RESOLVED_BY_MAJORITY"
-        elif rec_c is not None:
-            concordance = "ESCALATED_TO_C"
-        elif diag_a and diag_b:
-            if diag_a == diag_b:
-                concordance = "CONCORDANT_A_EQUALS_B"
+            if (decision and decision.closed) or p.status == AdjudicationStatus.CLOSED:
+                concordance = "CLOSED"
+            elif decision and decision.locked:
+                concordance = "CHAIR_FINALIZED"
+            elif rec_a and rec_b and rec_c:
+                if signature(rec_a) == signature(rec_b) == signature(rec_c):
+                    concordance = "CONCORDANT_ALL_THREE"
+                elif signature(rec_c) in (signature(rec_a), signature(rec_b)):
+                    concordance = "RESOLVED_BY_MAJORITY"
+                else:
+                    concordance = "RESOLVED_BY_REVIEWER_C"
+            elif rec_a and rec_b:
+                concordance = (
+                    "CONCORDANT_A_EQUALS_B"
+                    if signature(rec_a) == signature(rec_b)
+                    else "DISCORDANT_A_NEQ_B"
+                )
+            elif rec_a or rec_b:
+                concordance = "SINGLE_REVIEWER_COMPLETE"
             else:
-                concordance = "DISCORDANT_A_NEQ_B"
-        elif diag_a or diag_b:
-            concordance = "SINGLE_REVIEWER_COMPLETE"
-        else:
-            concordance = "PENDING_REVIEW"
+                concordance = "PENDING_REVIEW"
 
-        if status_filter and status_filter.upper() != "ALL" and concordance != status_filter.upper():
-            continue
+            if status_filter and status_filter.upper() != "ALL" and concordance != status_filter.upper():
+                continue
 
-        results.append({
-            "id": str(p.id),
-            "subject_id": p.subject_id,
-            "site_code": p.site_code,
-            "study_code": p.study.value if hasattr(p.study, "value") else str(p.study),
-            "concordance": concordance,
-            "participant_status": p.status.value if hasattr(p.status, "value") else str(p.status),
-            "reviewer_a": {
-                "upn": rec_a.reviewer_upn if rec_a else None,
-                "name": rec_a.reviewer_name if rec_a else None,
-                "diagnosis": diag_a,
-                "certainty": rec_a.certainty.value if rec_a and rec_a.certainty else None,
-                "signed_at": rec_a.signed_at.isoformat() if rec_a and rec_a.signed_at else None,
-            } if rec_a else None,
-            "reviewer_b": {
-                "upn": rec_b.reviewer_upn if rec_b else None,
-                "name": rec_b.reviewer_name if rec_b else None,
-                "diagnosis": diag_b,
-                "certainty": rec_b.certainty.value if rec_b and rec_b.certainty else None,
-                "signed_at": rec_b.signed_at.isoformat() if rec_b and rec_b.signed_at else None,
-            } if rec_b else None,
-            "reviewer_c": {
-                "upn": rec_c.reviewer_upn if rec_c else None,
-                "name": rec_c.reviewer_name if rec_c else None,
-                "diagnosis": diag_c,
-                "certainty": rec_c.certainty.value if rec_c and rec_c.certainty else None,
-                "rationale": rec_c.rationale if rec_c else None,
-                "signed_at": rec_c.signed_at.isoformat() if rec_c and rec_c.signed_at else None,
-            } if rec_c else None,
-            "final_outcome": {
-                "diagnosis": decision.final_diagnosis.value if decision and decision.final_diagnosis else None,
-                "adopted_reviewer": decision.adopted_reviewer.value if decision and decision.adopted_reviewer else None,
-                "chair_rationale": decision.chair_rationale if decision else None,
-                "closed": decision.closed if decision else False,
-            } if decision else None
-        })
+            def reviewer_payload(record, include_rationale=False):
+                if not record:
+                    return None
+                payload = {
+                    "upn": record.reviewer_upn,
+                    "name": record.reviewer_name,
+                    "diagnosis": record.diagnosis.value if record.diagnosis else None,
+                    "certainty": record.certainty.value if record.certainty else None,
+                    "meets_criteria": record.meets_criteria,
+                    "onset_class": record.onset_class.value if record.onset_class else None,
+                    "severity": record.severity.value if record.severity else None,
+                    "date_of_diagnosis": record.date_of_diagnosis.isoformat() if record.date_of_diagnosis else None,
+                    "differential_diagnosis": record.differential_diagnosis,
+                    "rationale": record.rationale,
+                    "signed_at": record.signed_at.isoformat() if record.signed_at else None,
+                }
+                return payload
+
+            results.append({
+                "id": str(visit.id),
+                "participant_id": str(p.id),
+                "visit_id": str(visit.id),
+                "visit_number": visit.visit_number,
+                "visit_code": visit.visit_code,
+                "visit_date": visit.visit_date.isoformat() if visit.visit_date else None,
+                "subject_id": p.subject_id,
+                "site_code": p.site_code,
+                "study_code": p.study.value if hasattr(p.study, "value") else str(p.study),
+                "concordance": concordance,
+                "participant_status": p.status.value if hasattr(p.status, "value") else str(p.status),
+                "visit_status": visit.status,
+                "resolution_type": visit.resolution_type,
+                "reviewer_a": reviewer_payload(rec_a),
+                "reviewer_b": reviewer_payload(rec_b),
+                "reviewer_c": reviewer_payload(rec_c, include_rationale=True),
+                "final_outcome": {
+                    "diagnosis": decision.final_diagnosis.value if decision.final_diagnosis else None,
+                    "adopted_reviewer": decision.adopted_reviewer.value if decision.adopted_reviewer else None,
+                    "chair_rationale": decision.chair_rationale,
+                    "closed": decision.closed,
+                } if decision else ({
+                    "diagnosis": adopted_record.diagnosis.value if adopted_record.diagnosis else None,
+                    "adopted_reviewer": adopted_record.reviewer_role.value,
+                    "chair_rationale": None,
+                    "closed": False,
+                } if adopted_record else None),
+            })
 
     return {
         "items": results,
         "total": len(results),
         "summary": {
-            "concordant": sum(1 for r in results if r["concordance"] == "CONCORDANT_A_EQUALS_B"),
+            "concordant": sum(1 for r in results if r["concordance"] in ["CONCORDANT_A_EQUALS_B", "CONCORDANT_ALL_THREE"]),
             "resolved_by_majority": sum(1 for r in results if r["concordance"] == "RESOLVED_BY_MAJORITY"),
-            "discordant": sum(1 for r in results if r["concordance"] in ["DISCORDANT_A_NEQ_B", "ESCALATED_TO_C", "THREE_WAY_DIVERGENT", "RESOLVED_BY_MAJORITY"]),
+            "discordant": sum(1 for r in results if r["concordance"] in ["DISCORDANT_A_NEQ_B", "ESCALATED_TO_C", "THREE_WAY_DIVERGENT", "RESOLVED_BY_MAJORITY", "RESOLVED_BY_REVIEWER_C"]),
             "three_way_divergent": sum(1 for r in results if r["concordance"] == "THREE_WAY_DIVERGENT"),
             "closed": sum(1 for r in results if r["concordance"] == "CLOSED"),
         }

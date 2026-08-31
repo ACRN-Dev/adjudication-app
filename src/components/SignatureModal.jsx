@@ -18,7 +18,13 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
     }
     setIsSubmitting(true);
     setErrorMsg('');
-    const onset = submission?.onset?.includes('LOPE') ? 'LOPE' : 'EOPE';
+    const onset = submission?.onset?.includes('LOPE')
+      ? 'LOPE'
+      : submission?.onset?.includes('Postpartum')
+        ? 'POSTPARTUM'
+        : submission?.onset?.includes('not yet classifiable')
+          ? 'UNCLASSIFIABLE'
+          : 'EOPE';
     const diagnosis = submission?.diagnosis || 'PE';
     fetch(`/api/adjudication/${encodeURIComponent(caseData.id)}/submit`, {
       method: 'POST',
@@ -33,7 +39,7 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
         visit_number: submission?.visitNumber || 1,
         visit_code: submission?.visitCode,
         visit_date: submission?.visitDate,
-        meets_criteria: true,
+        meets_criteria: submission?.meetsCriteria !== false,
         diagnosis,
         date_of_diagnosis: submission?.dateOfDiagnosis,
         onset_class: onset,
@@ -41,6 +47,7 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
         certainty: submission?.certainty || 'Probable',
         rationale: submission?.rationale || 'Adjudication completed after review of the available evidence.',
         comment: submission?.comment || null,
+        differential_diagnosis: submission?.differentialDiagnosis || null,
         longitudinal_comment: submission?.longitudinalComment || null,
         first_pe_visit_number: submission?.firstPeVisitNumber || null,
         first_pe_date: submission?.firstPeDate || null,

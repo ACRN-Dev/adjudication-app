@@ -22,8 +22,8 @@ export default function InstructionBanner({ step }) {
       description: "Review and edit the structured case narrative. Record your final clinical diagnosis, onset classification, severity, and certainty level. Sign to lock the adjudication record."
     },
     4: {
-      title: "Step 4 of 4: Adjudication Record Locked & Filed",
-      description: "This adjudication record is signed and locked. Download the PDF report for eTMF filing, or return to Step 1 to begin the next case in the queue."
+      title: "Step 4 of 4: Adjudication Records Signed & Locked",
+      description: "Your visit adjudications are signed and locked for concordance checking. Finalized cases can be downloaded for eTMF filing, or you can return to Step 1 for the next case."
     }
   };
 

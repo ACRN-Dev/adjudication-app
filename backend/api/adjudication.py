@@ -35,6 +35,14 @@ from services.adjudication_resolution import apply_visit_resolution
 router = APIRouter()
 
 
+def _demo_validation_bypass_enabled() -> bool:
+    """Allow only demo deployments to skip non-critical chronology checks."""
+    return any(
+        os.getenv(flag, "false").strip().lower() == "true"
+        for flag in ("ENABLE_DEMO_DATA", "ENABLE_DEMO_ACCOUNTS")
+    )
+
+
 def _naive_utc(value: datetime | None) -> datetime | None:
     """Normalize API and SQLite datetimes for safe comparison/storage."""
     if value is None:
@@ -300,29 +308,39 @@ def submit_adjudication(
                 detail=f"date_of_diagnosis {sub.date_of_diagnosis.isoformat()} precedes the study period."
             )
 
-        # Hardened check 3: Cross-visit consistency
-        prior_records = (
-            db.query(AdjudicationRecord)
-            .filter(
-                AdjudicationRecord.participant_id == participant.id,
-                AdjudicationRecord.reviewer_role == sub.reviewer_role,
-                AdjudicationRecord.visit_number < sub.visit_number,
-                AdjudicationRecord.date_of_diagnosis != None,
+        # Hardened check 3: Cross-visit consistency. Demo fixtures can contain
+        # source dates that are out of order; retain the other date checks and
+        # record the bypass so the meeting workflow can continue.
+        if _demo_validation_bypass_enabled():
+            _audit(
+                db, "DEMO_VALIDATION_BYPASSED", participant.id,
+                sub.reviewer_upn, "ADJUDICATOR",
+                f"Demo bypassed cross-visit diagnosis-date ordering for visit {sub.visit_number}",
+                {"check": "cross_visit_diagnosis_date_order", "visit_number": sub.visit_number},
             )
-            .order_by(AdjudicationRecord.visit_number.asc())
-            .all()
-        )
-        for pr in prior_records:
-            prior_diagnosis_date = _naive_utc(pr.date_of_diagnosis)
-            if prior_diagnosis_date and sub.date_of_diagnosis < prior_diagnosis_date:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"date_of_diagnosis ({sub.date_of_diagnosis.isoformat()}) at visit {sub.visit_number} "
-                        f"cannot precede the established diagnosis date ({prior_diagnosis_date.isoformat()}) "
-                        f"from visit {pr.visit_number}."
-                    ),
+        else:
+            prior_records = (
+                db.query(AdjudicationRecord)
+                .filter(
+                    AdjudicationRecord.participant_id == participant.id,
+                    AdjudicationRecord.reviewer_role == sub.reviewer_role,
+                    AdjudicationRecord.visit_number < sub.visit_number,
+                    AdjudicationRecord.date_of_diagnosis != None,
                 )
+                .order_by(AdjudicationRecord.visit_number.asc())
+                .all()
+            )
+            for pr in prior_records:
+                prior_diagnosis_date = _naive_utc(pr.date_of_diagnosis)
+                if prior_diagnosis_date and sub.date_of_diagnosis < prior_diagnosis_date:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"date_of_diagnosis ({sub.date_of_diagnosis.isoformat()}) at visit {sub.visit_number} "
+                            f"cannot precede the established diagnosis date ({prior_diagnosis_date.isoformat()}) "
+                            f"from visit {pr.visit_number}."
+                        ),
+                    )
 
         if sub.first_pe_visit_number and sub.first_pe_visit_number > sub.visit_number:
             raise HTTPException(

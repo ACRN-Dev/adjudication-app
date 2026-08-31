@@ -5,7 +5,7 @@ import { LongitudinalEvidenceTable, OverallSummary, VisitEvidencePanel, VisitRib
 import { generateNarrative, generateSummary, AI_ENGINE_MODEL } from '../services/demoNarrative';
 import { runDvEngine } from '../services/dvEngine';
 import { downloadPdfReport } from '../services/api';
-import { normalizeVisitEvidence } from '../services/visitEvidence';
+import { isReviewerVisitSigned, isVisitComplete, normalizeVisitEvidence } from '../services/visitEvidence';
 
 const DEFAULT_VISIT_CODES = ['V01', 'V02', 'V03', 'V04', 'V05', 'V06'];
 function visitNumberOf(visit, fallbackIndex = 0) {
@@ -15,6 +15,16 @@ function visitNumberOf(visit, fallbackIndex = 0) {
   const text = `${visit?.visit_code || ''} ${visit?.code || ''} ${visit?.name || ''} ${visit?.label || ''}`;
   const match = text.match(/\bV(?:isit)?\s*0?([1-6])\b/i) || text.match(/\bvisit\s*([1-6])\b/i);
   return match ? Number(match[1]) : fallbackIndex + 1;
+}
+
+function toDateTimeLocal(value) {
+  if (!value) return '';
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)) return text.slice(0, 16);
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = number => String(number).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function DropdownSection({ title, icon, children, defaultOpen = false, right = null }) {
@@ -65,16 +75,20 @@ export default function AdjudicatorWorkbench({
   user
 }) {
   const [selectedDiagnosis, setSelectedDiagnosis] = useState('PE');
+  const [meetsCriteria, setMeetsCriteria] = useState(true);
   const [otherDiagnosis, setOtherDiagnosis] = useState('');
+  const [differentialDiagnosis, setDifferentialDiagnosis] = useState('');
   const [selectedOnset, setSelectedOnset] = useState('Early-onset pre-eclampsia (EOPE)');
   const [selectedSeverity, setSelectedSeverity] = useState('With severe features');
   const [selectedCertainty, setSelectedCertainty] = useState('Probable');
   const [selectedVisitIndex, setSelectedVisitIndex] = useState(0);
+  const [visitDecisions, setVisitDecisions] = useState({});
   const [narrativeText, setNarrativeText] = useState('');
   const [visitNarratives, setVisitNarratives] = useState({});
   const [longitudinalComment, setLongitudinalComment] = useState('');
   const [firstPeVisitNumber, setFirstPeVisitNumber] = useState('');
   const [firstPeDate, setFirstPeDate] = useState('');
+  const [diagnosisDateTime, setDiagnosisDateTime] = useState('');
   const [narrativeViewMode, setNarrativeViewMode] = useState('TABLE'); // 'TABLE' | 'PROSE'
   const [formCode, setFormCode] = useState('FORM-ADJ-15A');
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
@@ -88,6 +102,51 @@ export default function AdjudicatorWorkbench({
   const selectedVisit = pages[selectedVisitIndex] || pages[0] || null;
   const selectedEvidenceVisit = evidenceVisits[Math.min(selectedVisitIndex, evidenceVisits.length - 1)] || null;
   const isVisitFive = /V05|visit\s*5/i.test(selectedVisit?.name || selectedVisit?.visit_code || '');
+  const firstUnsignedVisitIndex = pages.findIndex((visit) => !isReviewerVisitSigned(visit));
+  const allReviewerVisitsSigned = pages.length > 0 && firstUnsignedVisitIndex === -1;
+  const allVisitsFinalized = pages.length > 0 && pages.every(isVisitComplete);
+
+  const decisionSnapshot = () => ({
+    selectedDiagnosis,
+    meetsCriteria,
+    otherDiagnosis,
+    differentialDiagnosis,
+    selectedOnset,
+    selectedSeverity,
+    selectedCertainty,
+    narrativeText,
+    diagnosisDateTime,
+  });
+
+  const handleVisitSelect = (nextIndex) => {
+    if (nextIndex === selectedVisitIndex) return;
+    if (selectedVisitIndex < pages.length) {
+      setVisitDecisions(current => ({ ...current, [selectedVisitIndex]: decisionSnapshot() }));
+    }
+    const saved = visitDecisions[nextIndex];
+    if (saved) {
+      setSelectedDiagnosis(saved.selectedDiagnosis);
+      setMeetsCriteria(saved.meetsCriteria);
+      setOtherDiagnosis(saved.otherDiagnosis);
+      setDifferentialDiagnosis(saved.differentialDiagnosis);
+      setSelectedOnset(saved.selectedOnset);
+      setSelectedSeverity(saved.selectedSeverity);
+      setSelectedCertainty(saved.selectedCertainty);
+      setNarrativeText(saved.narrativeText);
+      setDiagnosisDateTime(saved.diagnosisDateTime);
+    } else if (nextIndex < pages.length) {
+      setSelectedDiagnosis('PE');
+      setMeetsCriteria(true);
+      setOtherDiagnosis('');
+      setDifferentialDiagnosis('');
+      setSelectedOnset('Early-onset pre-eclampsia (EOPE)');
+      setSelectedSeverity('With severe features');
+      setSelectedCertainty('Probable');
+      setNarrativeText('');
+      setDiagnosisDateTime(toDateTimeLocal(pages[nextIndex]?.visit_date || pages[nextIndex]?.date));
+    }
+    setSelectedVisitIndex(nextIndex);
+  };
 
   const getVisitLabel = (bp, index) => {
     if (bp.visitName) return bp.visitName;
@@ -116,6 +175,7 @@ export default function AdjudicatorWorkbench({
   useEffect(() => {
     if (activeCase) {
       setSelectedVisitIndex(0);
+      setVisitDecisions({});
       const generated = generateNarrative(activeCase);
       setNarrativeText(generated.fullText);
       setVisitNarratives({});
@@ -123,6 +183,9 @@ export default function AdjudicatorWorkbench({
       setLongitudinalComment(activeCase.longitudinal_comment || '');
       setFirstPeVisitNumber(activeCase.first_pe_visit_number ? String(activeCase.first_pe_visit_number) : '');
       setFirstPeDate(activeCase.first_pe_date ? String(activeCase.first_pe_date).slice(0, 10) : '');
+      setMeetsCriteria(true);
+      setDifferentialDiagnosis('');
+      setDiagnosisDateTime(toDateTimeLocal(activeCase.visits?.[0]?.date || activeCase.visits?.[0]?.visit_date));
 
       if (activeCase.derivedSubtype === 'LOPE') {
         setSelectedOnset('Late-onset pre-eclampsia (LOPE)');
@@ -160,8 +223,14 @@ export default function AdjudicatorWorkbench({
   }, [activeCase?.id, selectedVisitIndex]);
 
   useEffect(() => {
+    if (selectedVisitIndex < pages.length && selectedVisit && !visitDecisions[selectedVisitIndex]) {
+      setDiagnosisDateTime(toDateTimeLocal(selectedVisit.visit_date || selectedVisit.date));
+    }
+  }, [selectedVisitIndex, activeCase?.id, visitDecisions]);
+
+  useEffect(() => {
     if (Number.isInteger(advanceToVisitIndex)) {
-      setSelectedVisitIndex(Math.max(0, Math.min(advanceToVisitIndex, pages.length)));
+      handleVisitSelect(Math.max(0, Math.min(advanceToVisitIndex, pages.length)));
     }
   }, [advanceToVisitIndex, pages.length]);
 
@@ -657,12 +726,12 @@ export default function AdjudicatorWorkbench({
             </DropdownSection>
 
             <DropdownSection title="Visit Specific Evidence" icon={<FileText size={16} />} defaultOpen>
-              {selectedVisitIndex===evidenceVisits.length ? <OverallSummary visits={evidenceVisits} /> : selectedEvidenceVisit && <VisitEvidencePanel visit={selectedEvidenceVisit} selectedIndex={selectedVisitIndex} visitCount={evidenceVisits.length} onSelectVisit={setSelectedVisitIndex} />}
+              {selectedVisitIndex===evidenceVisits.length ? <OverallSummary visits={evidenceVisits} /> : selectedEvidenceVisit && <VisitEvidencePanel visit={selectedEvidenceVisit} selectedIndex={selectedVisitIndex} visitCount={evidenceVisits.length} onSelectVisit={handleVisitSelect} />}
             </DropdownSection>
 
             <DropdownSection title="Longitudinal Per-Visit Evidence" icon={<Database size={16} />} defaultOpen={false}>
-              <VisitRibbon visits={evidenceVisits} selectedIndex={selectedVisitIndex} onSelectVisit={setSelectedVisitIndex} />
-              <LongitudinalEvidenceTable visits={evidenceVisits} selectedIndex={Math.min(selectedVisitIndex, evidenceVisits.length - 1)} onSelectVisit={setSelectedVisitIndex} />
+              <VisitRibbon visits={evidenceVisits} selectedIndex={selectedVisitIndex} onSelectVisit={handleVisitSelect} />
+              <LongitudinalEvidenceTable visits={evidenceVisits} selectedIndex={Math.min(selectedVisitIndex, evidenceVisits.length - 1)} onSelectVisit={handleVisitSelect} />
             </DropdownSection>
 
           <div className="wizard-footer">
@@ -680,6 +749,7 @@ export default function AdjudicatorWorkbench({
 
   // STEP 4: COMPLETED & SIGNED RECORD VIEW
   if (currentStep === 4 || (currentStep === 3 && isSigned)) {
+    const isConsensusFinal = isSigned || allVisitsFinalized;
     const sig = activeCase.signature || {
       signer: "Dr. Tinotenda Chibongore",
       email: "tinotenda.chibongore@acrnhealth.com",
@@ -697,10 +767,22 @@ export default function AdjudicatorWorkbench({
             <div>
               <span className="badge-tag" style={{ background: '#f0fdf4', color: '#15803d', fontSize: '10.5px' }}>21 CFR Part 11 Lock Complete</span>
               <h2 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--acrn-navy-dark)', marginTop: '2px' }}>
-                Case {activeCase.caseNo} ({activeCase.id}) Finalized &amp; Filed to TMF
+                {isConsensusFinal
+                  ? `Case ${activeCase.caseNo} (${activeCase.id}) Finalized & Filed to TMF`
+                  : `Case ${activeCase.caseNo} (${activeCase.id}) Reviewer Adjudications Signed & Submitted`}
               </h2>
             </div>
           </div>
+
+          {!isConsensusFinal && (
+            <div className="overall-lock-message" style={{ marginBottom: '16px' }}>
+              <CheckCircle2 size={24}/>
+              <div>
+                <strong>Submitted for concordance checking</strong>
+                <p>Your six visit records are locked. Matching reviewer decisions will finalize automatically; discordant decisions will be routed to Reviewer C and the Chairperson workflow.</p>
+              </div>
+            </div>
+          )}
 
           <div style={{ background: '#f8fafc', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '14px', marginBottom: '16px' }}>
             <h4 style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--acrn-navy-dark)', marginBottom: '8px' }}>
@@ -727,7 +809,7 @@ export default function AdjudicatorWorkbench({
           </div>
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            <button className="btn-large btn-next" disabled={isDownloadingPdf} onClick={async () => {
+            {isConsensusFinal && <button className="btn-large btn-next" disabled={isDownloadingPdf} onClick={async () => {
               setIsDownloadingPdf(true);
               setPdfDownloadError('');
               try {
@@ -739,7 +821,7 @@ export default function AdjudicatorWorkbench({
               }
             }}>
               <Download size={15} /> {isDownloadingPdf ? 'Preparing TMF PDF…' : 'Download Signed TMF PDF Report'}
-            </button>
+            </button>}
 
             <button className="btn-large btn-back" onClick={() => {
               const nextCase = cases.find(c => c.id !== activeCase.id && !c.status?.includes('Finalized'));
@@ -753,7 +835,7 @@ export default function AdjudicatorWorkbench({
               Proceed to Next Patient in Queue <ArrowRight size={15} />
             </button>
           </div>
-          {pdfDownloadError && (
+          {isConsensusFinal && pdfDownloadError && (
             <div role="alert" style={{ marginTop: '10px', color: 'var(--danger, #b42318)', fontSize: '12px', fontWeight: 600 }}>
               {pdfDownloadError} Confirm that the backend service is running, then try again.
             </div>
@@ -770,14 +852,14 @@ export default function AdjudicatorWorkbench({
         <h2 className="wizard-title">Step 3: Approve Summary &amp; Sign Record ({activeCase.id})</h2>
         <p className="wizard-subtitle">Review the selected visit summary, confirm the closed-ended diagnosis, and sign the separate visit adjudication.</p>
 
-        {pages.length > 0 && <><VisitRibbon visits={pages} selectedIndex={selectedVisitIndex} onSelectVisit={setSelectedVisitIndex}/><div className="visit-signing-context"><div><strong>{selectedVisitIndex===pages.length?'Overall adjudication summary':`Adjudicating ${selectedVisit?.name||selectedVisit?.visit_code||`Visit ${selectedVisitIndex+1}`}`}</strong><span>{selectedVisitIndex===pages.length?'Read-only roll-up of completed visit decisions.':'Only this visit and its dated evidence will be signed.'}</span></div></div></>}
+        {pages.length > 0 && <><VisitRibbon visits={pages} selectedIndex={selectedVisitIndex} onSelectVisit={handleVisitSelect}/><div className="visit-signing-context"><div><strong>{selectedVisitIndex===pages.length?'Overall adjudication summary':`Adjudicating ${selectedVisit?.name||selectedVisit?.visit_code||`Visit ${selectedVisitIndex+1}`}`}</strong><span>{selectedVisitIndex===pages.length?'Read-only roll-up of completed visit decisions.':'Only this visit and its dated evidence will be signed.'}</span></div></div></>}
 
         <DropdownSection title="Visit Specific Evidence" icon={<FileText size={16} />} defaultOpen>
-          {selectedVisitIndex===evidenceVisits.length ? <OverallSummary visits={evidenceVisits} /> : selectedEvidenceVisit && <VisitEvidencePanel visit={selectedEvidenceVisit} selectedIndex={selectedVisitIndex} visitCount={evidenceVisits.length} onSelectVisit={setSelectedVisitIndex} />}
+          {selectedVisitIndex===evidenceVisits.length ? <OverallSummary visits={evidenceVisits} /> : selectedEvidenceVisit && <VisitEvidencePanel visit={selectedEvidenceVisit} selectedIndex={selectedVisitIndex} visitCount={evidenceVisits.length} onSelectVisit={handleVisitSelect} />}
         </DropdownSection>
 
         <DropdownSection title="Longitudinal Per-Visit Evidence" icon={<Database size={16} />} defaultOpen={false}>
-          <LongitudinalEvidenceTable visits={evidenceVisits} selectedIndex={Math.min(selectedVisitIndex, evidenceVisits.length - 1)} onSelectVisit={setSelectedVisitIndex} />
+          <LongitudinalEvidenceTable visits={evidenceVisits} selectedIndex={Math.min(selectedVisitIndex, evidenceVisits.length - 1)} onSelectVisit={handleVisitSelect} />
         </DropdownSection>
 
         {selectedVisitIndex<pages.length && <DropdownSection title="Subject History Context" icon={<Stethoscope size={16} />} defaultOpen={false}><PatientHistoryPanel caseData={activeCase} /></DropdownSection>}
@@ -828,6 +910,7 @@ export default function AdjudicatorWorkbench({
               disabled={isSigned}
             />
           )}
+          <small>Include the supporting findings and dates, clinical reasoning, alternatives considered, and any missing or conflicting evidence.</small>
           {isVisitFive && <div style={{ marginTop: 6, color: '#475569', fontSize: 11 }}><strong>Visit 5 narrative:</strong> open-ended clinical narrative is required; diagnosis selection remains restricted to the standard outcomes.</div>}
         </div></DropdownSection>}
 
@@ -838,13 +921,18 @@ export default function AdjudicatorWorkbench({
             <select
               className="form-select"
               value={selectedDiagnosis}
-              onChange={(e) => setSelectedDiagnosis(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setSelectedDiagnosis(value);
+                if (value === 'Not PE') setMeetsCriteria(false);
+              }}
               disabled={isSigned}
             >
               <option value="PE">PE</option>
               <option value="Severe PE">Severe PE</option>
               <option value="Eclampsia">Eclampsia</option>
               <option value="HELLP">HELLP</option>
+              <option value="Not PE">Not PE / Does not meet criteria</option>
               {isReviewerC && <option value="Other">Other</option>}
             </select>
             {selectedDiagnosis === 'Other' && (
@@ -860,6 +948,23 @@ export default function AdjudicatorWorkbench({
                 required
               />
             )}
+          </div>
+
+          <div className="form-group">
+            <label style={{ fontWeight: 700 }}>PE diagnostic criteria met</label>
+            <select
+              className="form-select"
+              value={meetsCriteria ? 'Yes' : 'No'}
+              onChange={(e) => {
+                const value = e.target.value === 'Yes';
+                setMeetsCriteria(value);
+                if (!value && selectedDiagnosis !== 'Other') setSelectedDiagnosis('Not PE');
+              }}
+              disabled={isSigned}
+            >
+              <option value="Yes">Yes</option>
+              <option value="No">No</option>
+            </select>
           </div>
 
           <div className="form-group">
@@ -890,6 +995,29 @@ export default function AdjudicatorWorkbench({
               <option value="Postpartum-only presentation">Postpartum-only presentation</option>
               <option value="Onset not yet classifiable">Onset not yet classifiable</option>
             </select>
+          </div>
+
+          <div className="form-group">
+            <label style={{ fontWeight: 700 }}>Date and time of diagnosis</label>
+            <input
+              className="form-input"
+              type="datetime-local"
+              value={diagnosisDateTime}
+              onChange={(e) => setDiagnosisDateTime(e.target.value)}
+              disabled={isSigned}
+            />
+          </div>
+
+          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+            <label style={{ fontWeight: 700 }}>Differential diagnosis / alternative explanation</label>
+            <input
+              className="form-input"
+              type="text"
+              value={differentialDiagnosis}
+              onChange={(e) => setDifferentialDiagnosis(e.target.value)}
+              placeholder="Record important alternatives considered or why none applied"
+              disabled={isSigned}
+            />
           </div>
 
           <div className="form-group">
@@ -938,11 +1066,13 @@ export default function AdjudicatorWorkbench({
               reviewerRole: activeCase?.reviewerRole || 'REVIEWER_A',
               reviewerName: user?.display_name || user?.name || user?.email,
               diagnosis: finalDiagnosis,
+              meetsCriteria,
               onset: selectedOnset,
               severity: selectedSeverity,
               certainty: selectedCertainty,
               rationale: narrativeText,
               comment: narrativeText,
+              differentialDiagnosis: differentialDiagnosis.trim() || null,
               otherRationale: selectedDiagnosis === 'Other' ? otherDiagnosis.trim() : null,
               longitudinalComment: longitudinalComment.trim() || null,
               firstPeVisitNumber: firstPeVisitNumber ? Number(firstPeVisitNumber) : null,
@@ -950,11 +1080,23 @@ export default function AdjudicatorWorkbench({
               visitNumber: selectedVisit?.visit_number || selectedVisit?.visitNumber || selectedVisitIndex + 1,
               visitCode: selectedVisit?.visit_code || selectedVisit?.name,
               visitDate: selectedVisit?.visit_date || selectedVisit?.date,
-              dateOfDiagnosis: selectedVisit?.visit_date || selectedVisit?.date || new Date().toISOString(),
+              dateOfDiagnosis: diagnosisDateTime ? new Date(diagnosisDateTime).toISOString() : (selectedVisit?.visit_date || selectedVisit?.date || new Date().toISOString()),
             });
-          }} disabled={selectedDiagnosis === 'Other' && !otherDiagnosis.trim()}>
+          }} disabled={(selectedDiagnosis === 'Other' && !otherDiagnosis.trim()) || !diagnosisDateTime}>
             <ShieldCheck size={16} /> Sign &amp; Lock Adjudication Record
           </button>}
+
+          {selectedVisitIndex===pages.length && allReviewerVisitsSigned && (
+            <button className="btn-large btn-next" onClick={() => setCurrentStep(4)}>
+              Proceed to Step 4 <ArrowRight size={16} />
+            </button>
+          )}
+
+          {selectedVisitIndex===pages.length && !allReviewerVisitsSigned && (
+            <button className="btn-large btn-next" onClick={() => handleVisitSelect(firstUnsignedVisitIndex)}>
+              Complete {pages[firstUnsignedVisitIndex]?.name || `Visit ${firstUnsignedVisitIndex + 1}`} <ArrowRight size={16} />
+            </button>
+          )}
         </div>
       </div>
     </div>

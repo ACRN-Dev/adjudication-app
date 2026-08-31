@@ -102,7 +102,7 @@ def test_matching_reviewers_are_concordant_and_discordance_assigns_independent_r
 
         discordant_case, independent_reviewers = _seed_case("a2@acrnhealth.com", "b2@acrnhealth.com")
         assert _submit(discordant_case, "REVIEWER_A", "a2@acrnhealth.com", DiagnosisCode.PREECLAMPSIA.value).status_code == 200
-        result = _submit(discordant_case, "REVIEWER_B", "b2@acrnhealth.com", DiagnosisCode.NOT_PE.value)
+        result = _submit(discordant_case, "REVIEWER_B", "b2@acrnhealth.com", DiagnosisCode.HELLP.value)
         assert result.status_code == 200
         assert result.json()["participant_status"] == AdjudicationStatus.COMMITTEE_PENDING.value
 

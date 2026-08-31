@@ -7,16 +7,21 @@ if [ ! -f .env.prod ]; then
   exit 1
 fi
 
-set -a
-source .env.prod
-set +a
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+echo "Building application image..."
+$COMPOSE build
+
+echo "Applying and verifying database migrations (no data purge)..."
+$COMPOSE run --rm --no-deps app python backend/scripts/init_prod.py --schema-only
+
+echo "Starting application..."
+$COMPOSE up -d
 
 echo "Deployed. Waiting for health check..."
 healthy=false
 for i in $(seq 1 20); do
-  if docker compose -f docker-compose.yml -f docker-compose.prod.yml ps app | grep -q "(healthy)"; then
+  if $COMPOSE ps app | grep -q "(healthy)"; then
     echo "app is healthy."
     healthy=true
     break
@@ -29,7 +34,7 @@ if [ "$healthy" != "true" ]; then
   exit 1
 fi
 
-if docker compose -f docker-compose.yml -f docker-compose.prod.yml logs app 2>&1 | grep -qi "PostgreSQL unavailable"; then
+if $COMPOSE logs app 2>&1 | grep -qi "PostgreSQL unavailable"; then
   echo "Error: app fell back to local SQLite — check DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT / DB_SSL_MODE in .env.prod." >&2
   exit 1
 fi

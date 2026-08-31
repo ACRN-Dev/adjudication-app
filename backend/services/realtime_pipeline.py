@@ -102,7 +102,11 @@ def process_batch(batch_id):
                 value=source_value(row); fp=hashlib.sha256(f"{key}|{form}|{occ}|{canonical}|{value}|{row.get('Page Title')}|{row.get('Field Label')}".encode()).hexdigest()
                 if fp in seen_fingerprints: continue
                 seen_fingerprints.add(fp); dt=parse_datetime(value) if canonical.endswith("DATE") or "DATETIME" in canonical else None
-                if canonical=="VISIT_DATE" and dt: visit.visit_datetime=dt
+                if canonical=="VISIT_DATE" and dt:
+                    if visit.visit_datetime is None:
+                        visit.visit_datetime=dt
+                    elif visit.visit_datetime != dt:
+                        visit.qc_status="DATE_CONFLICT"
                 obs=CanonicalObservation(participant_id=p.id,visit_id=visit.id,source_batch_id=batch.id,canonical_variable=canonical,raw_source_value=value,parsed_text_value=value or None,numeric_value=parse_numeric(value),datetime_value=dt,coded_value=parse_coded(value),observation_datetime=dt or visit.visit_datetime,date_confidence="EXACT" if dt else ("INFERRED" if visit.visit_datetime else "MISSING"),source_form=form,source_page=row.get("Page Title"),source_field_label=row.get("Field Label"),source_row_number=row_no,mapping_version=MAPPING_VERSION,quality_status="VALID" if value else "MISSING",provenance_type="SOURCE_RECORDED",prohibited_flag=False,source_fingerprint=fp)
                 db.add(obs); batch.rows_processed=row_no-1
                 if row_no%5000==0: db.commit()

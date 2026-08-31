@@ -1,6 +1,6 @@
 """Controlled RealTime composite mapping and privacy classification."""
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 MAPPING_VERSION = "RT-MAP-1.0"
 DIRECT_ALIASES = {
@@ -65,8 +65,22 @@ def map_variable(row):
 def source_value(row): return (row.get("Data Value") or row.get("Data Input") or "").strip()
 def parse_datetime(value):
     v=(value or "").strip().split("|")[0].strip()
-    for fmt in ("%m/%d/%Y %H:%M:%S","%m/%d/%Y %H:%M","%d/%b/%Y %I:%M:%S %p %Z","%d/%b/%Y","%Y-%m-%d","%d-%b-%Y"):
-        try: return datetime.strptime(v,fmt)
+    if not v: return None
+    normalized=re.sub(r"\s+(?:SAST|SAT|UTC|GMT)$", "", v, flags=re.I).strip()
+    try:
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None) if parsed.tzinfo else parsed
+    except ValueError:
+        pass
+    for fmt in (
+        "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y",
+        "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y",
+        "%d/%b/%Y %H:%M:%S", "%d/%b/%Y %H:%M",
+        "%d/%b/%Y %I:%M:%S %p", "%d/%b/%Y %I:%M %p", "%d/%b/%Y",
+        "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d",
+        "%d-%b-%Y %H:%M:%S", "%d-%b-%Y %H:%M", "%d-%b-%Y",
+    ):
+        try: return datetime.strptime(normalized,fmt)
         except ValueError: pass
     return None
 def parse_numeric(value):

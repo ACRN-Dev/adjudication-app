@@ -58,15 +58,19 @@ def test_admin_can_create_user_with_default_password_and_login():
     assert body["role"] == "Monitor"
     assert body["portal_role"] == "MONITOR_QC_REVIEWER"
     assert body["study_scope"] == "PROTECT-Africa"
-    assert body["default_password"] == "ACRN@2026"
+    assert body["temporary_password"]
+    assert body["temporary_password"] != "ACRN@2026"
 
     db = TestingSession()
     row = db.query(PortalUser).filter_by(email="new.monitor.login@acrnhealth.com").first()
     assert row.password_hash is not None
     db.close()
 
-    # The newly created user can immediately log in with their email and default password
-    login_res = client.post("/api/auth/login", json={"email": "new.monitor.login@acrnhealth.com", "password": "ACRN@2026"})
+    # The newly created user can log in with the one-time password returned only at creation.
+    login_res = client.post("/api/auth/login", json={
+        "email": "new.monitor.login@acrnhealth.com",
+        "password": body["temporary_password"],
+    })
     assert login_res.status_code == 200
     assert login_res.json()["email"] == "new.monitor.login@acrnhealth.com"
 

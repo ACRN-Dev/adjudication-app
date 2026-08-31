@@ -1,5 +1,5 @@
 """Secure RealTime import, Monitor database, and assigned-case API."""
-import os, uuid
+import os, re, uuid
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter,UploadFile,File,BackgroundTasks,Depends,HTTPException,Header,Query,Request
@@ -13,8 +13,17 @@ from services.auth_service import current_user, audit_auth
 from services.lab_reference import evaluate_participant_labs, LAB_ANALYTES
 from models.auth import PortalUser
 from models.admin import AdjudicatorStudyContract
+from models.canonical import AdjudicationRecord, AdjudicationVisit, Participant
 router = APIRouter()
 MONITOR = {"ADJUDICATION_COORDINATOR", "MONITOR_QC_REVIEWER", "QA_REVIEWER", "RELEASE_OPERATOR", "MONITOR", "ADMIN"}
+
+
+def _demo_contract_bypass_enabled() -> bool:
+    """Demo data and demo-account deployments may assign without contract fixtures."""
+    return any(
+        os.getenv(flag, "false").strip().lower() == "true"
+        for flag in ("ENABLE_DEMO_DATA", "ENABLE_DEMO_ACCOUNTS")
+    )
 
 def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role: str | None = Header(None), db: Session = Depends(get_db)):
     token = request.cookies.get("acrn_demo_session")
@@ -211,9 +220,38 @@ def history_item(f):
         "amber_flag": f.amber_flag,
         "flag_reason": f.flag_reason,
     }
-def timeline(p,db):
+
+
+def _timeline_visit_number(visit, fallback):
+    match = re.search(r"(?:^|\b)V(?:ISIT)?\s*0?([1-9]\d*)\b", str(visit.scheduled_visit_code or ""), re.IGNORECASE)
+    return int(match.group(1)) if match else fallback
+
+
+def timeline(p,db, reviewer_upn=None):
+    canonical_participant = db.query(Participant).filter(
+        (Participant.case_number == p.blinded_subject_id)
+        | (Participant.subject_id == p.blinded_subject_id)
+    ).first()
+    canonical_visits = {}
+    reviewer_records = {}
+    if canonical_participant:
+        canonical_visits = {
+            visit.visit_number: visit
+            for visit in db.query(AdjudicationVisit).filter_by(participant_id=canonical_participant.id).all()
+        }
+        if reviewer_upn:
+            reviewer_records = {
+                record.visit_number: record
+                for record in db.query(AdjudicationRecord).filter(
+                    AdjudicationRecord.participant_id == canonical_participant.id,
+                    AdjudicationRecord.reviewer_upn == reviewer_upn.strip().lower(),
+                    AdjudicationRecord.signed.is_(True),
+                ).all()
+            }
     visits=[]
-    for v in sorted(p.visits,key=lambda x:(x.visit_datetime is None,x.visit_datetime or datetime.max,x.visit_sequence)):
+    ordered_visits = sorted(p.visits,key=lambda x:(x.visit_datetime is None,x.visit_datetime or datetime.max,x.visit_sequence))
+    for visit_index, v in enumerate(ordered_visits, start=1):
+        visit_number = _timeline_visit_number(v, visit_index)
         evidence={}
         for o in v.observations:
             if o.prohibited_flag or o.canonical_variable.startswith("RECORDED_PE_"): continue
@@ -229,7 +267,27 @@ def timeline(p,db):
                 "provenance": o.provenance_type,
                 "source": {"form": o.source_form, "page": o.source_page, "field": o.source_field_label, "row": o.source_row_number},
             })
-        visits.append({"id":str(v.id),"name":v.scheduled_visit_code,"occurrence":v.visit_occurrence,"date":v.visit_datetime,"ga_days":v.gestational_age_days,"form":v.form_title,"form_version":v.form_version,"reconstruction":{"method":v.reconstruction_method,"confidence":v.reconstruction_confidence,"qc_status":v.qc_status},"evidence":evidence})
+        canonical_visit = canonical_visits.get(visit_number)
+        reviewer_record = reviewer_records.get(visit_number)
+        visits.append({
+            "id":str(v.id),"name":v.scheduled_visit_code,"occurrence":v.visit_occurrence,
+            "date":v.visit_datetime,"ga_days":v.gestational_age_days,"form":v.form_title,
+            "form_version":v.form_version,
+            "reconstruction":{"method":v.reconstruction_method,"confidence":v.reconstruction_confidence,"qc_status":v.qc_status},
+            "evidence":evidence,
+            "signed": bool(reviewer_record),
+            "status": canonical_visit.status if canonical_visit else None,
+            "resolution_status": canonical_visit.status if canonical_visit else None,
+            "finalized": bool(canonical_visit and (canonical_visit.finalized_at or canonical_visit.final_record_id)),
+            "filing_status": canonical_visit.filing_status if canonical_visit else None,
+            "signature": None if not reviewer_record else {
+                "signer": reviewer_record.reviewer_name,
+                "email": reviewer_record.reviewer_upn,
+                "timestamp": reviewer_record.signed_at,
+                "hash": reviewer_record.signature_hash,
+                "visit_number": reviewer_record.visit_number,
+            },
+        })
     d=db.query(LongitudinalCaseDerivation).filter_by(participant_id=p.id).first()
     long=None if not d else {"earliest_qualifying_date":d.earliest_qualifying_pe_date,"first_qualifying_visit_id":str(d.first_qualifying_visit_id) if d.first_qualifying_visit_id else None,"onset_classification":d.onset_classification,"maximum_severity":d.maximum_severity,"packet_completeness":d.packet_completeness,"certainty_restriction":d.certainty_restriction,"trigger_status":d.trigger_status,"recorded_site_diagnosis":d.recorded_site_diagnosis,"recorded_site_diagnosis_date":d.recorded_site_diagnosis_date,"discrepancy":d.recorded_versus_derived_discrepancy,"explanation":d.explanation}
     history_fields = db.query(PatientHistoryField).filter_by(participant_id=p.id).order_by(PatientHistoryField.domain, PatientHistoryField.instance_index, PatientHistoryField.field_key).all()
@@ -251,12 +309,14 @@ def patient(participant_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends
     if not p: raise HTTPException(404,"Participant not found")
     # Record the caller's actual authority, not a hardcoded portal: this view is reachable
     # by every role now, so a fixed "MONITOR" would misattribute the access.
-    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"MONITOR" if i[2] else "NON_QC","role":i[1]}); db.commit(); return {**timeline(p,db),"lab_issues":evaluate_participant_labs(db,p)}
+    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"MONITOR" if i[2] else "NON_QC","role":i[1]}); db.commit(); return {**timeline(p,db,i[0]),"lab_issues":evaluate_participant_labs(db,p)}
 @router.post("/patients/{participant_id}/approve")
 def approve(participant_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
     p=db.get(LongitudinalParticipant,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
     if db.query(ImportIssue).filter_by(participant_id=p.id,resolution_status="OPEN").count(): raise HTTPException(409,"Unresolved import issues block approval")
+    if db.query(VisitInstance).filter_by(participant_id=p.id,qc_status="DATE_CONFLICT").count():
+        raise HTTPException(409,"Conflicting source visit dates require Monitor/QC review before approval")
     p.workflow_status="QC_APPROVED"; audit(db,i[0],i[1],"PARTICIPANT_QC_APPROVED","PARTICIPANT",p.id); db.commit(); return {"status":p.workflow_status}
 @router.post("/patients/{participant_id}/assign")
 def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends(monitor),db:Session=Depends(get_db)):
@@ -267,7 +327,8 @@ def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends
     reviewer_upn=reviewer_upn.strip().lower()
     reviewer=db.query(PortalUser).filter_by(email=reviewer_upn,role="ADJUDICATOR",status="ACTIVE").first()
     if not reviewer: raise HTTPException(422,f"Reviewer '{reviewer_upn}' must be an active adjudicator account")
-    if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() != "true":
+    demo_contract_bypass = _demo_contract_bypass_enabled()
+    if not demo_contract_bypass:
         now=datetime.utcnow()
         contract=db.query(AdjudicatorStudyContract).filter(
             AdjudicatorStudyContract.adjudicator_upn==reviewer_upn,
@@ -280,7 +341,7 @@ def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends
     existing=db.query(ReviewerAssignment).filter_by(participant_id=p.id,reviewer_role=reviewer_role).first()
     if existing: existing.reviewer_upn=reviewer_upn
     else: db.add(ReviewerAssignment(participant_id=p.id,reviewer_upn=reviewer_upn,reviewer_role=reviewer_role))
-    p.workflow_status="ASSIGNED"; audit(db,i[0],i[1],"REVIEWER_ASSIGNED","PARTICIPANT",p.id,{"reviewer_role":reviewer_role,"reviewer_upn":reviewer_upn}); db.commit(); return {"status":"ASSIGNED"}
+    p.workflow_status="ASSIGNED"; audit(db,i[0],i[1],"REVIEWER_ASSIGNED","PARTICIPANT",p.id,{"reviewer_role":reviewer_role,"reviewer_upn":reviewer_upn,"contract_verification":"BYPASSED_DEMO" if demo_contract_bypass else "VERIFIED"}); db.commit(); return {"status":"ASSIGNED","contract_verification":"BYPASSED_DEMO" if demo_contract_bypass else "VERIFIED"}
 @router.get("/assigned")
 def assigned(i=Depends(actor),db:Session=Depends(get_db)):
     if i[1] not in {"ADJUDICATOR","REVIEWER_A","REVIEWER_B"}: raise HTTPException(403,"Adjudicator role required")
@@ -299,7 +360,7 @@ def assigned_patient(participant_id:uuid.UUID,i=Depends(actor),db:Session=Depend
     if not db.query(ReviewerAssignment).filter_by(participant_id=participant_id,reviewer_upn=i[0]).first(): raise HTTPException(403,"Participant is not assigned to this reviewer")
     p=loaded(db,participant_id)
     if not p or p.workflow_status!="ASSIGNED": raise HTTPException(404,"Assigned participant unavailable")
-    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"ADJUDICATOR"}); db.commit(); return timeline(p,db)
+    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"ADJUDICATOR"}); db.commit(); return timeline(p,db,i[0])
 
 
 # ── Configurable per-site/per-lab reference ranges (Monitor/QC authority only) ──

@@ -5,6 +5,9 @@ Run inside the application container against the external production Postgres:
     docker compose -f docker-compose.yml -f docker-compose.prod.yml \
         run --rm app python backend/scripts/init_prod.py
 
+Pass --schema-only during routine deployment to apply migrations and verify model
+columns without purging demo data or changing accounts.
+
 Every step is idempotent, so this is safe to re-run on each deployment. Unlike the
 application itself, this script never falls back to SQLite: if the production Postgres
 is unreachable it aborts, so a misconfigured deployment can never silently initialise
@@ -42,6 +45,7 @@ BOOTSTRAP_ADMINS = [
 ]
 
 DRY_RUN = "--dry-run" in sys.argv
+SCHEMA_ONLY = "--schema-only" in sys.argv
 
 
 def say(message=""):
@@ -164,6 +168,7 @@ from database import Base  # noqa: E402
 from models import admin as admin_models  # noqa: F401,E402
 from models import auth as auth_models  # noqa: F401,E402
 from models import canonical as canonical_models  # noqa: F401,E402
+from models import history as history_models  # noqa: F401,E402
 from models import longitudinal as longitudinal_models  # noqa: F401,E402
 from models import monitor as monitor_models  # noqa: F401,E402
 from models.auth import AuthAuditEvent, PortalUser  # noqa: E402
@@ -260,6 +265,16 @@ if schema_drift:
         say(f'        ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {ddl};')
 else:
     say(f"      Schema matches the models across {len(live_tables)} tables.")
+
+if SCHEMA_ONLY:
+    if schema_drift:
+        fail(
+            f"{len(schema_drift)} model column(s) are still missing after migrations: "
+            + ", ".join(f"{table}.{column}" for table, column, _ in schema_drift)
+        )
+    say()
+    say("Schema migrations applied and verified successfully; no data or accounts were removed.")
+    sys.exit(0)
 
 
 # ── 4. Purge synthetic / demo data ──────────────────────────────────────────────────

@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi.testclient import TestClient
 from models.auth import PortalUser
 from models.canonical import (
-    AdjudicationStatus, AdjudicationRecord, DiagnosisCode, OnsetClass,
+    AdjudicationStatus, AdjudicationVisit, AdjudicationRecord, DiagnosisCode, OnsetClass,
     Participant, SeverityGrade, StudyCode, SubjectAssignment, CertaintyLevel,
 )
 from services.auth_service import hash_password
@@ -63,21 +63,32 @@ def _seed_discordant_case_with_reviewer_c(a_email, b_email, c_email):
     )
     db.add(participant)
     db.flush()
+    visit = AdjudicationVisit(
+        participant_id=participant.id,
+        visit_number=1,
+        visit_code="VISIT-1",
+        status="AWAITING_REVIEWER_C",
+        resolution_type="A_B_DISCORDANT",
+    )
+    db.add(visit)
+    db.flush()
 
     # Add signed A and B records (discordant)
     db.add(AdjudicationRecord(
-        participant_id=participant.id, reviewer_role="REVIEWER_A",
+        participant_id=participant.id, visit_id=visit.id, visit_number=1,
+        reviewer_role="REVIEWER_A",
         reviewer_upn=a_email, reviewer_name="Rev A",
         diagnosis=DiagnosisCode.PREECLAMPSIA, onset_class=OnsetClass.EOPE,
         severity=SeverityGrade.WITH_SEVERE, certainty=CertaintyLevel.DEFINITE,
         meets_criteria=True, rationale="Criteria met for PE.", signed=True,
     ))
     db.add(AdjudicationRecord(
-        participant_id=participant.id, reviewer_role="REVIEWER_B",
+        participant_id=participant.id, visit_id=visit.id, visit_number=1,
+        reviewer_role="REVIEWER_B",
         reviewer_upn=b_email, reviewer_name="Rev B",
-        diagnosis=DiagnosisCode.NOT_PE, onset_class=None,
-        severity=None, certainty=CertaintyLevel.PROBABLE,
-        meets_criteria=False, rationale="Normotensive profile observed.", signed=True,
+        diagnosis=DiagnosisCode.HELLP, onset_class=OnsetClass.EOPE,
+        severity=SeverityGrade.WITH_SEVERE, certainty=CertaintyLevel.PROBABLE,
+        meets_criteria=True, rationale="HELLP criteria supported by the visit evidence.", signed=True,
     ))
 
     # Assign Reviewer C explicitly

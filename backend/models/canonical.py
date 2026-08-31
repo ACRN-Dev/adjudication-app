@@ -77,6 +77,7 @@ class ReviewerRole(str, enum.Enum):
 class DiagnosisCode(str, enum.Enum):
     PE = "PE"
     PREECLAMPSIA = "PE"  # compatibility alias for historical API/tests
+    NOT_PE = "Not PE"
     SEVERE_PE = "Severe PE"
     ECLAMPSIA = "Eclampsia"
     HELLP = "HELLP"
@@ -86,6 +87,8 @@ class DiagnosisCode(str, enum.Enum):
 class OnsetClass(str, enum.Enum):
     EOPE = "EOPE"   # < 34+0 weeks
     LOPE = "LOPE"   # >= 34+0 weeks
+    POSTPARTUM = "POSTPARTUM"
+    UNCLASSIFIABLE = "UNCLASSIFIABLE"
 
 
 class SeverityGrade(str, enum.Enum):

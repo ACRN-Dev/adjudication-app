@@ -9,13 +9,24 @@ if (-not (Test-Path ".env.prod")) {
     exit 1
 }
 
+$composeFiles = @("-f", "docker-compose.yml", "-f", "docker-compose.prod.yml", "-f", "docker-compose.demo.yml")
+
+Write-Host "Building demo application image..."
+docker compose @composeFiles build
+if ($LASTEXITCODE -ne 0) { throw "Docker build failed." }
+
+Write-Host "Applying and verifying database migrations (no data purge)..."
+docker compose @composeFiles run --rm --no-deps app python backend/scripts/init_prod.py --schema-only
+if ($LASTEXITCODE -ne 0) { throw "Database migration failed; the existing app was not replaced." }
+
 Write-Host "Starting demo deployment with ENABLE_DEMO_ACCOUNTS=true ..."
-docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.demo.yml up -d --build
+docker compose @composeFiles up -d
+if ($LASTEXITCODE -ne 0) { throw "Docker startup failed." }
 
 Write-Host "Waiting for health check..."
 $healthy = $false
 for ($i = 1; $i -le 20; $i++) {
-    $status = docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.demo.yml ps app 2>&1
+    $status = docker compose @composeFiles ps app 2>&1
     if ($status -match "\(healthy\)") {
         Write-Host "App is healthy."
         $healthy = $true
@@ -24,9 +35,10 @@ for ($i = 1; $i -le 20; $i++) {
     Start-Sleep -Seconds 3
 }
 
-if (-not $healthy) {
-    Write-Warning "App did not become healthy within timeout. Check logs with: docker compose logs app"
-}
+if (-not $healthy) { throw "App did not become healthy within timeout." }
+
+$logs = docker compose @composeFiles logs app 2>&1
+if ($logs -match "PostgreSQL unavailable") { throw "App fell back to local SQLite; check the production database settings." }
 
 Write-Host ""
 Write-Host "Demo deployment live at https://adjudication.acrncloud.com" -ForegroundColor Green
