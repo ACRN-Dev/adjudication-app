@@ -19,7 +19,8 @@ import uuid
 from datetime import datetime
 from sqlalchemy import (
     Column, String, Integer, Float, Boolean,
-    DateTime, Text, ForeignKey, JSON, Enum as SAEnum, UniqueConstraint, CheckConstraint
+    DateTime, Text, ForeignKey, JSON, Enum as SAEnum, UniqueConstraint, CheckConstraint,
+    func
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -202,13 +203,20 @@ class AdjudicationVisit(Base):
     visit_number = Column(Integer, nullable=False)
     visit_code = Column(String(40), nullable=False)
     visit_date = Column(DateTime, nullable=True, index=True)
-    status = Column(String(40), nullable=False, default="IN_REVIEW", index=True)
+    # server_default as well as default: 20260826_09 backfills this table with raw SQL,
+    # and a Python-side default never reaches the database. Without these, a table built
+    # by create_all() rejects the backfill with a NOT NULL violation. They mirror the
+    # DEFAULTs that 20260826_09 and 20260827_12 declare.
+    status = Column(String(40), nullable=False, default="IN_REVIEW",
+                    server_default="IN_REVIEW", index=True)
     resolution_type = Column(String(40), nullable=True)
     final_record_id = Column(UUID(as_uuid=True), nullable=True)
     finalized_at = Column(DateTime, nullable=True)
-    filing_status = Column(String(30), nullable=False, default="NOT_READY", index=True)
+    filing_status = Column(String(30), nullable=False, default="NOT_READY",
+                           server_default="NOT_READY", index=True)
     filing_error = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, server_default=func.now(),
+                        nullable=False)
 
     participant = relationship("Participant", back_populates="visits")
     measurement_dates = relationship(
