@@ -44,6 +44,9 @@ try:
                 "visit_number": "INTEGER DEFAULT 1",
                 "date_of_diagnosis": "TIMESTAMP",
                 "comment": "TEXT",
+                "longitudinal_comment": "TEXT",
+                "first_pe_visit_number": "INTEGER",
+                "first_pe_date": "TIMESTAMP",
                 "other_rationale": "TEXT",
             },
             "signed_case_artifacts": {

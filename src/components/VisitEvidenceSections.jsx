@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import * as I from 'lucide-react';
 import {
   buildLongitudinalRows,
@@ -24,9 +24,9 @@ const stateIcon = {
   conflicting: I.MessageSquareWarning,
 };
 
-export function EvidenceStatusBadge({ state = 'available' }) {
+export function EvidenceStatusBadge({ state = 'available', label }) {
   const Icon = stateIcon[state] || I.CheckCircle2;
-  return <span className={`evidence-status ${state}`}><Icon size={12} />{statusLabel(state)}</span>;
+  return <span className={`evidence-status ${state}`}><Icon size={12} />{label || statusLabel(state)}</span>;
 }
 
 export function VisitRibbon({ visits = [], selectedIndex = 0, onSelectVisit, showOverall = true }) {
@@ -62,7 +62,7 @@ export function VisitRibbon({ visits = [], selectedIndex = 0, onSelectVisit, sho
             onClick={() => complete && onSelectVisit?.(expectedVisits.length)}
           >
             <span>Overall</span>
-            <small>{complete ? 'V1–V6 signed' : `Review after V1–V6 (${signedCount}/6)`}</small>
+            <small>{complete ? 'V1â€“V6 signed' : `Review after V1â€“V6 (${signedCount}/6)`}</small>
             {complete ? <I.CheckCircle2 size={13} /> : <I.Lock size={13} />}
           </button>
         )}
@@ -81,7 +81,7 @@ function ValueWithState({ value, state, change }) {
   );
 }
 
-export function LongitudinalEvidenceTable({ visits, selectedIndex, onSelectVisit }) {
+export function LongitudinalEvidenceTable({ visits }) {
   const rows = buildLongitudinalRows(visits);
   return (
     <section className="visit-section">
@@ -93,11 +93,9 @@ export function LongitudinalEvidenceTable({ visits, selectedIndex, onSelectVisit
             <tr>
               <th scope="col">Clinical measure</th>
               {visits.map((visit, index) => (
-                <th key={visit.id} scope="col" className={selectedIndex === index ? 'selected' : ''}>
-                  <button type="button" onClick={() => onSelectVisit?.(index)}>
-                    {visitLabel(visit, index)}
-                    <span>{formatVisitDate(visit.date)}</span>
-                  </button>
+                <th key={visit.id} scope="col">
+                  {visitLabel(visit, index)}
+                  <span>{formatVisitDate(visit.date)}</span>
                 </th>
               ))}
             </tr>
@@ -106,8 +104,8 @@ export function LongitudinalEvidenceTable({ visits, selectedIndex, onSelectVisit
             {rows.map((row) => (
               <tr key={row.key}>
                 <th scope="row">{row.label}{row.unit && <span>{row.unit}</span>}</th>
-                {row.cells.map((cell, index) => (
-                  <td key={`${row.key}-${cell.visitId}`} className={selectedIndex === index ? 'selected' : ''} onClick={() => onSelectVisit?.(index)}>
+                {row.cells.map((cell) => (
+                  <td key={`${row.key}-${cell.visitId}`}>
                     <ValueWithState value={cell.value} state={cell.state} change={cell.change} />
                   </td>
                 ))}
@@ -132,9 +130,16 @@ function latestByMeasure(rows) {
     const existing = grouped.get(row.key);
     const currentRank = rank[row.evidence_state] ?? 0;
     const existingRank = rank[existing?.evidence_state] ?? 0;
+    const currentHasValue = row.raw != null || row.value != null;
+    const existingHasValue = existing?.raw != null || existing?.value != null;
     const currentTime = new Date(row.observed_at || 0).getTime();
     const existingTime = new Date(existing?.observed_at || 0).getTime();
-    if (!existing || currentRank > existingRank || (currentRank === existingRank && currentTime >= existingTime)) {
+    if (
+      !existing ||
+      (currentHasValue && !existingHasValue) ||
+      currentRank > existingRank ||
+      (currentRank === existingRank && currentHasValue === existingHasValue && currentTime >= existingTime)
+    ) {
       grouped.set(row.key, { ...row, source_count: (existing?.source_count || 0) + 1 });
     } else {
       existing.source_count = (existing.source_count || 1) + 1;
@@ -143,13 +148,61 @@ function latestByMeasure(rows) {
   return ['PLATELETS', 'CREATININE', 'AST', 'ALT', 'LDH'].map(key => grouped.get(key)).filter(Boolean);
 }
 
-function labInterpretation(row) {
-  if (row.evidence_state === 'severe') return 'Severe or decision-changing abnormality flagged';
-  if (row.evidence_state === 'abnormal') return 'Abnormal result flagged';
-  if (row.evidence_state === 'pending') return 'Result pending';
-  if (row.evidence_state === 'conflicting') return 'Conflicting evidence, query required';
-  if (row.evidence_state === 'not_available') return 'Not available';
-  return 'Recorded, no abnormal flag supplied';
+const DEFAULT_LAB_RANGES = {
+  PLATELETS: { low: 150, high: 400, unit: 'x10^3 cells/uL' },
+  CREATININE: { low: 48, high: 131, unit: 'umol/L' },
+  AST: { low: 10, high: 30, unit: 'U/L' },
+  ALT: { low: 5, high: 44, unit: 'U/L' },
+  LDH: { low: 180, high: 325, unit: 'U/L' },
+};
+
+function rangeLabel(row) {
+  const ref = row.reference || row.reference_range || row.range || DEFAULT_LAB_RANGES[row.key];
+  if (!ref) return 'Reference range not configured';
+  if (typeof ref === 'string') return ref;
+  const low = ref.low ?? ref.lower;
+  const high = ref.high ?? ref.upper;
+  const unit = ref.unit || row.unit || '';
+  if (low != null && high != null) return `Range ${low}-${high} ${unit}`.trim();
+  if (low != null) return `Range >= ${low} ${unit}`.trim();
+  if (high != null) return `Range <= ${high} ${unit}`.trim();
+  return 'Reference range not configured';
+}
+
+function numericValue(value) {
+  if (typeof value === 'number') return value;
+  const match = String(value ?? '').replace(',', '.').match(/-?\d+(\.\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+function referenceBounds(row) {
+  const ref = row.reference || row.reference_range || row.range || DEFAULT_LAB_RANGES[row.key];
+  if (!ref) return {};
+  if (typeof ref === 'string') {
+    const numbers = ref.match(/-?\d+(\.\d+)?/g)?.map(Number) || [];
+    if (numbers.length >= 2) return { low: numbers[0], high: numbers[1] };
+    if (/<=|<|up to/i.test(ref) && numbers.length) return { high: numbers[0] };
+    if (/>=|>|from/i.test(ref) && numbers.length) return { low: numbers[0] };
+    return {};
+  }
+  return { low: ref.low ?? ref.lower, high: ref.high ?? ref.upper };
+}
+
+function labValueLabel(row) {
+  const actual = row.raw ?? row.value;
+  if (actual == null || String(actual).trim() === '') return 'Actual value not imported';
+  return `${actual}${row.unit ? ` ${row.unit}` : ''}`;
+}
+
+function labRangeStatus(row) {
+  const value = numericValue(row.raw ?? row.value);
+  const { low, high } = referenceBounds(row);
+  if (value == null || (low == null && high == null)) {
+    return { state: row.evidence_state || 'available', label: statusLabel(row.evidence_state || 'available') };
+  }
+  if (low != null && value < low) return { state: 'abnormal', label: 'Low' };
+  if (high != null && value > high) return { state: 'abnormal', label: 'High' };
+  return { state: 'normal', label: 'Normal' };
 }
 
 export function BloodPressureGroup({ visit }) {
@@ -165,7 +218,7 @@ export function BloodPressureGroup({ visit }) {
             <div>
               <span>Initial</span>
               <strong>{pair.initial?.sbp ?? '-'} / {pair.initial?.dbp ?? '-'} mmHg</strong>
-              <small>{formatVisitDateTime(pair.initial?.observed_at)} · {pair.initial?.source_label}</small>
+              <small>{formatVisitDateTime(pair.initial?.observed_at)} Â· {pair.initial?.source_label}</small>
               <EvidenceStatusBadge state={pair.severe ? 'severe' : pair.initial?.evidence_state} />
             </div>
             <div>
@@ -173,7 +226,7 @@ export function BloodPressureGroup({ visit }) {
               {pair.recheck ? (
                 <>
                   <strong>{pair.recheck.sbp ?? '-'} / {pair.recheck.dbp ?? '-'} mmHg</strong>
-                  <small>{formatVisitDateTime(pair.recheck.observed_at)} · {pair.recheck.source_label}</small>
+                  <small>{formatVisitDateTime(pair.recheck.observed_at)} Â· {pair.recheck.source_label}</small>
                   <EvidenceStatusBadge state={pair.recheck.evidence_state} />
                 </>
               ) : (
@@ -194,26 +247,34 @@ export function BloodPressureGroup({ visit }) {
 
 export function LaboratoryResultsGroup({ visit }) {
   const keyLabs = latestByMeasure(visit.labs.filter((row) => ['PLATELETS', 'CREATININE', 'AST', 'ALT', 'LDH'].includes(row.key)));
-  const renderLabRow = (row) => (
-    <div className="evidence-row" key={row.id}>
-      <div><strong>{row.label}</strong><small>{labInterpretation(row)}</small></div>
-      <div><span>{row.raw ?? row.value} {row.unit || ''}</span><EvidenceStatusBadge state={row.evidence_state} />{row.observed_at && <small>Latest recorded {formatVisitDateTime(row.observed_at)}</small>}</div>
-    </div>
-  );
+  const renderLabRow = (row) => {
+    const interpretation = labRangeStatus(row);
+    return (
+      <div className="evidence-row" key={row.id}>
+        <div><strong>{row.label}</strong></div>
+        <div>
+          <span>{labValueLabel(row)}</span>
+          <small>{rangeLabel(row)}</small>
+          <EvidenceStatusBadge state={interpretation.state} label={interpretation.label} />
+          {row.observed_at && <small>Latest recorded {formatVisitDateTime(row.observed_at)}</small>}
+        </div>
+      </div>
+    );
+  };
   return (
     <section className="clinical-block lab-results-block">
       <h5><I.Database size={14} />Biochemistry and haematology</h5>
       {keyLabs.length ? <div className="evidence-list clinical-lab-list">{keyLabs.map(renderLabRow)}</div> : <div className="evidence-empty"><EvidenceStatusBadge state="not_available" />No permitted platelet, renal or liver laboratory result is available for this visit.</div>}
-      <EvidenceList
+      {false && <EvidenceList
         rows={keyLabs}
         empty="No permitted platelet, renal or liver laboratory result is available for this visit."
         render={(row) => (
           <div className="evidence-row" key={row.id}>
-            <div><strong>{row.label}</strong><small>{formatVisitDateTime(row.observed_at)} · {row.source_label}</small></div>
+            <div><strong>{row.label}</strong><small>{formatVisitDateTime(row.observed_at)} Â· {row.source_label}</small></div>
             <div><span>{row.raw ?? row.value} {row.unit || ''}</span><EvidenceStatusBadge state={row.evidence_state} /></div>
           </div>
         )}
-      />
+      />}
     </section>
   );
 }
@@ -227,8 +288,8 @@ function ProteinuriaGroup({ visit }) {
         empty="No proteinuria observation is available for this visit."
         render={(row) => (
           <div className="evidence-row" key={row.id}>
-            <div><strong>{row.method}</strong><small>{formatVisitDateTime(row.observed_at)} · {row.source_label}</small></div>
-            <div><span>{row.value} {row.unit || ''}</span><EvidenceStatusBadge state={row.evidence_state} /></div>
+            <div><strong>{row.method}</strong></div>
+            <div><span>{row.value} {row.unit || ''}</span></div>
           </div>
         )}
       />
@@ -252,7 +313,7 @@ function OtherEvidenceGroup({ visit }) {
             <EvidenceList
               rows={rows}
               empty="Not available"
-              render={(row) => <p key={row.id}>{row.value}<small>{formatVisitDateTime(row.observed_at)} · {row.source_label}</small><EvidenceStatusBadge state={row.evidence_state} /></p>}
+              render={(row) => <p key={row.id}>{row.value}<small>{formatVisitDateTime(row.observed_at)} Â· {row.source_label}</small><EvidenceStatusBadge state={row.evidence_state} /></p>}
             />
           </div>
         ))}
@@ -261,11 +322,19 @@ function OtherEvidenceGroup({ visit }) {
   );
 }
 
+function VisitFiveOutcomeGroup({ visit }) {
+  const groups = [
+    ['Maternal outcome', visit.maternal || [], I.Stethoscope],
+    ['Neonatal outcome', visit.neonatal || [], I.Baby],
+  ];
+  return <section className="clinical-block"><h5><I.ClipboardList size={14} />Visit 5 maternal and neonatal outcomes</h5><div className="other-evidence-grid">{groups.map(([title, rows, Icon]) => <div key={title}><strong><Icon size={13}/>{title}</strong><EvidenceList rows={rows} empty="Not collected or not available" render={(row)=><p key={row.id}>{row.value}<small>{formatVisitDateTime(row.observed_at)} Â· {row.source_label}</small><EvidenceStatusBadge state={row.evidence_state}/></p>}/></div>)}</div></section>;
+}
+
 export function VisitInterpretationCard({ visit }) {
   const i = visit.interpretation;
   return (
     <section className="visit-interpretation-card" aria-labelledby={`interpretation-${visit.id}`}>
-      <h5 id={`interpretation-${visit.id}`}><I.FileSearch size={14} />Visit interpretation</h5>
+      <h5 id={`interpretation-${visit.id}`}><I.FileSearch size={14} />Cumulative interpretation through this visit</h5>
       <p>{i.summary}</p>
       <dl>
         <div><dt>Classification</dt><dd>{i.classification}</dd></div>
@@ -279,20 +348,27 @@ export function VisitInterpretationCard({ visit }) {
   );
 }
 
-export function VisitEvidencePanel({ visit }) {
+export function VisitEvidencePanel({ visit, selectedIndex, visitCount, onSelectVisit }) {
+  const safeSelectedIndex = Number.isInteger(selectedIndex) ? selectedIndex : 0;
+  const safeVisitCount = Number.isInteger(visitCount) && visitCount > 0 ? visitCount : 1;
   return (
     <section className="visit-section">
       <div className="visit-panel-heading">
         <div>
           <strong>{visit.label}</strong>
-          <span>{formatVisitDate(visit.date)} · {visit.gestationalLabel || 'GA/postpartum status not documented'}</span>
+          <span>{formatVisitDate(visit.date)} Â· {visit.gestationalLabel || 'GA/postpartum status not documented'}</span>
         </div>
-        <span className="visit-scope-badge">Visit-specific evidence</span>
+        <div className="visit-step-actions">
+          <button type="button" onClick={() => onSelectVisit?.(safeSelectedIndex - 1)} disabled={safeSelectedIndex <= 0}><I.ChevronLeft size={15} />Previous visit</button>
+          <span className="visit-scope-badge">Visit {safeSelectedIndex + 1} of {safeVisitCount}</span>
+          <button type="button" onClick={() => onSelectVisit?.(safeSelectedIndex + 1)} disabled={safeSelectedIndex >= safeVisitCount - 1}>Next visit<I.ChevronRight size={15} /></button>
+        </div>
       </div>
       <BloodPressureGroup visit={visit} />
       <LaboratoryResultsGroup visit={visit} />
       <ProteinuriaGroup visit={visit} />
       <OtherEvidenceGroup visit={visit} />
+      {Number(visit.visit_number) === 5 && <VisitFiveOutcomeGroup visit={visit} />}
       <VisitInterpretationCard visit={visit} />
       <p className="visit-evidence-note"><I.EyeOff size={12} />Blinded biomarker fields remain withheld. Values shown here come from permitted structured evidence only.</p>
     </section>
@@ -320,9 +396,14 @@ export default function VisitEvidenceSections({ caseData, visits: rawVisits, sel
   const selected = visits[Math.min(selectedIndex, visits.length - 1)];
   return (
     <div className="summary-feature-card visit-evidence-card" style={{ gridColumn: '1 / -1' }}>
-      {showRibbon && <VisitRibbon visits={visits} selectedIndex={selectedIndex} onSelectVisit={onSelectVisit} />}
-      {showComparison && <LongitudinalEvidenceTable visits={visits} selectedIndex={Math.min(selectedIndex, visits.length - 1)} onSelectVisit={onSelectVisit} />}
-      {overall ? <OverallSummary visits={visits} /> : <VisitEvidencePanel visit={selected} />}
+      {showComparison && <LongitudinalEvidenceTable visits={visits} />}
+      {showRibbon && (
+        <section className="visit-navigation-section">
+          <div className="visit-section-title"><I.ClipboardList size={15} />Select visit-specific evidence</div>
+          <VisitRibbon visits={visits} selectedIndex={selectedIndex} onSelectVisit={onSelectVisit} />
+        </section>
+      )}
+      {overall ? <OverallSummary visits={visits} /> : <VisitEvidencePanel visit={selected} selectedIndex={selectedIndex} visitCount={visits.length} onSelectVisit={onSelectVisit} />}
     </div>
   );
 }

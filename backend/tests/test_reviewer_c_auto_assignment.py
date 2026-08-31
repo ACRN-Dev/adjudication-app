@@ -72,12 +72,13 @@ def _seed_case(a_email, b_email):
     return case_number, {c_email, d_email}
 
 
-def _submit(case_number, role, email, diagnosis):
+def _submit(case_number, role, email, diagnosis, password="ACRN@2026", mfa_code=None):
     return client.post(f"/api/adjudication/{case_number}/submit", json={
         "reviewer_role": role,
         "reviewer_upn": email,
         "reviewer_name": email.split("@")[0],
-        "reviewer_password": "ACRN@2026",
+        "reviewer_password": password,
+        "mfa_code": mfa_code,
         "visit_number": 1,
         "meets_criteria": True,
         "diagnosis": diagnosis,
@@ -112,6 +113,29 @@ def test_matching_reviewers_are_concordant_and_discordance_assigns_independent_r
         assert db.query(PortalUser).filter_by(email=assignment.reviewer_c_upn, role="ADJUDICATOR", status="ACTIVE").one()
         assert assignment.reviewer_c_upn not in {"a2@acrnhealth.com", "b2@acrnhealth.com"}
         db.close()
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(get_db, None)
+        else:
+            app.dependency_overrides[get_db] = previous
+
+
+def test_demo_signature_step_up_otp_allows_workflow_when_password_was_reset(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "true")
+    previous = app.dependency_overrides.get(get_db)
+    app.dependency_overrides[get_db] = override_db
+    try:
+        case_number, _ = _seed_case("otp-a@acrnhealth.com", "otp-b@acrnhealth.com")
+        result = _submit(
+            case_number,
+            "REVIEWER_A",
+            "otp-a@acrnhealth.com",
+            DiagnosisCode.PREECLAMPSIA.value,
+            password="not-the-current-password",
+            mfa_code="849201",
+        )
+        assert result.status_code == 200
+        assert result.json()["status"] == "success"
     finally:
         if previous is None:
             app.dependency_overrides.pop(get_db, None)

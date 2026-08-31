@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone
 import hashlib
+import os
 import random
 
 from database import get_db
@@ -64,6 +65,7 @@ class ReviewerSubmission(BaseModel):
         min_length=1,
         description="Reviewer's actual password for 21 CFR Part 11 re-authentication"
     )
+    mfa_code: Optional[str] = None
     visit_number: int = Field(default=1, ge=1, le=10)
     meets_criteria: bool
     diagnosis: DiagnosisCode
@@ -74,6 +76,9 @@ class ReviewerSubmission(BaseModel):
     differential_diagnosis: Optional[str] = None
     rationale: str = Field(min_length=10)
     comment: Optional[str] = None
+    longitudinal_comment: Optional[str] = None
+    first_pe_visit_number: Optional[int] = Field(default=None, ge=1, le=10)
+    first_pe_date: Optional[datetime] = None
     other_rationale: Optional[str] = None
     visit_code: Optional[str] = None
     visit_date: Optional[datetime] = None
@@ -92,6 +97,7 @@ def submit_adjudication(
     """
     sub.visit_date = _naive_utc(sub.visit_date)
     sub.date_of_diagnosis = _naive_utc(sub.date_of_diagnosis)
+    sub.first_pe_date = _naive_utc(sub.first_pe_date)
 
     # ── 1. Locate participant by blinded case_number ──────────────────────────
     participant = (
@@ -179,9 +185,15 @@ def submit_adjudication(
         db.commit()
         raise HTTPException(status_code=401,
                             detail="Invalid credentials. Signature rejected (21 CFR Part 11).")
-    if not reviewer_user.password_hash or not verify_password(
-        sub.reviewer_password, reviewer_user.password_hash
-    ):
+    password_verified = bool(
+        reviewer_user.password_hash and verify_password(sub.reviewer_password, reviewer_user.password_hash)
+    )
+    demo_step_up_verified = (
+        os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true"
+        and reviewer_user.is_demo_account
+        and str(sub.mfa_code or "").strip() == os.getenv("DEMO_SIGNATURE_OTP", "849201")
+    )
+    if not password_verified and not demo_step_up_verified:
         _audit(db, "SIGN_REJECTED", participant.id, sub.reviewer_upn, "ADJUDICATOR",
                "Signature rejected: incorrect password", {"reason": "wrong_password"})
         db.commit()
@@ -312,6 +324,17 @@ def submit_adjudication(
                     ),
                 )
 
+        if sub.first_pe_visit_number and sub.first_pe_visit_number > sub.visit_number:
+            raise HTTPException(
+                status_code=422,
+                detail="The first PE visit cannot be later than the visit currently being adjudicated.",
+            )
+        if sub.first_pe_date and sub.date_of_diagnosis and sub.first_pe_date > sub.date_of_diagnosis:
+            raise HTTPException(
+                status_code=422,
+                detail="The first PE date cannot be later than date_of_diagnosis.",
+            )
+
     # Hardened check 4: Definite certainty requires full diagnostic criteria and evidence sufficiency
     if sub.certainty == CertaintyLevel.DEFINITE:
         if not sub.meets_criteria or not sub.rationale or len(sub.rationale.strip()) < 10:
@@ -382,6 +405,9 @@ def submit_adjudication(
     rec.differential_diagnosis = sub.differential_diagnosis
     rec.rationale = sub.rationale
     rec.comment = sub.comment
+    rec.longitudinal_comment = sub.longitudinal_comment
+    rec.first_pe_visit_number = sub.first_pe_visit_number
+    rec.first_pe_date = sub.first_pe_date
     rec.other_rationale = sub.other_rationale.strip() if sub.other_rationale else None
     rec.signed = True
     rec.signed_at = datetime.utcnow()
@@ -576,6 +602,9 @@ def get_adjudication_status(
                 "date_of_diagnosis": r.date_of_diagnosis.isoformat() if r.date_of_diagnosis else None,
                 "rationale": r.rationale,
                 "comment": r.comment,
+                "longitudinal_comment": r.longitudinal_comment,
+                "first_pe_visit_number": r.first_pe_visit_number,
+                "first_pe_date": r.first_pe_date.isoformat() if r.first_pe_date else None,
                 "other_rationale": r.other_rationale,
                 "signed_at": r.signed_at.isoformat() if r.signed_at else None,
                 "signature_hash": r.signature_hash,

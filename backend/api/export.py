@@ -198,48 +198,53 @@ def study_analysis_export(
     writer.writerow([
         "blinded_subject_id", "visit_number", "outcome",
         "onset_class", "severity", "certainty",
-        "date_of_diagnosis", "concordance_source",
+        "date_of_diagnosis", "visit_comment", "first_pe_visit_number",
+        "first_pe_date", "overall_longitudinal_comment", "concordance_source",
     ])
 
     for p in participants:
         blinded_id = p.case_number or p.subject_id  # case_number is the blinded reference
 
-        committee_dec = db.query(CommitteeDecision).filter_by(participant_id=p.id).first()
-        if committee_dec and committee_dec.locked:
-            # Use committee final decision
+        visits = sorted(p.visits, key=lambda row: row.visit_number)
+        for visit in visits:
+            committee_dec = db.query(CommitteeDecision).filter_by(
+                participant_id=p.id, visit_id=visit.id, locked=True
+            ).first()
+            reviewer_record = db.query(AdjudicationRecord).filter_by(
+                visit_id=visit.id, reviewer_role=ReviewerRole.REVIEWER_A, signed=True
+            ).first()
+            if committee_dec:
+                source_record = db.get(AdjudicationRecord, visit.final_record_id) if visit.final_record_id else reviewer_record
+                diagnosis = committee_dec.final_diagnosis
+                onset = committee_dec.final_onset_class
+                severity = committee_dec.final_severity
+                certainty = committee_dec.final_certainty
+                diagnosis_date = committee_dec.date_of_diagnosis
+                source = "CHAIR_LOCKED"
+            elif reviewer_record:
+                source_record = reviewer_record
+                diagnosis = reviewer_record.diagnosis
+                onset = reviewer_record.onset_class
+                severity = reviewer_record.severity
+                certainty = reviewer_record.certainty
+                diagnosis_date = reviewer_record.date_of_diagnosis
+                source = "CONCORDANT"
+            else:
+                continue
             writer.writerow([
                 blinded_id,
-                "committee",  # committee decision spans all visits
-                committee_dec.final_diagnosis.value if committee_dec.final_diagnosis else "",
-                committee_dec.final_onset_class.value if committee_dec.final_onset_class else "",
-                committee_dec.final_severity.value if committee_dec.final_severity else "",
-                committee_dec.final_certainty.value if committee_dec.final_certainty else "",
-                committee_dec.date_of_diagnosis.isoformat() if committee_dec.date_of_diagnosis else "",
-                "CHAIR_LOCKED",
+                visit.visit_number,
+                diagnosis.value if diagnosis else "",
+                onset.value if onset else "",
+                severity.value if severity else "",
+                certainty.value if certainty else "",
+                diagnosis_date.isoformat() if diagnosis_date else "",
+                source_record.comment if source_record else "",
+                source_record.first_pe_visit_number if source_record else "",
+                source_record.first_pe_date.isoformat() if source_record and source_record.first_pe_date else "",
+                source_record.longitudinal_comment if source_record else "",
+                source,
             ])
-        else:
-            # Use per-visit Reviewer A records (concordant path)
-            recs = (
-                db.query(AdjudicationRecord)
-                .filter_by(
-                    participant_id=p.id,
-                    reviewer_role=ReviewerRole.REVIEWER_A,
-                    signed=True,
-                )
-                .order_by(AdjudicationRecord.visit_number)
-                .all()
-            )
-            for rec in recs:
-                writer.writerow([
-                    blinded_id,
-                    rec.visit_number,
-                    rec.diagnosis.value if rec.diagnosis else "",
-                    rec.onset_class.value if rec.onset_class else "",
-                    rec.severity.value if rec.severity else "",
-                    rec.certainty.value if rec.certainty else "",
-                    rec.date_of_diagnosis.isoformat() if rec.date_of_diagnosis else "",
-                    "CONCORDANT",
-                ])
 
     output.seek(0)
     return StreamingResponse(

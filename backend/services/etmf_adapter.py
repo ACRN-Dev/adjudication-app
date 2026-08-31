@@ -45,6 +45,7 @@ class ETMFAdapter(abc.ABC):
         study: str,
         pdf_bytes: bytes,
         timestamp: datetime | None = None,
+        visit_code: str | None = None,
     ) -> str:
         """Write a signed adjudication PDF to the eTMF repository."""
 
@@ -103,13 +104,14 @@ class LocalFilesystemAdapter(ETMFAdapter):
         study: str,
         pdf_bytes: bytes,
         timestamp: datetime | None = None,
+        visit_code: str | None = None,
     ) -> str:
         ts = timestamp or datetime.utcnow()
         study_dir, bid_dir = self._path_parts(study, blinded_id)
         dest_dir = self._root / study_dir / bid_dir
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        filename = self._naming(study, blinded_id, subject_id, ts)
+        filename = self._naming(study, f"{blinded_id}-{visit_code}" if visit_code else blinded_id, subject_id, ts)
         dest_path = dest_dir / filename
 
         dest_path.write_bytes(pdf_bytes)
@@ -213,8 +215,8 @@ class SharePointAdapter(ETMFAdapter):
         )
         return result.get("webUrl") or result["id"]
 
-    def write(self, subject_id, blinded_id, study, pdf_bytes, timestamp=None):
-        filename = self._naming(study, blinded_id, subject_id, timestamp or datetime.utcnow())
+    def write(self, subject_id, blinded_id, study, pdf_bytes, timestamp=None, visit_code=None):
+        filename = self._naming(study, f"{blinded_id}-{visit_code}" if visit_code else blinded_id, subject_id, timestamp or datetime.utcnow())
         return self._upload(f"{study}/{blinded_id}", filename, pdf_bytes)
 
     def write_meeting_report(self, meeting_id, meeting_title, study, report_bytes, timestamp=None):

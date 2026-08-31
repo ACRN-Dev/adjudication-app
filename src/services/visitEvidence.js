@@ -10,8 +10,8 @@ const LAB_ALIASES = {
 
 const COMPARISON_ROWS = [
   { key: 'bp', label: 'BP', unit: 'mmHg' },
-  { key: 'platelets', label: 'Platelets', unit: 'x10^3/uL' },
-  { key: 'creatinine', label: 'Creatinine', unit: 'mg/dL' },
+  { key: 'platelets', label: 'Platelets', unit: 'x10^3 cells/uL' },
+  { key: 'creatinine', label: 'Creatinine', unit: 'umol/L' },
   { key: 'ast', label: 'AST', unit: 'U/L' },
   { key: 'alt', label: 'ALT', unit: 'U/L' },
   { key: 'ldh', label: 'LDH', unit: 'U/L' },
@@ -48,7 +48,7 @@ export function visitLabel(visit, index) {
 
 export function isVisitComplete(visit) {
   const state = String(visit?.resolution_status || visit?.final_status || visit?.status || visit?.packet_status || '').toUpperCase();
-  if (['CONCORDANT', 'RESOLVED_BY_MAJORITY', 'FINALIZED', 'CLOSED', 'SIGNED'].includes(state)) return true;
+  if (['CONCORDANT', 'RESOLVED_BY_MAJORITY', 'FINALIZED', 'CLOSED'].includes(state)) return true;
   if (visit?.final_record || visit?.finalized) return true;
   return false;
 }
@@ -91,11 +91,12 @@ function sourceLabel(row) {
 function fromEvidence(visit, canonicalNames) {
   const evidence = visit?.evidence || {};
   const wanted = new Set(canonicalNames);
+  const displayValue = (row) => row.numeric_value ?? row.raw_source_value ?? row.result ?? row.value ?? row.parsed_text_value ?? row.coded_value;
   return Object.entries(evidence).filter(([name]) => wanted.has(name)).flatMap(([name, list]) => (list || []).map((row, index) => ({
     ...row,
     canonical: name,
     id: stableId(name, visit, index, row),
-    value: row.value ?? row.result ?? row.coded_value ?? row.parsed_text_value,
+    value: displayValue(row),
     observed_at: row.observed_at || row.datetime || row.date || visit?.date || visit?.visit_date,
     source_label: sourceLabel(row),
     evidence_state: normalizeState(row),
@@ -111,7 +112,9 @@ function likelyMeasurement(row) {
 function makeBpReading(visit, prefix, index, s, d, kind) {
   const sbp = toNumber(s?.value);
   const dbp = toNumber(d?.value);
-  if (sbp == null && dbp == null) return null;
+  // A clinically displayable BP requires both components. Zero-valued or
+  // incomplete placeholders must never become additional BP cards.
+  if (sbp == null || dbp == null || sbp <= 0 || dbp <= 0) return null;
   return {
     id: stableId(prefix, visit, index, s || d || {}),
     sbp,
@@ -137,7 +140,7 @@ function normalizeBp(visit, legacyRows = []) {
     const reading = makeBpReading(visit, 'bp-recheck', index, s, dbpRecheck[index], 'recheck');
     if (reading) rows.push(reading);
   });
-  legacyRows.forEach((row, index) => rows.push({
+  const legacy = legacyRows.map((row, index) => ({
     id: stableId('bp-legacy', visit, index, row),
     sbp: toNumber(row.sbp),
     dbp: toNumber(row.dbp),
@@ -145,18 +148,30 @@ function normalizeBp(visit, legacyRows = []) {
     source_label: sourceLabel(row),
     evidence_state: normalizeState(row, row.sbp || row.dbp ? 'available' : 'not_available'),
     kind: /recheck|repeat/i.test(`${row.source || ''} ${row.type || ''}`) ? 'recheck' : 'initial',
-  }));
-  return rows.sort((a, b) => new Date(a.observed_at || 0) - new Date(b.observed_at || 0));
+  })).filter((row) => row.sbp != null && row.dbp != null && row.sbp > 0 && row.dbp > 0);
+  // Structured visit evidence and legacy case logs commonly describe the
+  // same source rows. Prefer structured evidence so each reading is emitted
+  // once; use legacy rows only when structured BP evidence is absent.
+  return (rows.length ? rows : legacy).sort((a, b) => new Date(a.observed_at || 0) - new Date(b.observed_at || 0));
 }
 
 function normalizeLabs(visit, legacyRows = []) {
-  const byName = Object.entries(LAB_ALIASES).flatMap(([key, aliases]) => fromEvidence(visit, aliases).map((row) => ({
+  const statusOnlyPattern = /^(available|yes|no|true|false|normal|abnormal)(\s*\([^)]*\))?$/i;
+  const isLabResult = (row) => {
+    if (toNumber(row.value) != null) return true;
+    if (['pending', 'conflicting', 'blinded', 'not_available'].includes(row.evidence_state)) return true;
+    const text = String(row.value ?? '').trim();
+    if (!text) return false;
+    return !statusOnlyPattern.test(text);
+  };
+  const byName = Object.entries(LAB_ALIASES).flatMap(([key, aliases]) => fromEvidence(visit, aliases).filter(isLabResult).map((row) => ({
     id: row.id,
     key,
     label: key === 'PLATELETS' ? 'Platelets' : key,
     value: toNumber(row.value),
     raw: row.value,
     unit: row.unit,
+    reference: row.reference || row.reference_range || row.range,
     observed_at: row.observed_at,
     source_label: row.source_label,
     evidence_state: normalizeState(row),
@@ -170,11 +185,12 @@ function normalizeLabs(visit, legacyRows = []) {
       value: toNumber(row.result),
       raw: row.result,
       unit: row.unit,
+      reference: row.reference || row.reference_range || row.range,
       observed_at: row.datetime || row.date || visit?.date || visit?.visit_date,
       source_label: sourceLabel(row),
       evidence_state: normalizeState(row),
     };
-  });
+  }).filter((row) => row.raw != null || ['pending', 'conflicting', 'blinded', 'not_available'].includes(row.evidence_state));
   return [...byName, ...legacy];
 }
 
@@ -251,13 +267,15 @@ export function normalizeVisitEvidence(caseData = {}) {
   const visits = sourceVisits.length ? sourceVisits : [
     makeUnassignedVisit(caseData),
   ].filter(Boolean);
-  return visits.map((visit, index) => {
+  const normalized = visits.map((visit, index) => {
     const bp = normalizeBp(visit, legacyForVisit(caseData.bpLog || caseData.bp_readings, visit, index));
     const labs = normalizeLabs(visit, legacyForVisit(caseData.labLog, visit, index));
     const proteinuria = normalizeProteinuria(visit, legacyForVisit(caseData.proteinuriaLog, visit, index));
     const symptoms = textEvidence(visit, ['SYMPTOMS', 'HEADACHE', 'VISUAL_SYMPTOMS', 'RUQ_PAIN'], legacyForVisit(caseData.symptomsLog, visit, index));
     const medications = textEvidence(visit, ['MEDICATION', 'INTERVENTION'], legacyForVisit(caseData.medicationLog, visit, index));
     const fetal = textEvidence(visit, ['FETAL_ASSESSMENT', 'EFW_CENTILE', 'UA_DOPPLER'], legacyForVisit(caseData.fetalLog, visit, index));
+    const maternal = textEvidence(visit, ['MATERNAL_OUTCOME', 'DELIVERY_MODE', 'DELIVERY_COMPLICATION', 'MATERNAL_STATUS'], []);
+    const neonatal = textEvidence(visit, ['NEONATAL_OUTCOME', 'BIRTH_WEIGHT', 'APGAR', 'NICU_ADMISSION', 'STILLBIRTH'], []);
     return {
       ...visit,
       id: visit.id || `${caseData.id || 'case'}-${visitLabel(visit, index)}`,
@@ -270,7 +288,27 @@ export function normalizeVisitEvidence(caseData = {}) {
       symptoms,
       medications,
       fetal,
-      interpretation: deriveVisitInterpretation({ ...visit, bp, labs, proteinuria, symptoms, medications, fetal }, caseData),
+      maternal,
+      neonatal,
+    };
+  });
+  return normalized.map((visit, index) => {
+    const throughVisit = normalized.slice(0, index + 1);
+    const cumulative = {
+      ...visit,
+      bp: throughVisit.flatMap((row) => row.bp),
+      labs: throughVisit.flatMap((row) => row.labs),
+      proteinuria: throughVisit.flatMap((row) => row.proteinuria),
+      symptoms: throughVisit.flatMap((row) => row.symptoms),
+      medications: throughVisit.flatMap((row) => row.medications),
+      fetal: throughVisit.flatMap((row) => row.fetal),
+      maternal: throughVisit.flatMap((row) => row.maternal),
+      neonatal: throughVisit.flatMap((row) => row.neonatal),
+    };
+    return {
+      ...visit,
+      cumulativeEvidence: cumulative,
+      interpretation: deriveVisitInterpretation(cumulative, caseData),
     };
   });
 }
@@ -290,37 +328,22 @@ export function formatInterval(minutes) {
 }
 
 export function pairBpReadings(bp = []) {
-  const rows = [...bp].sort((a, b) => new Date(a.observed_at || 0) - new Date(b.observed_at || 0));
-  const pairs = [];
-  const used = new Set();
-  rows.forEach((reading, index) => {
-    if (used.has(reading.id)) return;
-    if (reading.kind === 'recheck') {
-      pairs.push({
-        initial: null,
-        recheck: reading,
-        interval: null,
-        confirmed: false,
-        severe: reading.sbp >= 160 || reading.dbp >= 110 || reading.evidence_state === 'severe',
-      });
-      used.add(reading.id);
-      return;
-    }
-    const explicitRecheck = rows.slice(index + 1).find((candidate) => !used.has(candidate.id) && candidate.kind === 'recheck');
-    const chronologicalRecheck = rows.slice(index + 1).find((candidate) => !used.has(candidate.id) && minutesBetween(reading.observed_at, candidate.observed_at) != null);
-    const recheck = explicitRecheck || chronologicalRecheck;
-    if (recheck) used.add(recheck.id);
-    used.add(reading.id);
-    const interval = recheck ? minutesBetween(reading.observed_at, recheck.observed_at) : null;
-    pairs.push({
-      initial: reading,
-      recheck,
-      interval,
-      confirmed: recheck ? interval >= 240 : false,
-      severe: [reading, recheck].some((row) => row && (row.sbp >= 160 || row.dbp >= 110 || row.evidence_state === 'severe')),
-    });
-  });
-  return pairs;
+  const rows = [...bp]
+    .filter((row) => row?.sbp != null && row?.dbp != null && row.sbp > 0 && row.dbp > 0)
+    .sort((a, b) => new Date(a.observed_at || 0) - new Date(b.observed_at || 0));
+  if (!rows.length) return [];
+
+  const initial = rows.find((row) => row.kind !== 'recheck') || rows[0];
+  const afterInitial = rows.filter((row) => row.id !== initial.id);
+  const recheck = afterInitial.find((row) => row.kind === 'recheck') || afterInitial[0] || null;
+  const interval = recheck ? minutesBetween(initial.observed_at, recheck.observed_at) : null;
+  return [{
+    initial,
+    recheck,
+    interval,
+    confirmed: recheck ? interval >= 240 : false,
+    severe: [initial, recheck].some((row) => row && (row.sbp >= 160 || row.dbp >= 110 || row.evidence_state === 'severe')),
+  }];
 }
 
 function latest(rows, key) {

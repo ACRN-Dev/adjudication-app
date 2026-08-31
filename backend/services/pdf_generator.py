@@ -197,6 +197,7 @@ def generate_adjudication_pdf(case_data: dict) -> bytes:
     final_diag = case_data.get("finalDiagnosis", "PE")
     onset_class = case_data.get("derivedSubtype", "Early-onset pre-eclampsia (EOPE)")
     severity_val = case_data.get("derivedSeverity", "With severe features")
+    certainty_val = case_data.get("certainty", "Not classified")
 
     sig_hash = case_data.get("signatureHash") or hashlib.sha256(
         f"{id_val}|{final_diag}|{onset_class}|{case_data.get('signedAt', '')}".encode()
@@ -206,9 +207,9 @@ def generate_adjudication_pdf(case_data: dict) -> bytes:
 
     det_grid = [
         [Paragraph("<b>Primary Endpoint Diagnosis:</b>", body_style), Paragraph(f"<b>{final_diag}</b>", body_style), Paragraph("<b>Severity Grade:</b>", body_style), Paragraph(f"<b>{severity_val}</b>", body_style)],
-        [Paragraph("<b>Onset Classification:</b>", body_style), Paragraph(f"<b>{onset_class}</b>", body_style), Paragraph("<b>Diagnostic Certainty:</b>", body_style), Paragraph("<b>Definite (DV-27 Gate Open)</b>", body_style)],
+        [Paragraph("<b>Onset Classification:</b>", body_style), Paragraph(f"<b>{onset_class}</b>", body_style), Paragraph("<b>Diagnostic Certainty:</b>", body_style), Paragraph(f"<b>{certainty_val}</b>", body_style)],
         [Paragraph("<b>Reviewer / Signer Identity:</b>", body_style), Paragraph(signer, body_style), Paragraph("<b>Authentication:</b>", body_style), Paragraph("21 CFR Part 11 Verified", body_style)],
-        [Paragraph("<b>Timestamp:</b>", body_style), Paragraph(signed_at, body_style), Paragraph("<b>Record Lock Status:</b>", body_style), Paragraph("<b>LOCKED &amp; FILED TO SHAREPOINT</b>", body_style)],
+        [Paragraph("<b>Timestamp:</b>", body_style), Paragraph(signed_at, body_style), Paragraph("<b>Record Lock Status:</b>", body_style), Paragraph("<b>SIGNED &amp; LOCKED; FILING TRACKED SEPARATELY</b>", body_style)],
         [Paragraph("<b>Cryptographic Hash (SHA-256):</b>", body_style), Paragraph(f"<font fontName='Courier' size=7.5>{sig_hash}</font>", body_style), Paragraph("<b>Governance Standard:</b>", body_style), Paragraph("OAC Charter §10 / SOP-ADJ-001", body_style)],
     ]
     t_det = Table(det_grid, colWidths=[130, 160, 110, 140])

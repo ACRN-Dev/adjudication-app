@@ -14,7 +14,7 @@ from conftest import TestingSession
 from database import get_db
 from main import app
 from models.canonical import (
-    Participant, AdjudicationRecord, CommitteeDecision, CommitteeMeeting, StudyCode,
+    Participant, AdjudicationVisit, AdjudicationRecord, CommitteeDecision, CommitteeMeeting, StudyCode,
     ReviewerRole, DiagnosisCode, OnsetClass, SeverityGrade, CertaintyLevel, AdjudicationStatus
 )
 from models.auth import PortalUser, CommitteeAssignment
@@ -50,13 +50,23 @@ def _seed_completed_case(concordant=True):
     )
     db.add(p)
     db.flush()
+    visit = AdjudicationVisit(
+        participant_id=p.id,
+        visit_number=1,
+        visit_code="VISIT-1",
+        status=AdjudicationStatus.CONCORDANT.value if concordant else AdjudicationStatus.DISCORDANT.value,
+    )
+    db.add(visit)
+    db.flush()
 
     rec_a = AdjudicationRecord(
         participant_id=p.id,
+        visit_id=visit.id,
+        visit_number=1,
         reviewer_role=ReviewerRole.REVIEWER_A,
         reviewer_upn="adjudicatora@acrnhealth.com",
         reviewer_name="Reviewer A",
-        diagnosis=DiagnosisCode.PREECLAMPSIA,
+        diagnosis=DiagnosisCode.PREECLAMPSIA if concordant else DiagnosisCode.HELLP,
         onset_class=OnsetClass.EOPE,
         severity=SeverityGrade.WITH_SEVERE,
         certainty=CertaintyLevel.DEFINITE,
@@ -65,13 +75,15 @@ def _seed_completed_case(concordant=True):
     )
     rec_b = AdjudicationRecord(
         participant_id=p.id,
+        visit_id=visit.id,
+        visit_number=1,
         reviewer_role=ReviewerRole.REVIEWER_B,
         reviewer_upn="adjudicatorb@acrnhealth.com",
         reviewer_name="Reviewer B",
-        diagnosis=DiagnosisCode.PREECLAMPSIA if concordant else DiagnosisCode.NOT_PE,
+        diagnosis=DiagnosisCode.PREECLAMPSIA,
         onset_class=OnsetClass.EOPE if concordant else None,
         severity=SeverityGrade.WITH_SEVERE if concordant else None,
-        certainty=CertaintyLevel.DEFINITE if concordant else CertaintyLevel.PROBABLE,
+        certainty=CertaintyLevel.DEFINITE if concordant else CertaintyLevel.NOT_PE,
         rationale="Criteria met" if concordant else "Normotensive profile",
         signed=True,
     )

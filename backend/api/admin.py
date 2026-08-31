@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from database import get_db, DB_OFFLINE
 from models.admin import (AdminUser, AdminRole, UserRole, StudyAccess, AdminStudy, AdminSite, ControlledVersion,
@@ -309,17 +310,96 @@ def demo_reset(req:ReasonedRequest,identity:Identity=Depends(require("integratio
 @router.post("/demo/reset-all")
 def demo_reset_all(req:ReasonedRequest,identity:Identity=Depends(require("integrations.manage")),db:Session=Depends(get_db)):
     if os.getenv("ENABLE_DEMO_DATA","false").lower()!="true": raise HTTPException(409,"Demo data is disabled in this environment.")
-    from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInstance,CanonicalObservation,ReviewerAssignment,RestrictedIdentityCrosswalk
-    from models.canonical import ImportBatch,Participant,CanonicalField,DerivationResult,Narrative,AdjudicationRecord,CommitteeDecision,AuditEvent
-    from models.auth import AuthSession,AuthAuditEvent
-    counts={}
-    # delete in FK-safe order
-    for m in [CommitteeDecision,AdjudicationRecord,Narrative,DerivationResult,CanonicalField,Participant,ImportBatch,
-              RestrictedIdentityCrosswalk,ReviewerAssignment,CanonicalObservation,VisitInstance,LongitudinalParticipant,RTImportBatch,
-              AuthSession,AuthAuditEvent]:
-        counts[m.__tablename__]=db.query(m).delete(synchronize_session=False)
-    db.commit()
-    counts.update(reset_demo(db))
-    add_audit(db,identity,"DEMO_FULL_DATABASE_RESET","DEMO_DATA","administration",req.reason,new=counts)
+    from models.canonical import (
+        ImportBatch, Participant, CanonicalField, DerivationResult, Narrative,
+        AdjudicationRecord, CommitteeDecision, AuditEvent, AdjudicationVisit,
+        VisitMeasurementDate, SignedCaseArtifact,
+    )
+    from models.longitudinal import (
+        RTImportBatch, LongitudinalParticipant, VisitInstance, CanonicalObservation,
+        ReviewerAssignment, RestrictedIdentityCrosswalk, VisitDerivation,
+        LongitudinalCaseDerivation, ImportIssue,
+    )
+    counts = {}
+
+    csv_batches = db.query(ImportBatch).filter(
+        or_(
+            ImportBatch.edc_filename.ilike("%.csv"),
+            ImportBatch.esource_filename.ilike("%.csv"),
+            ImportBatch.edc_filename.ilike("%demo%"),
+            ImportBatch.esource_filename.ilike("%demo%"),
+        )
+    ).all()
+    csv_batch_ids = [b.id for b in csv_batches]
+    participant_ids = [
+        p.id for p in db.query(Participant.id)
+        .filter(Participant.import_batch_id.in_(csv_batch_ids))
+        .all()
+    ] if csv_batch_ids else []
+    visit_ids = [
+        v.id for v in db.query(AdjudicationVisit.id)
+        .filter(AdjudicationVisit.participant_id.in_(participant_ids))
+        .all()
+    ] if participant_ids else []
+
+    rt_batches = db.query(RTImportBatch).filter(
+        or_(RTImportBatch.filename.ilike("%.csv"), RTImportBatch.filename.ilike("%demo%"))
+    ).all()
+    rt_batch_ids = [b.id for b in rt_batches]
+    rt_participant_ids = [
+        p.id for p in db.query(LongitudinalParticipant.id)
+        .filter(LongitudinalParticipant.source_batch_id.in_(rt_batch_ids))
+        .all()
+    ] if rt_batch_ids else []
+    rt_visit_ids = [
+        v.id for v in db.query(VisitInstance.id)
+        .filter(VisitInstance.source_batch_id.in_(rt_batch_ids))
+        .all()
+    ] if rt_batch_ids else []
+
+    def delete_count(model, *criteria):
+        q = db.query(model)
+        for criterion in criteria:
+            q = q.filter(criterion)
+        count = q.delete(synchronize_session=False)
+        counts[model.__tablename__] = counts.get(model.__tablename__, 0) + count
+
+    if visit_ids:
+        delete_count(SignedCaseArtifact, SignedCaseArtifact.visit_id.in_(visit_ids))
+        delete_count(VisitMeasurementDate, VisitMeasurementDate.visit_id.in_(visit_ids))
+        delete_count(CommitteeDecision, CommitteeDecision.visit_id.in_(visit_ids))
+        delete_count(AdjudicationRecord, AdjudicationRecord.visit_id.in_(visit_ids))
+    if participant_ids:
+        delete_count(SubjectAssignment, SubjectAssignment.participant_id.in_(participant_ids))
+        delete_count(Narrative, Narrative.participant_id.in_(participant_ids))
+        delete_count(DerivationResult, DerivationResult.participant_id.in_(participant_ids))
+        delete_count(CanonicalField, CanonicalField.participant_id.in_(participant_ids))
+        delete_count(AuditEvent, AuditEvent.participant_id.in_(participant_ids))
+    if visit_ids:
+        delete_count(AdjudicationVisit, AdjudicationVisit.id.in_(visit_ids))
+    if participant_ids:
+        delete_count(Participant, Participant.id.in_(participant_ids))
+    if csv_batch_ids:
+        delete_count(AuditEvent, AuditEvent.import_batch_id.in_(csv_batch_ids))
+        delete_count(ImportBatch, ImportBatch.id.in_(csv_batch_ids))
+
+    if rt_visit_ids:
+        delete_count(VisitDerivation, VisitDerivation.visit_id.in_(rt_visit_ids))
+        delete_count(ImportIssue, ImportIssue.visit_id.in_(rt_visit_ids))
+        delete_count(CanonicalObservation, CanonicalObservation.visit_id.in_(rt_visit_ids))
+    if rt_participant_ids:
+        delete_count(ReviewerAssignment, ReviewerAssignment.participant_id.in_(rt_participant_ids))
+        delete_count(LongitudinalCaseDerivation, LongitudinalCaseDerivation.participant_id.in_(rt_participant_ids))
+        delete_count(RestrictedIdentityCrosswalk, RestrictedIdentityCrosswalk.participant_id.in_(rt_participant_ids))
+        delete_count(ImportIssue, ImportIssue.participant_id.in_(rt_participant_ids))
+    if rt_visit_ids:
+        delete_count(VisitInstance, VisitInstance.id.in_(rt_visit_ids))
+    if rt_participant_ids:
+        delete_count(LongitudinalParticipant, LongitudinalParticipant.id.in_(rt_participant_ids))
+    if rt_batch_ids:
+        delete_count(ImportIssue, ImportIssue.batch_id.in_(rt_batch_ids))
+        delete_count(RTImportBatch, RTImportBatch.id.in_(rt_batch_ids))
+
+    add_audit(db,identity,"DEMO_CSV_ASSIGNMENT_RESET","DEMO_DATA","csv-imports-and-assignments",req.reason,new=counts)
     db.commit()
     return {"demo":True,"reset":counts,"production_records_affected":0}

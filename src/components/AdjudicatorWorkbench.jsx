@@ -71,6 +71,10 @@ export default function AdjudicatorWorkbench({
   const [selectedCertainty, setSelectedCertainty] = useState('Probable');
   const [selectedVisitIndex, setSelectedVisitIndex] = useState(0);
   const [narrativeText, setNarrativeText] = useState('');
+  const [visitNarratives, setVisitNarratives] = useState({});
+  const [longitudinalComment, setLongitudinalComment] = useState('');
+  const [firstPeVisitNumber, setFirstPeVisitNumber] = useState('');
+  const [firstPeDate, setFirstPeDate] = useState('');
   const [narrativeViewMode, setNarrativeViewMode] = useState('TABLE'); // 'TABLE' | 'PROSE'
   const [formCode, setFormCode] = useState('FORM-ADJ-15A');
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
@@ -100,17 +104,25 @@ export default function AdjudicatorWorkbench({
 
   // Compute DV engine results for active case
   const dvResults = activeCase ? runDvEngine(activeCase) : null;
-  const evidenceScore = dvResults ? dvResults.evidenceScore : (activeCase?.pktScore || 0);
-  const missingAnchors = dvResults ? dvResults.missingAnchors : [];
-  const certaintyGatePassed = dvResults?.certaintyGate?.inputs?.gate_open ?? (evidenceScore === 1.0);
-  const maxCertaintyAllowed = dvResults?.certaintyGate?.inputs?.max_certainty || (evidenceScore === 1.0 ? 'Definite' : 'Probable');
+  const evidenceScore = selectedEvidenceVisit?.interpretation?.completeness != null
+    ? selectedEvidenceVisit.interpretation.completeness / 100
+    : (dvResults ? dvResults.evidenceScore : (activeCase?.pktScore || 0));
+  const missingAnchors = selectedEvidenceVisit?.interpretation?.missing || dvResults?.missingAnchors || [];
+  const certaintyGatePassed = selectedEvidenceVisit
+    ? selectedEvidenceVisit.interpretation.missing.length === 0
+    : (dvResults?.certaintyGate?.inputs?.gate_open ?? evidenceScore === 1.0);
+  const maxCertaintyAllowed = certaintyGatePassed ? 'Definite' : 'Probable';
 
   useEffect(() => {
     if (activeCase) {
       setSelectedVisitIndex(0);
       const generated = generateNarrative(activeCase);
       setNarrativeText(generated.fullText);
+      setVisitNarratives({});
       setFormCode(generated.formCode);
+      setLongitudinalComment(activeCase.longitudinal_comment || '');
+      setFirstPeVisitNumber(activeCase.first_pe_visit_number ? String(activeCase.first_pe_visit_number) : '');
+      setFirstPeDate(activeCase.first_pe_date ? String(activeCase.first_pe_date).slice(0, 10) : '');
 
       if (activeCase.derivedSubtype === 'LOPE') {
         setSelectedOnset('Late-onset pre-eclampsia (LOPE)');
@@ -135,6 +147,19 @@ export default function AdjudicatorWorkbench({
   }, [activeCase?.id]);
 
   useEffect(() => {
+    if (!activeCase || selectedVisitIndex >= pages.length) return;
+    const visitKey = pages[selectedVisitIndex]?.visit_code || String(selectedVisitIndex + 1);
+    const existing = visitNarratives[visitKey];
+    if (existing != null) {
+      setNarrativeText(existing);
+      return;
+    }
+    const generated = generateNarrative({ ...activeCase, visits: pages.slice(0, selectedVisitIndex + 1) }, formCode);
+    setVisitNarratives((current) => ({ ...current, [visitKey]: generated.fullText }));
+    setNarrativeText(generated.fullText);
+  }, [activeCase?.id, selectedVisitIndex]);
+
+  useEffect(() => {
     if (Number.isInteger(advanceToVisitIndex)) {
       setSelectedVisitIndex(Math.max(0, Math.min(advanceToVisitIndex, pages.length)));
     }
@@ -144,8 +169,13 @@ export default function AdjudicatorWorkbench({
     if (!activeCase) return;
     setIsGeneratingAi(true);
     setTimeout(() => {
-      const generated = generateNarrative(activeCase, formCode);
+      const scopedCase = selectedVisitIndex < pages.length ? { ...activeCase, visits: pages.slice(0, selectedVisitIndex + 1) } : activeCase;
+      const generated = generateNarrative(scopedCase, formCode);
       setNarrativeText(generated.fullText);
+      if (selectedVisitIndex < pages.length) {
+        const key = pages[selectedVisitIndex]?.visit_code || String(selectedVisitIndex + 1);
+        setVisitNarratives((current) => ({ ...current, [key]: generated.fullText }));
+      }
       setIsGeneratingAi(false);
     }, 450);
   };
@@ -627,7 +657,7 @@ export default function AdjudicatorWorkbench({
             </DropdownSection>
 
             <DropdownSection title="Visit Specific Evidence" icon={<FileText size={16} />} defaultOpen>
-              {selectedVisitIndex===evidenceVisits.length ? <OverallSummary visits={evidenceVisits} /> : selectedEvidenceVisit && <VisitEvidencePanel visit={selectedEvidenceVisit} />}
+              {selectedVisitIndex===evidenceVisits.length ? <OverallSummary visits={evidenceVisits} /> : selectedEvidenceVisit && <VisitEvidencePanel visit={selectedEvidenceVisit} selectedIndex={selectedVisitIndex} visitCount={evidenceVisits.length} onSelectVisit={setSelectedVisitIndex} />}
             </DropdownSection>
 
             <DropdownSection title="Longitudinal Per-Visit Evidence" icon={<Database size={16} />} defaultOpen={false}>
@@ -743,7 +773,7 @@ export default function AdjudicatorWorkbench({
         {pages.length > 0 && <><VisitRibbon visits={pages} selectedIndex={selectedVisitIndex} onSelectVisit={setSelectedVisitIndex}/><div className="visit-signing-context"><div><strong>{selectedVisitIndex===pages.length?'Overall adjudication summary':`Adjudicating ${selectedVisit?.name||selectedVisit?.visit_code||`Visit ${selectedVisitIndex+1}`}`}</strong><span>{selectedVisitIndex===pages.length?'Read-only roll-up of completed visit decisions.':'Only this visit and its dated evidence will be signed.'}</span></div></div></>}
 
         <DropdownSection title="Visit Specific Evidence" icon={<FileText size={16} />} defaultOpen>
-          {selectedVisitIndex===evidenceVisits.length ? <OverallSummary visits={evidenceVisits} /> : selectedEvidenceVisit && <VisitEvidencePanel visit={selectedEvidenceVisit} />}
+          {selectedVisitIndex===evidenceVisits.length ? <OverallSummary visits={evidenceVisits} /> : selectedEvidenceVisit && <VisitEvidencePanel visit={selectedEvidenceVisit} selectedIndex={selectedVisitIndex} visitCount={evidenceVisits.length} onSelectVisit={setSelectedVisitIndex} />}
         </DropdownSection>
 
         <DropdownSection title="Longitudinal Per-Visit Evidence" icon={<Database size={16} />} defaultOpen={false}>
@@ -752,10 +782,10 @@ export default function AdjudicatorWorkbench({
 
         {selectedVisitIndex<pages.length && <DropdownSection title="Subject History Context" icon={<Stethoscope size={16} />} defaultOpen={false}><PatientHistoryPanel caseData={activeCase} /></DropdownSection>}
 
-        {selectedVisitIndex===pages.length && <div className="overall-lock-message"><CheckCircle2 size={24}/><div><strong>Overall adjudication is complete</strong><p>The overall view is a read-only roll-up. Each visit retains its independent signature and audit trail.</p></div></div>}
+        {selectedVisitIndex===pages.length && <><div className="overall-lock-message"><CheckCircle2 size={24}/><div><strong>Overall longitudinal assessment</strong><p>Summarize when PE first became evident and how the participant's condition evolved. Visit decisions retain separate signatures and audit trails.</p></div></div><div className="summary-card-grid" style={{marginTop:16}}><div className="form-group"><label style={{fontWeight:700}}>First visit where PE was evident</label><select className="form-select" value={firstPeVisitNumber} onChange={(e)=>setFirstPeVisitNumber(e.target.value)}><option value="">Not established</option>{pages.map((v,i)=><option key={v.id} value={i+1}>{v.name || `Visit ${i+1}`}</option>)}</select></div><div className="form-group"><label style={{fontWeight:700}}>First PE date</label><input className="form-input" type="date" value={firstPeDate} onChange={(e)=>setFirstPeDate(e.target.value)}/></div></div><div className="form-group" style={{marginTop:12}}><label style={{fontWeight:700}}>Overall progression comment</label><textarea className="narrative-box" style={{height:150}} value={longitudinalComment} onChange={(e)=>setLongitudinalComment(e.target.value)} placeholder="Describe the cumulative clinical course, the visit where PE first emerged, progression or resolution, and supporting dated evidence."/><small>This assessment is included with subsequent signed visit records and in the visit-level analysis export.</small></div></>}
 
         {/* Narrative Box */}
-        {selectedVisitIndex<pages.length && <DropdownSection title={`${formCode} Blinded Case Narrative Draft`} icon={<Bot size={16} />} defaultOpen={false}><div style={{ marginBottom: '16px' }}>
+        {selectedVisitIndex<pages.length && <DropdownSection title={`${formCode} Cumulative Narrative Through ${selectedVisit?.name || `Visit ${selectedVisitIndex + 1}`}`} icon={<Bot size={16} />} defaultOpen={false}><div style={{ marginBottom: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
               <label style={{ fontWeight: 700, fontSize: '12.5px', color: 'var(--acrn-navy-dark)', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Bot size={15} color="var(--acrn-navy-dark)" />
@@ -794,7 +824,7 @@ export default function AdjudicatorWorkbench({
               className="narrative-box"
               style={{ height: '240px', fontFamily: 'monospace', fontSize: '12px', lineHeight: '1.45' }}
               value={narrativeText}
-              onChange={(e) => setNarrativeText(e.target.value)}
+              onChange={(e) => { const value=e.target.value; const key=selectedVisit?.visit_code || String(selectedVisitIndex+1); setNarrativeText(value); setVisitNarratives((current)=>({...current,[key]:value})); }}
               disabled={isSigned}
             />
           )}
@@ -914,6 +944,9 @@ export default function AdjudicatorWorkbench({
               rationale: narrativeText,
               comment: narrativeText,
               otherRationale: selectedDiagnosis === 'Other' ? otherDiagnosis.trim() : null,
+              longitudinalComment: longitudinalComment.trim() || null,
+              firstPeVisitNumber: firstPeVisitNumber ? Number(firstPeVisitNumber) : null,
+              firstPeDate: firstPeDate || null,
               visitNumber: selectedVisit?.visit_number || selectedVisit?.visitNumber || selectedVisitIndex + 1,
               visitCode: selectedVisit?.visit_code || selectedVisit?.name,
               visitDate: selectedVisit?.visit_date || selectedVisit?.date,

@@ -11,6 +11,8 @@ os.environ["ENABLE_DEMO_DATA"] = "true"
 from main import app
 from models.admin import AdminUser, ControlledVersion, AdminAuditEvent
 from models.auth import PortalUser
+from models.canonical import ImportBatch, Participant, SubjectAssignment, AdjudicationVisit, AdjudicationRecord, ReviewerRole, StudyCode
+from models.longitudinal import RTImportBatch, LongitudinalParticipant, ReviewerAssignment
 from services.admin_security import Identity, validate_mapping, validate_workflow_definition, risk_warnings
 from services.auth_service import ACTIVE, hash_password
 from conftest import TestingSession
@@ -114,3 +116,70 @@ def test_sso_admin_can_reset_demo_data_without_demo_accounts(monkeypatch):
         cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]},
     )
     assert response.status_code == 200
+
+
+def test_reset_all_is_scoped_to_csv_imports_and_assignments(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_DATA", "true")
+    db = TestingSession()
+    admin_email = "scoped.reset.admin@acrnhealth.com"
+    if not db.query(PortalUser).filter_by(email=admin_email).first():
+        db.add(PortalUser(
+            email=admin_email, display_name="Scoped Reset Admin",
+            password_hash=hash_password("Whatever123!"), role="ADMIN", portal_role="TECHNICAL_ADMIN", status=ACTIVE,
+        ))
+
+    csv_batch = ImportBatch(study=StudyCode.EOPE, edc_filename="scenario-a.csv", mapping_version="test", imported_by=admin_email)
+    retained_batch = ImportBatch(study=StudyCode.EOPE, edc_filename="production-feed.json", mapping_version="test", imported_by=admin_email)
+    db.add_all([csv_batch, retained_batch])
+    db.flush()
+    csv_participant = Participant(subject_id="CSV-RESET-001", case_number="ADJ-CSV-001", study=StudyCode.EOPE, import_batch_id=csv_batch.id)
+    retained_participant = Participant(subject_id="KEEP-RESET-001", case_number="ADJ-KEEP-001", study=StudyCode.EOPE, import_batch_id=retained_batch.id)
+    db.add_all([csv_participant, retained_participant])
+    db.flush()
+    csv_visit = AdjudicationVisit(participant_id=csv_participant.id, visit_number=1, visit_code="V01")
+    retained_visit = AdjudicationVisit(participant_id=retained_participant.id, visit_number=1, visit_code="V01")
+    db.add_all([csv_visit, retained_visit])
+    db.flush()
+    db.add_all([
+        SubjectAssignment(participant_id=csv_participant.id, reviewer_a_upn="a@demo", reviewer_b_upn="b@demo"),
+        SubjectAssignment(participant_id=retained_participant.id, reviewer_a_upn="a@demo", reviewer_b_upn="b@demo"),
+        AdjudicationRecord(participant_id=csv_participant.id, visit_id=csv_visit.id, reviewer_role=ReviewerRole.REVIEWER_A, reviewer_upn="a@demo"),
+        AdjudicationRecord(participant_id=retained_participant.id, visit_id=retained_visit.id, reviewer_role=ReviewerRole.REVIEWER_A, reviewer_upn="a@demo"),
+    ])
+
+    rt_csv = RTImportBatch(filename="scenario-b.csv", checksum="scoped-reset-csv", file_size=1, uploaded_by=admin_email)
+    rt_retained = RTImportBatch(filename="production-feed.parquet", checksum="scoped-reset-keep", file_size=1, uploaded_by=admin_email)
+    db.add_all([rt_csv, rt_retained])
+    db.flush()
+    rt_csv_participant = LongitudinalParticipant(blinded_subject_id="RT-CSV-001", source_batch_id=rt_csv.id)
+    rt_retained_participant = LongitudinalParticipant(blinded_subject_id="RT-KEEP-001", source_batch_id=rt_retained.id)
+    db.add_all([rt_csv_participant, rt_retained_participant])
+    db.flush()
+    db.add_all([
+        ReviewerAssignment(participant_id=rt_csv_participant.id, reviewer_upn="a@demo", reviewer_role="REVIEWER_A"),
+        ReviewerAssignment(participant_id=rt_retained_participant.id, reviewer_upn="a@demo", reviewer_role="REVIEWER_A"),
+    ])
+    db.commit()
+    db.close()
+
+    login = client.post("/api/auth/login", json={"email": admin_email, "password": "Whatever123!"})
+    response = client.post(
+        "/api/admin/demo/reset-all",
+        json={"reason": "Scoped CSV reset regression"},
+        cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]},
+    )
+    assert response.status_code == 200
+
+    db = TestingSession()
+    assert db.query(PortalUser).filter_by(email=admin_email).count() == 1
+    assert db.query(ImportBatch).filter_by(edc_filename="scenario-a.csv").count() == 0
+    assert db.query(Participant).filter_by(subject_id="CSV-RESET-001").count() == 0
+    assert db.query(ImportBatch).filter_by(edc_filename="production-feed.json").count() == 1
+    assert db.query(Participant).filter_by(subject_id="KEEP-RESET-001").count() == 1
+    assert db.query(SubjectAssignment).join(Participant).filter(Participant.subject_id == "KEEP-RESET-001").count() == 1
+    assert db.query(RTImportBatch).filter_by(filename="scenario-b.csv").count() == 0
+    assert db.query(LongitudinalParticipant).filter_by(blinded_subject_id="RT-CSV-001").count() == 0
+    assert db.query(RTImportBatch).filter_by(filename="production-feed.parquet").count() == 1
+    assert db.query(LongitudinalParticipant).filter_by(blinded_subject_id="RT-KEEP-001").count() == 1
+    assert db.query(ReviewerAssignment).join(LongitudinalParticipant).filter(LongitudinalParticipant.blinded_subject_id == "RT-KEEP-001").count() == 1
+    db.close()

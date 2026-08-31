@@ -30,9 +30,21 @@ const caseData = {
         ],
         PLATELETS: [{ value: '92', unit: 'x10^3/uL', observed_at: '2026-04-21T14:05:00Z', severe: true }],
         CREATININE: [{ value: '1.31', unit: 'mg/dL', observed_at: '2026-04-21T14:05:00Z', abnormal: true }],
+        AST: [
+          { value: 'Available', observed_at: '2026-04-21T13:00:00Z', source: { form: 'Labs', field: 'AST available?' } },
+          { reference_range: '5-40 U/L', observed_at: '2026-04-21T13:30:00Z', source: { form: 'Labs', field: 'AST reference range' } },
+          { coded_value: 'Abnormal (CS)', observed_at: '2026-04-21T13:45:00Z', source: { form: 'Labs', field: 'AST interpretation' } },
+          { value: '96', unit: 'U/L', observed_at: '2026-04-21T14:05:00Z', abnormal: true },
+        ],
         ALT: [
           { value: '62', unit: 'U/L', observed_at: '2026-04-21T13:05:00Z', abnormal: true },
           { value: '78', unit: 'U/L', observed_at: '2026-04-21T14:05:00Z', abnormal: true },
+        ],
+        LDH: [
+          { value: 'Available', observed_at: '2026-04-21T13:00:00Z', source: { form: 'Labs', field: 'LDH available?' } },
+          { reference_range: '140-280 U/L', observed_at: '2026-04-21T13:30:00Z', source: { form: 'Labs', field: 'LDH reference range' } },
+          { value: 'Abnormal (CS)', observed_at: '2026-04-21T13:45:00Z', source: { form: 'Labs', field: 'LDH interpretation' } },
+          { raw_source_value: '610', unit: 'IU/L', observed_at: '2026-04-21T14:05:00Z', abnormal: true },
         ],
         UPCR: [{ value: '1.84', unit: 'g/g', observed_at: '2026-04-21T14:10:00Z', abnormal: true }],
         SFLT1_PLGF_RATIO: [{ value: '99', evidence_state: 'AVAILABLE' }],
@@ -69,16 +81,29 @@ const visits = normalizeVisitEvidence(caseData);
 assert.equal(visits.length, 4);
 assert.equal(visits[1].bp.length, 2, 'keeps multiple BP observations from the same visit');
 assert.equal(visits[1].labs.some((row) => /SFLT|PLGF/i.test(row.key)), false, 'blinded biomarkers are withheld');
+assert.equal(visits[1].labs.find((row) => row.key === 'AST').raw, '96', 'AST displays the numeric result, not an availability flag');
+assert.equal(visits[1].labs.find((row) => row.key === 'LDH').raw, '610', 'LDH supports raw_source_value from RealTime observations');
 assert.equal(minutesBetween('2026-04-21T08:14:00Z', '2026-04-21T12:40:00Z'), 266);
 assert.equal(formatInterval(266), '4 h 26 min');
 assert.equal(pairBpReadings(visits[1].bp)[0].confirmed, true);
 assert.equal(visits[2].bp.length, 2, 'V2 has one initial and one recheck reading, not flag rows');
 assert.equal(pairBpReadings(visits[2].bp).length, 1, 'V2 initial and recheck render as one BP card');
+assert.equal(pairBpReadings([
+  { id: 'bad', sbp: 0, dbp: null, observed_at: '2026-07-15T00:00:00Z', kind: 'initial' },
+  { id: 'initial', sbp: 125, dbp: 74, observed_at: '2026-07-15T10:01:00Z', kind: 'initial' },
+  { id: 'recheck', sbp: 116, dbp: 78, observed_at: '2026-07-15T10:02:00Z', kind: 'initial' },
+  { id: 'duplicate', sbp: 125, dbp: 74, observed_at: '2026-07-15T10:03:00Z', kind: 'initial' },
+]).length, 1, 'one visit renders exactly one initial/recheck BP card');
+assert.equal(pairBpReadings([
+  { id: 'bad', sbp: 0, dbp: null, observed_at: '2026-07-15T00:00:00Z', kind: 'initial' },
+  { id: 'initial', sbp: 125, dbp: 74, observed_at: '2026-07-15T10:01:00Z', kind: 'initial' },
+  { id: 'recheck', sbp: 116, dbp: 78, observed_at: '2026-07-15T10:02:00Z', kind: 'initial' },
+])[0].recheck.sbp, 116, 'zero placeholder is discarded and second complete reading is the recheck');
 assert.equal(visits[0].interpretation.missing.includes('Blood pressure'), true);
 assert.equal(visits[3].proteinuria[0].evidence_state, 'pending');
 assert.equal(visits[3].labs[0].evidence_state, 'conflicting');
 assert.equal(isVisitComplete(visits[3]), true);
-assert.equal(isVisitComplete({ signed: true, status: 'SIGNED' }), false, 'one reviewer signature does not unlock overall final adjudication');
+assert.equal(isVisitComplete({ signed: true, status: 'IN_REVIEW' }), false, 'one reviewer signature does not unlock overall final adjudication');
 
 const legacy = normalizeVisitEvidence({
   id: 'LEGACY-001',

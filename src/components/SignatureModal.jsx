@@ -29,6 +29,7 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
         reviewer_upn: user?.email,
         reviewer_name: submission?.reviewerName || user?.display_name || user?.email,
         reviewer_password: password,
+        mfa_code: mfaCode,
         visit_number: submission?.visitNumber || 1,
         visit_code: submission?.visitCode,
         visit_date: submission?.visitDate,
@@ -40,6 +41,9 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
         certainty: submission?.certainty || 'Probable',
         rationale: submission?.rationale || 'Adjudication completed after review of the available evidence.',
         comment: submission?.comment || null,
+        longitudinal_comment: submission?.longitudinalComment || null,
+        first_pe_visit_number: submission?.firstPeVisitNumber || null,
+        first_pe_date: submission?.firstPeDate || null,
         other_rationale: submission?.otherRationale || null,
       }),
     })

@@ -409,6 +409,9 @@ class AdjudicationRecord(Base):
     differential_diagnosis = Column(String(500))
     rationale = Column(Text)
     comment = Column(Text)
+    longitudinal_comment = Column(Text)
+    first_pe_visit_number = Column(Integer, nullable=True)
+    first_pe_date = Column(DateTime, nullable=True)
     other_rationale = Column(Text)
     narrative_id = Column(UUID(as_uuid=True), ForeignKey("narratives.id"))
 

@@ -50,6 +50,9 @@ def finalize_case_pdf(db: Session, participant, visit, determination) -> SignedC
         "derivedSeverity": determination.severity.value if determination.severity else "Not classified",
         "certainty": determination.certainty.value if determination.certainty else "Not classified",
         "comment": determination.comment or determination.rationale or "",
+        "longitudinalComment": determination.longitudinal_comment or "",
+        "firstPeVisitNumber": determination.first_pe_visit_number,
+        "firstPeDate": determination.first_pe_date.isoformat() if determination.first_pe_date else "",
         "otherRationale": determination.other_rationale or "",
         "reviewerName": determination.reviewer_name or determination.reviewer_upn,
         "reviewerRole": determination.reviewer_role.value,
@@ -79,7 +82,8 @@ def finalize_case_pdf(db: Session, participant, visit, determination) -> SignedC
     try:
         destination = adapter.write(
             subject_id=participant.subject_id,
-            blinded_id=f"{case_reference}-{visit.visit_code}",
+            blinded_id=case_reference,
+            visit_code=visit.visit_code,
             study=participant.study.value,
             pdf_bytes=pdf_bytes,
             timestamp=determination.signed_at,

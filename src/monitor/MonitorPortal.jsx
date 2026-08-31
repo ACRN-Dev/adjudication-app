@@ -287,8 +287,7 @@ function ReconstructionQC({ user, onOpen }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
-  const load = () => Promise.all([listPatients(user, { page_size: 100 }), listAdjudicators(user)])
-    .then(([patients, adjudicators]) => { setData(patients); setRoster(adjudicators); });
+  const load = () => listPatients(user, { page_size: 100 }).then(setData);
 
   useEffect(() => {
     load();
@@ -377,10 +376,16 @@ function ReconstructionQC({ user, onOpen }) {
 
 function Assignments({ user, onOpen }) {
   const [data, setData] = useState({ items: [], total: 0 });
+  const [roster, setRoster] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
-  const load = () => listPatients(user, { page_size: 100 }).then(setData);
+  const load = () =>
+    Promise.all([listPatients(user, { page_size: 100 }), listAdjudicators(user)])
+      .then(([patients, adjudicators]) => {
+        setData(patients);
+        setRoster(adjudicators);
+      });
 
   useEffect(() => {
     load();

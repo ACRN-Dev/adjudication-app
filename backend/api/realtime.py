@@ -217,7 +217,18 @@ def timeline(p,db):
         evidence={}
         for o in v.observations:
             if o.prohibited_flag or o.canonical_variable.startswith("RECORDED_PE_"): continue
-            evidence.setdefault(o.canonical_variable,[]).append({"value":o.numeric_value if o.numeric_value is not None else o.coded_value or o.parsed_text_value,"unit":o.unit,"observed_at":o.observation_datetime,"date_confidence":o.date_confidence,"provenance":o.provenance_type,"source":{"form":o.source_form,"page":o.source_page,"field":o.source_field_label,"row":o.source_row_number}})
+            evidence.setdefault(o.canonical_variable,[]).append({
+                "value": o.numeric_value if o.numeric_value is not None else o.raw_source_value or o.parsed_text_value or o.coded_value,
+                "numeric_value": o.numeric_value,
+                "raw_source_value": o.raw_source_value,
+                "parsed_text_value": o.parsed_text_value,
+                "coded_value": o.coded_value,
+                "unit": o.unit,
+                "observed_at": o.observation_datetime,
+                "date_confidence": o.date_confidence,
+                "provenance": o.provenance_type,
+                "source": {"form": o.source_form, "page": o.source_page, "field": o.source_field_label, "row": o.source_row_number},
+            })
         visits.append({"id":str(v.id),"name":v.scheduled_visit_code,"occurrence":v.visit_occurrence,"date":v.visit_datetime,"ga_days":v.gestational_age_days,"form":v.form_title,"form_version":v.form_version,"reconstruction":{"method":v.reconstruction_method,"confidence":v.reconstruction_confidence,"qc_status":v.qc_status},"evidence":evidence})
     d=db.query(LongitudinalCaseDerivation).filter_by(participant_id=p.id).first()
     long=None if not d else {"earliest_qualifying_date":d.earliest_qualifying_pe_date,"first_qualifying_visit_id":str(d.first_qualifying_visit_id) if d.first_qualifying_visit_id else None,"onset_classification":d.onset_classification,"maximum_severity":d.maximum_severity,"packet_completeness":d.packet_completeness,"certainty_restriction":d.certainty_restriction,"trigger_status":d.trigger_status,"recorded_site_diagnosis":d.recorded_site_diagnosis,"recorded_site_diagnosis_date":d.recorded_site_diagnosis_date,"discrepancy":d.recorded_versus_derived_discrepancy,"explanation":d.explanation}

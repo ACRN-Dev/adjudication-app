@@ -102,7 +102,7 @@ export default function App() {
     const signedVisit=Number(sigData.visit_number||signatureSubmission?.visitNumber||1);
     const updatedActiveVisits=(activeCase?.visits||[]).map((visit,index)=>index+1===signedVisit?{...visit,status:sigData.visit_status||'SIGNED',signed:true,filing_status:sigData.filing_status,signature:sigData}:visit);
     const visitCount = Math.max(6, updatedActiveVisits.length || 0);
-    const finalVisitStates = ['CONCORDANT', 'RESOLVED_BY_MAJORITY', 'FINALIZED', 'CLOSED', 'SIGNED'];
+    const finalVisitStates = ['CONCORDANT', 'RESOLVED_BY_MAJORITY', 'FINALIZED', 'CLOSED'];
     const allVisitsComplete = Array.from({ length: visitCount }, (_, index) => {
       const visit = updatedActiveVisits[index];
       return Boolean(
@@ -110,7 +110,7 @@ export default function App() {
         && (finalVisitStates.includes(String(visit.resolution_status || visit.final_status || visit.status).toUpperCase())
           || visit.final_record
           || visit.finalized
-          || visit.signed)
+          )
       );
     }).every(Boolean);
     const nextVisitIndex = Math.min(Math.max(signedVisit, 0), visitCount);

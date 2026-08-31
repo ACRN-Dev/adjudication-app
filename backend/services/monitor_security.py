@@ -23,9 +23,7 @@ def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get
                     pr = user.portal_role
                     if not pr or pr not in ROLES:
                         # Provisioning gap, not a permission denial — see backend/api/realtime.py actor().
-                        user.portal_role = "MONITOR_QC_REVIEWER"
-                        db.commit()
-                        pr = user.portal_role
+                        raise HTTPException(403,"Monitor Portal access denied")
                     studies=tuple(filter(None,(user.study_scope or "*").split(",")))
                     return MonitorIdentity(user.email,pr,studies)
                 if user.role=="ADMIN":
