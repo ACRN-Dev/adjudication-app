@@ -3,6 +3,7 @@ import {
   Users, FileText, CheckCircle, AlertTriangle, Scale, Lock, LogOut,
   Calendar, Download, RefreshCw, Send, CheckSquare, ShieldCheck, ChevronRight, Eye, X
 } from 'lucide-react';
+import EvidenceInspectorModal from './EvidenceInspectorModal';
 import './chairperson.css';
 
 export default function ChairpersonPortal({ user, onLogout }) {
@@ -383,34 +384,12 @@ export default function ChairpersonPortal({ user, onLogout }) {
         )}
 
         {inspectionItem && (
-          <div className="evidence-modal-backdrop" role="presentation" onClick={() => setInspectionItem(null)}>
-            <section className="evidence-modal" role="dialog" aria-modal="true" aria-labelledby="evidence-title" onClick={(e) => e.stopPropagation()}>
-              <div className="evidence-modal-header">
-                  <div><div className="evidence-kicker">Inspect evidence</div><h2 id="evidence-title">{inspectionItem.subject_id} - {inspectionItem.visit_code || `Visit ${inspectionItem.visit_number || 1}`}</h2></div>
-                <button className="icon-btn" onClick={() => setInspectionItem(null)} aria-label="Close evidence"><X size={18} /></button>
-              </div>
-              <div className="evidence-summary-grid">
-                <div><span>Visit date</span><strong>{formatDate(inspectionItem.visit_date)}</strong></div>
-                <div><span>Concordance</span><strong>{inspectionItem.concordance || 'Pending'}</strong></div>
-              </div>
-              <div className="evidence-reviewers">
-                {[['Reviewer A', inspectionItem.reviewer_a], ['Reviewer B', inspectionItem.reviewer_b], ['Reviewer C', inspectionItem.reviewer_c]].map(([label, reviewer]) => reviewer && (
-                  <article className="evidence-reviewer" key={label}>
-                    <h3>{label}</h3><p className="evidence-diagnosis">{reviewer.diagnosis || 'Pending'}</p>
-                    <dl>
-                      <dt>Criteria</dt><dd>{reviewer.meets_criteria === true ? 'Yes' : reviewer.meets_criteria === false ? 'No' : 'Not recorded'}</dd>
-                      <dt>Onset</dt><dd>{reviewer.onset_class || 'Not recorded'}</dd>
-                      <dt>Severity</dt><dd>{reviewer.severity || 'Not recorded'}</dd>
-                      <dt>Diagnosis date</dt><dd>{formatDate(reviewer.date_of_diagnosis)}</dd>
-                      {reviewer.differential_diagnosis && <><dt>Differential</dt><dd>{reviewer.differential_diagnosis}</dd></>}
-                      {reviewer.rationale && <><dt>Rationale</dt><dd className="evidence-rationale">{renderRationale(reviewer.rationale)}</dd></>}
-                    </dl>
-                  </article>
-                ))}
-              </div>
-              {inspectionItem.final_outcome && <div className="evidence-final"><b>Final decision:</b> {inspectionItem.final_outcome.diagnosis || 'Locked'} <span>({inspectionItem.final_outcome.adopted_reviewer || 'not recorded'})</span></div>}
-            </section>
-          </div>
+          <EvidenceInspectorModal
+            item={inspectionItem}
+            allPatientVisits={groupedAdjudications[inspectionItem.subject_id] || []}
+            onClose={() => setInspectionItem(null)}
+            onSelectVisit={(v) => setInspectionItem(v)}
+          />
         )}
 
         {/* TAB 2: Meeting Agenda Pack Generator */}
