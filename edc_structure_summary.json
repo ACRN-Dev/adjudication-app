@@ -1,0 +1,3663 @@
+{
+  "ADVERSE EVENTS": {
+    "visits": [
+      "AE, ConMed, Medical History & Protocol Deviations"
+    ],
+    "questions": {
+      "A congenital anomaly/birth defect": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      },
+      "A life-threatening maternal or neonatal condition": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Yes"
+        ]
+      },
+      "A persistent or significant incapacity or substantial disruption of the ability to conduct normal life functions (e.g., severe postpartum complications or permanent fetal compromise)": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      },
+      "AE Description": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Baby had an Apgar of 6/10 to 8/10 . The baby was admitted to the nursery for respiratory distress. The baby was not breastfeeding well",
+          "2+ protein , abnormal urine biochemistry",
+          "3day history of headache prior to admission. \n\n1 day prior to admission:  \nLower abdominal pain \nBack pain \nLeft-sided or generalized side pain \nNo fetal movements perceived"
+        ]
+      },
+      "Adverse Event Term": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Neonatal respiratory distress",
+          "proteinuria",
+          "Intrauterine Fetal Demise"
+        ]
+      },
+      "Date of AE Onset": {
+        "count": 7,
+        "units": [],
+        "samples": [
+          "17-Feb-2026",
+          "23-Feb-2026",
+          "09-Feb-2026",
+          "19-Feb-2026"
+        ]
+      },
+      "Date of AE Resolution": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "22-Feb-2026",
+          "21-Feb-2026"
+        ]
+      },
+      "Date of Death - Neonatal": {
+        "count": 1,
+        "units": [],
+        "samples": [
+          "19-Feb-2026"
+        ]
+      },
+      "Death Description - Neonatal": {
+        "count": 1,
+        "units": [],
+        "samples": [
+          "Macerated still birth"
+        ]
+      },
+      "Hospitalization Description": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "baby was admitted in nursery and was on oxygen"
+        ]
+      },
+      "Inpatient hospitalization or prolongation of existing hospitalization for maternal or neonatal complications": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Yes"
+        ]
+      },
+      "Is the AE a Serious Adverse Event?": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Maternal Death": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      },
+      "Neonatal Death": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Outcome of AE": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Recovered/Resolved",
+          "Fatal",
+          "Flag: Unknown"
+        ]
+      },
+      "Reason for AE Resolution": {
+        "count": 1,
+        "units": [],
+        "samples": [
+          "Baby was put on oxygen whilst being admitted in nursery"
+        ]
+      },
+      "Relationship to Study Intervention": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Not Related",
+          "Unlikely Related"
+        ]
+      },
+      "Severity of AE": {
+        "count": 6,
+        "units": [],
+        "samples": [
+          "Grade 1 (Mild)",
+          "Grade 5 (Death)",
+          "Grade 4 (Life-threatening)",
+          "Grade 3 (Severe)"
+        ]
+      },
+      "Solicited or Unsolicited Adverse Event?": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Solicited"
+        ]
+      },
+      "Start Date of Hospitalization": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "17-Feb-2026",
+          "19-Feb-2026"
+        ]
+      },
+      "Stop Date of Hospitalization": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "22-Feb-2026",
+          "19-Feb-2026"
+        ]
+      },
+      "Were any medications taken to treat the adverse event?": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "ALLERGIES": {
+    "visits": [
+      "Visit 1 (Screening)"
+    ],
+    "questions": {
+      "Any Allergies?": {
+        "count": 120,
+        "units": [],
+        "samples": [
+          "No",
+          "Unknown"
+        ]
+      }
+    }
+  },
+  "ASSESSMENT OF PROTEINURIA": {
+    "visits": [
+      "EARLY TERMINATION",
+      "Visit 1 (Screening)",
+      "Visit 2",
+      "Visit 3",
+      "Visit 4",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Date of urine protein dipstick test": {
+        "count": 232,
+        "units": [],
+        "samples": [
+          "27-Mar-2026",
+          "31-Mar-2026",
+          "15-Apr-2026",
+          "18-Mar-2026"
+        ]
+      },
+      "Urine protein dipstick test results": {
+        "count": 220,
+        "units": [],
+        "samples": [
+          "1+",
+          "2+",
+          "Trace",
+          "Negative"
+        ]
+      },
+      "Was a spot urine test for protein performed?": {
+        "count": 248,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Was a spot urine test for protein/creatinine ratio performed?": {
+        "count": 241,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Was a urine protein dipstick test performed?": {
+        "count": 247,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "BIOMARKER ANALYSIS": {
+    "visits": [
+      "Visit 1 (Screening)",
+      "Visit 2",
+      "Visit 3",
+      "Visit 4",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Fasting": {
+        "count": 124,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "High Range": {
+        "count": 44,
+        "units": [],
+        "samples": [
+          "38",
+          "10000"
+        ]
+      },
+      "Lab Test": {
+        "count": 297,
+        "units": [],
+        "samples": [
+          "Aucheer PlGF",
+          "Aucheer sFlt-1/PlGF ratio",
+          "Aucheer sFlt-1",
+          "Roche PlGF"
+        ]
+      },
+      "Lab Unit": {
+        "count": 44,
+        "units": [],
+        "samples": [
+          "pg/mL",
+          "No unit"
+        ]
+      },
+      "Low Range": {
+        "count": 44,
+        "units": [],
+        "samples": [
+          "100",
+          "0"
+        ]
+      },
+      "Sample Collection Date and Time": {
+        "count": 131,
+        "units": [],
+        "samples": [
+          "15-Apr-2026 12:07",
+          "31-Mar-2026 15:50",
+          "25-Mar-2026 13:25",
+          "18-Mar-2026 13:40"
+        ]
+      }
+    }
+  },
+  "BIOMARKER ANALYSIS (CIRCARED TEST)": {
+    "visits": [
+      "Visit 1 (Screening)",
+      "Visit 2",
+      "Visit 3",
+      "Visit 4",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Fasting": {
+        "count": 160,
+        "units": [],
+        "samples": [
+          "Yes, No",
+          "No",
+          "Yes"
+        ]
+      },
+      "Lab Test": {
+        "count": 188,
+        "units": [],
+        "samples": [
+          "CircaRed Test"
+        ]
+      },
+      "Sample Collection Date and Time": {
+        "count": 223,
+        "units": [],
+        "samples": [
+          "15-Apr-2026 12:25",
+          "25-Mar-2026 13:25",
+          "31-Mar-2026 15:55",
+          "18-Mar-2026 13:40"
+        ]
+      }
+    }
+  },
+  "BODY MEASUREMENTS": {
+    "visits": [
+      "Visit 1 (Screening)"
+    ],
+    "questions": {
+      "BMI": {
+        "count": 110,
+        "units": [
+          "kg/m^2"
+        ],
+        "samples": [
+          "0.0",
+          "30.1",
+          "20.0",
+          "26.3"
+        ]
+      },
+      "Body weight": {
+        "count": 124,
+        "units": [
+          "kg"
+        ],
+        "samples": [
+          "45.0",
+          "71.0",
+          "79.0",
+          "70.0"
+        ]
+      },
+      "Height": {
+        "count": 134,
+        "units": [
+          "m"
+        ],
+        "samples": [
+          "1.63",
+          "162.00",
+          "1.50",
+          "1.62"
+        ]
+      }
+    }
+  },
+  "BODY WEIGHT": {
+    "visits": [
+      "EARLY TERMINATION",
+      "Visit 2",
+      "Visit 3",
+      "Visit 4",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "BMI": {
+        "count": 119,
+        "units": [
+          "kg/m^2"
+        ],
+        "samples": [
+          "28.6",
+          "24.6",
+          "30.1",
+          "19.8"
+        ]
+      },
+      "Body weight": {
+        "count": 142,
+        "units": [
+          "kg"
+        ],
+        "samples": [
+          "79.0",
+          "67.0",
+          "76.0",
+          "54.0"
+        ]
+      }
+    }
+  },
+  "CLINICAL CHEMISTRY": {
+    "visits": [
+      "Visit 1 (Screening)",
+      "Visit 2",
+      "Visit 3",
+      "Visit 4",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Comments": {
+        "count": 576,
+        "units": [],
+        "samples": [
+          "results are correct, manual  conversion of units",
+          "not done",
+          "Accurate result and confirmed",
+          "not done /not requested"
+        ]
+      },
+      "Fasting": {
+        "count": 217,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "High Range": {
+        "count": 1240,
+        "units": [],
+        "samples": [
+          "34",
+          "306",
+          "20.5",
+          "55"
+        ]
+      },
+      "Lab Result": {
+        "count": 1256,
+        "units": [],
+        "samples": [
+          "13.2",
+          "76",
+          "12.4",
+          "0.73"
+        ]
+      },
+      "Lab Test": {
+        "count": 1463,
+        "units": [],
+        "samples": [
+          "Bilirubin",
+          "Aspartate Aminotransferase",
+          "Alkaline Phosphatase",
+          "Alanine Aminotransferase"
+        ]
+      },
+      "Lab Unit": {
+        "count": 1240,
+        "units": [],
+        "samples": [
+          "\u00b5mol/L",
+          "mmol/L",
+          "IU/L",
+          "U/L"
+        ]
+      },
+      "Low Range": {
+        "count": 1240,
+        "units": [],
+        "samples": [
+          "2.5",
+          "3.4",
+          "5",
+          "0"
+        ]
+      },
+      "Sample Collection Date and Time": {
+        "count": 232,
+        "units": [],
+        "samples": [
+          "15-Apr-2026 12:07",
+          "31-Mar-2026 15:50",
+          "27-Mar-2026 11:30",
+          "18-Mar-2026 13:40"
+        ]
+      }
+    }
+  },
+  "CONCOMITANT MEDICATIONS": {
+    "visits": [
+      "AE, ConMed, Medical History & Protocol Deviations"
+    ],
+    "questions": {
+      "Adverse Events Related to Medication": {
+        "count": 42,
+        "units": [],
+        "samples": [
+          "Yes",
+          "No",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Date of Medication End": {
+        "count": 9,
+        "units": [],
+        "samples": [
+          "02-Mar-2026",
+          "25-Mar-2026",
+          "25-Feb-2026",
+          "26-Feb-2026"
+        ]
+      },
+      "Date of Medication Start": {
+        "count": 40,
+        "units": [],
+        "samples": [
+          "17-Nov-2025",
+          "11-Nov-2025",
+          "25-Nov-2025",
+          "UNK-UNK-2018"
+        ]
+      },
+      "Frequency of Administration": {
+        "count": 39,
+        "units": [],
+        "samples": [
+          "Twice daily",
+          "Other",
+          "Once daily",
+          "3 times daily"
+        ]
+      },
+      "Indication for Medication": {
+        "count": 39,
+        "units": [],
+        "samples": [
+          "cervical incompetence",
+          "for headache",
+          "hypertension",
+          "for preeclampsia prophylaxis"
+        ]
+      },
+      "Medication Dose": {
+        "count": 39,
+        "units": [],
+        "samples": [
+          "1",
+          "150",
+          "200",
+          "20"
+        ]
+      },
+      "Medication Name": {
+        "count": 39,
+        "units": [],
+        "samples": [
+          "Nifedipine",
+          "Aspirin",
+          "Acetaminophen",
+          "progesterone"
+        ]
+      },
+      "Ongoing?": {
+        "count": 39,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Other Frequency of Administration, specify": {
+        "count": 3,
+        "units": [],
+        "samples": [
+          "as needed",
+          "PRN -As needed"
+        ]
+      },
+      "Route of Administration": {
+        "count": 39,
+        "units": [],
+        "samples": [
+          "Oral",
+          "Vaginal"
+        ]
+      },
+      "Unit of Measurement": {
+        "count": 39,
+        "units": [],
+        "samples": [
+          "Tablets",
+          "Milligram",
+          "Gram"
+        ]
+      }
+    }
+  },
+  "DELIVERY OUTCOME": {
+    "visits": [
+      "Visit 5 - Delivery"
+    ],
+    "questions": {
+      "Blood Transfusion Description": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "SHE WAS TRANSFUSED WITH platlets 4units"
+        ]
+      },
+      "Blood Transfusion Required": {
+        "count": 42,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No",
+          "Yes"
+        ]
+      },
+      "Date of Delivery": {
+        "count": 47,
+        "units": [],
+        "samples": [
+          "03-Apr-2026",
+          "09-Jun-2026",
+          "31-Mar-2026",
+          "23-May-2026"
+        ]
+      },
+      "Days": {
+        "count": 38,
+        "units": [
+          "days"
+        ],
+        "samples": [
+          "3",
+          "1",
+          "2",
+          "6"
+        ]
+      },
+      "Delivery Complications": {
+        "count": 42,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No",
+          "Yes"
+        ]
+      },
+      "Delivery Complications Description": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "PRETERM WITH FEVER"
+        ]
+      },
+      "Estimated Blood Loss": {
+        "count": 53,
+        "units": [
+          "mL"
+        ],
+        "samples": [
+          "250",
+          "300",
+          "Flag: Unknown",
+          "0"
+        ]
+      },
+      "Infection Post-Delivery": {
+        "count": 42,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No"
+        ]
+      },
+      "Length of Hospital Stay": {
+        "count": 41,
+        "units": [
+          "days"
+        ],
+        "samples": [
+          "3",
+          "7",
+          "4",
+          "9"
+        ]
+      },
+      "Postpartum Health Description": {
+        "count": 3,
+        "units": [],
+        "samples": [
+          "preterm infant sdmitted in ICU",
+          "this is a post partum death of the infant after 3 days in NICU",
+          "after C-section the mother is physically week and not able to breastfeed due to anaesthesia"
+        ]
+      },
+      "Postpartum Health Status": {
+        "count": 44,
+        "units": [],
+        "samples": [
+          "Normal",
+          "Flag: Not Answered",
+          "Abnormal"
+        ]
+      },
+      "Pregnancy Outcome": {
+        "count": 42,
+        "units": [],
+        "samples": [
+          "Preterm birth",
+          "Normal baby",
+          "Stillbirth",
+          "Congenital abnormalities"
+        ]
+      },
+      "Readmission Required": {
+        "count": 42,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No"
+        ]
+      },
+      "Reason for Cesarean section": {
+        "count": 28,
+        "units": [],
+        "samples": [
+          "Circatricised uterus",
+          "Preeclampsia / Eclampsia\u2026.",
+          "Preeclampsia",
+          "Preeclampsia / Eclampsia with severe features"
+        ]
+      },
+      "Type of Delivery": {
+        "count": 44,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Cesarean section",
+          "Vaginal"
+        ]
+      },
+      "Weeks": {
+        "count": 39,
+        "units": [
+          "weeks"
+        ],
+        "samples": [
+          "36",
+          "33",
+          "39",
+          "30"
+        ]
+      }
+    }
+  },
+  "DEMOGRAPHIC DATA": {
+    "visits": [
+      "Visit 1 (Screening)"
+    ],
+    "questions": {
+      "Age": {
+        "count": 101,
+        "units": [
+          "Years"
+        ],
+        "samples": [
+          "27",
+          "22",
+          "26",
+          "30"
+        ]
+      },
+      "Age_SMARTITEM_02_DOB": {
+        "count": 131,
+        "units": [],
+        "samples": [
+          "16-Sep-1995",
+          "24-Jun-1998",
+          "09-Nov-1999",
+          "18-Aug-2003"
+        ]
+      },
+      "Education Level": {
+        "count": 124,
+        "units": [],
+        "samples": [
+          "Tertiary education",
+          "Primary education",
+          "Secondary education"
+        ]
+      },
+      "Employment Status": {
+        "count": 127,
+        "units": [],
+        "samples": [
+          "Formally Employed",
+          "Unemployed",
+          "Informally Employed"
+        ]
+      },
+      "Household Income": {
+        "count": 123,
+        "units": [],
+        "samples": [
+          "$100-$199",
+          "$400-799",
+          "$200-$399",
+          "< $100"
+        ]
+      },
+      "Marital Status": {
+        "count": 123,
+        "units": [],
+        "samples": [
+          "Separated",
+          "Single",
+          "Married"
+        ]
+      },
+      "Occupation": {
+        "count": 130,
+        "units": [],
+        "samples": [
+          "Other",
+          "Private sector employee",
+          "Trader",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Other Occupation, specify": {
+        "count": 78,
+        "units": [],
+        "samples": [
+          "no occupation",
+          "unemployed",
+          "self employed",
+          "NO OCCUPATION"
+        ]
+      },
+      "Race": {
+        "count": 121,
+        "units": [],
+        "samples": [
+          "African"
+        ]
+      },
+      "Residence Type": {
+        "count": 125,
+        "units": [],
+        "samples": [
+          "Rural",
+          "Peri-urban",
+          "Urban"
+        ]
+      },
+      "Sex": {
+        "count": 102,
+        "units": [],
+        "samples": [
+          "Female"
+        ]
+      }
+    }
+  },
+  "EARLY TERMINATION (WITHDRAWAL FROM THE STUDY)": {
+    "visits": [
+      "EARLY TERMINATION"
+    ],
+    "questions": {
+      "Date of last contact with the patient": {
+        "count": 3,
+        "units": [],
+        "samples": [
+          "09-Apr-2026",
+          "22-Jul-2026",
+          "23-Jun-2026"
+        ]
+      },
+      "Date of study withdrawal": {
+        "count": 13,
+        "units": [],
+        "samples": [
+          "04-Jun-2026",
+          "17-Jun-2026",
+          "13-Apr-2026",
+          "03-Jun-2026"
+        ]
+      },
+      "Reason for early withdrawal from the study": {
+        "count": 14,
+        "units": [],
+        "samples": [
+          "Patient (voluntary) withdrawal",
+          "Sponsor decision (to terminate /suspend the study)",
+          "Lost to follow up"
+        ]
+      }
+    }
+  },
+  "END OF STUDY": {
+    "visits": [
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Additional Comments": {
+        "count": 9,
+        "units": [],
+        "samples": [
+          "Mother health condition improved while her child died at NICU",
+          "the Pregnant Women Completed the six visit in Good health condition",
+          "Flag: Not Answered",
+          "NA"
+        ]
+      },
+      "Date of End of Study": {
+        "count": 17,
+        "units": [],
+        "samples": [
+          "11-May-2026",
+          "28-Apr-2026",
+          "15-Jun-2026",
+          "14-May-2026"
+        ]
+      },
+      "End of Study Status": {
+        "count": 19,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Completed",
+          "Flag: Not Done"
+        ]
+      },
+      "Final Health Status": {
+        "count": 17,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Unchanged",
+          "Flag: Not Done",
+          "Improved"
+        ]
+      },
+      "Final Health Status Description": {
+        "count": 19,
+        "units": [],
+        "samples": [
+          "Improve and in good health",
+          "Improved and in good health",
+          "normal health of mother and infant",
+          "Mother and her child are in a good health"
+        ]
+      },
+      "Follow-Up Description": {
+        "count": 1,
+        "units": [],
+        "samples": [
+          "follow up the infant health progress"
+        ]
+      },
+      "Follow-Up Required": {
+        "count": 16,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No",
+          "Flag: Unknown",
+          "Yes"
+        ]
+      },
+      "Unresolved Issues": {
+        "count": 17,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Flag: Not Done",
+          "No",
+          "Yes"
+        ]
+      },
+      "Unresolved Issues Description": {
+        "count": 1,
+        "units": [],
+        "samples": [
+          "neonate is still in Hospital we were not able to record the date of discharge"
+        ]
+      }
+    }
+  },
+  "FAMILY HISTORY": {
+    "visits": [
+      "Visit 1 (Screening)"
+    ],
+    "questions": {
+      "Family History": {
+        "count": 359,
+        "units": [],
+        "samples": [
+          "Diabetes",
+          "Preeclampsia / Eclampsia",
+          "Hypertension",
+          "Renal Disease"
+        ]
+      },
+      "Provide Details": {
+        "count": 44,
+        "units": [],
+        "samples": [
+          "family history of diabetes",
+          "in family there are some who has preeclampsia",
+          "Her mother had hypertension during pregnancy",
+          "Her mother used to have hypertension"
+        ]
+      },
+      "Yes / No": {
+        "count": 491,
+        "units": [],
+        "samples": [
+          "Yes",
+          "No",
+          "Unknown"
+        ]
+      }
+    }
+  },
+  "FOLLOW-UP VISIT": {
+    "visits": [
+      "Visit 2",
+      "Visit 3",
+      "Visit 4"
+    ],
+    "questions": {
+      "Adverse Events Changes": {
+        "count": 110,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Compliance Description": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "this visit comply with protocol",
+          "study protocol is applied"
+        ]
+      },
+      "Compliance with Study Protocol": {
+        "count": 111,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Health Status": {
+        "count": 114,
+        "units": [],
+        "samples": [
+          "Unchanged",
+          "Worsened",
+          "Improved"
+        ]
+      },
+      "Health Status Description": {
+        "count": 73,
+        "units": [],
+        "samples": [
+          "blood pressure stabilized",
+          "stable",
+          "stable blood pressure",
+          "Stable blood pressure"
+        ]
+      },
+      "Medication Changes": {
+        "count": 111,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "FOLLOW-UP VISIT (V5)": {
+    "visits": [
+      "Visit 5 - Delivery"
+    ],
+    "questions": {
+      "Adverse Events Changes": {
+        "count": 42,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No",
+          "Yes"
+        ]
+      },
+      "Compliance with Study Protocol": {
+        "count": 42,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Yes"
+        ]
+      },
+      "Health Status": {
+        "count": 43,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Unchanged",
+          "Improved"
+        ]
+      },
+      "Health Status Description": {
+        "count": 25,
+        "units": [],
+        "samples": [
+          "improved health of Mother status post C-section the infant  died at NICU after 3 days",
+          "normal",
+          "mother and infant are in good health",
+          "Stable"
+        ]
+      },
+      "Medication Changes": {
+        "count": 42,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No",
+          "Yes"
+        ]
+      },
+      "Will the participant be attending Visit 6 (EOS) - Postpartum?": {
+        "count": 42,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "HEMATOLOGY": {
+    "visits": [
+      "Visit 1 (Screening)",
+      "Visit 2",
+      "Visit 3",
+      "Visit 4",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Comments": {
+        "count": 565,
+        "units": [],
+        "samples": [
+          "results are correct",
+          "Accurate Result Confirmed",
+          "results are in normal range",
+          "Accurate result confirmed"
+        ]
+      },
+      "Fasting": {
+        "count": 221,
+        "units": [],
+        "samples": [
+          "Yes, No",
+          "No",
+          "Yes"
+        ]
+      },
+      "High Range": {
+        "count": 1178,
+        "units": [],
+        "samples": [
+          "11.5",
+          "4",
+          "450",
+          "8"
+        ]
+      },
+      "Lab Result": {
+        "count": 1508,
+        "units": [],
+        "samples": [
+          "4.75",
+          "173",
+          "1.95",
+          "14.4"
+        ]
+      },
+      "Lab Test": {
+        "count": 1267,
+        "units": [],
+        "samples": [
+          "Absolute Lymphocyte Count",
+          "Hemoglobin",
+          "Absolute Neutrophil Count",
+          "Hematocrit"
+        ]
+      },
+      "Lab Unit": {
+        "count": 1194,
+        "units": [],
+        "samples": [
+          "10E3/\u00b5L",
+          "mmol/L",
+          "10E6/\u00b5L",
+          "%"
+        ]
+      },
+      "Low Range": {
+        "count": 1178,
+        "units": [],
+        "samples": [
+          "2",
+          "4",
+          "1.3",
+          "150"
+        ]
+      },
+      "Sample Collection Date and Time": {
+        "count": 230,
+        "units": [],
+        "samples": [
+          "15-Apr-2026 12:07",
+          "31-Mar-2026 15:50",
+          "27-Mar-2026 11:30",
+          "18-Mar-2026 13:40"
+        ]
+      }
+    }
+  },
+  "INCLUSION/EXCLUSION CRITERIA": {
+    "visits": [
+      "Visit 1 (Screening)"
+    ],
+    "questions": {
+      "If No, specify reason": {
+        "count": 38,
+        "units": [],
+        "samples": [
+          "Participants who do not have a verified/documented ultrasound scan performed prior to 22 weeks of gestation to establish gestational age",
+          "Multiple pregnancies (e.g. twins, triplets)",
+          "Other",
+          "Proteinuria \u2265 2+ (dipstick) and current anti-hypertensive treatment, Participants who do not have a verified/documented ultrasound scan performed prior to 22 weeks of gestation to establish gestational age, Other"
+        ]
+      },
+      "Is the participant eligible for the study?": {
+        "count": 134,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Other reason, specify": {
+        "count": 29,
+        "units": [],
+        "samples": [
+          "Gestational age under 23 weeks",
+          "Gestational age below 23 weeks ( 18 weeks)",
+          "Gestational age beyond 36 Weeks ( 40weeks)",
+          "Gestational age under 23 weeks (10W5D)"
+        ]
+      }
+    }
+  },
+  "INFORMED CONSENT": {
+    "visits": [
+      "Visit 1 (Screening)"
+    ],
+    "questions": {
+      "Has Informed Consent been obtained?": {
+        "count": 129,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Has consent for future use of samples been obtained?": {
+        "count": 125,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Has consent for genetic testing of biological samples been obtained?": {
+        "count": 125,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Informed Consent Date": {
+        "count": 142,
+        "units": [],
+        "samples": [
+          "27-Mar-2026 11:30",
+          "31-Mar-2026 09:30",
+          "02-Apr-2026 09:30",
+          "18-Mar-2026 13:40"
+        ]
+      }
+    }
+  },
+  "IUGR AND SGA": {
+    "visits": [
+      "Visit 1 (Screening)"
+    ],
+    "questions": {
+      "Confirmed IUGR?": {
+        "count": 118,
+        "units": [],
+        "samples": [
+          "Not Done",
+          "No"
+        ]
+      },
+      "Confirmed SGA?": {
+        "count": 118,
+        "units": [],
+        "samples": [
+          "Not Done",
+          "No",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "LIFESTYLE AND SOCIAL HISTORY": {
+    "visits": [
+      "Visit 1 (Screening)"
+    ],
+    "questions": {
+      "Alcohol Use": {
+        "count": 120,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Dietary Restrictions or Concerns": {
+        "count": 119,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      },
+      "Illicit Drug Use": {
+        "count": 119,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      },
+      "Physical Activity Level": {
+        "count": 125,
+        "units": [],
+        "samples": [
+          "Moderately active",
+          "Sedentary",
+          "Very active"
+        ]
+      },
+      "Tobacco Use": {
+        "count": 119,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      }
+    }
+  },
+  "MATERNAL DEATH (V2)": {
+    "visits": [
+      "Visit 2"
+    ],
+    "questions": {
+      "Maternal death?": {
+        "count": 73,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "MATERNAL DEATH (V3)": {
+    "visits": [
+      "Visit 3"
+    ],
+    "questions": {
+      "Maternal death?": {
+        "count": 54,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      }
+    }
+  },
+  "MATERNAL DEATH (V4)": {
+    "visits": [
+      "Visit 4"
+    ],
+    "questions": {
+      "Maternal death?": {
+        "count": 39,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      }
+    }
+  },
+  "MATERNAL DEATH (V6)": {
+    "visits": [
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Maternal death?": {
+        "count": 20,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "MATERNAL PREECLAMPSIA ASSESSMENT": {
+    "visits": [
+      "EARLY TERMINATION",
+      "Visit 2",
+      "Visit 3",
+      "Visit 4",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "PE Status": {
+        "count": 134,
+        "units": [],
+        "samples": [
+          "No PE",
+          "PE",
+          "Suspected PE",
+          "Severe PE"
+        ]
+      },
+      "PE Symptoms": {
+        "count": 52,
+        "units": [],
+        "samples": [
+          "Elevated Systolic Blood Pressure, Elevated Diastolic Blood Pressure, Swelling of any body part",
+          "Elevated Systolic Blood Pressure, Elevated Diastolic Blood Pressure",
+          "Elevated Systolic Blood Pressure, Elevated Diastolic Blood Pressure, Proteinuria",
+          "Elevated Systolic Blood Pressure"
+        ]
+      },
+      "Preeclampsia Diagnosis Date": {
+        "count": 16,
+        "units": [],
+        "samples": [
+          "26-May-2026",
+          "27-Apr-2026",
+          "15-May-2026",
+          "20-Feb-2026"
+        ]
+      },
+      "Preeclampsia Diagnosis Description": {
+        "count": 16,
+        "units": [],
+        "samples": [
+          "PE with severe features edema, hypertension etc",
+          "preeclampsia with severe features",
+          "Pre-eclampsia - O14",
+          "pre-eclampsia with severe features"
+        ]
+      }
+    }
+  },
+  "MATERNAL STATUS": {
+    "visits": [
+      "Visit 2",
+      "Visit 3",
+      "Visit 4",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Does the patient present with acute renal failure?": {
+        "count": 125,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No"
+        ]
+      },
+      "Does the patient present with cerebral hemorrhage?": {
+        "count": 125,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No"
+        ]
+      },
+      "Does the patient present with cerebral thrombosis?": {
+        "count": 125,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No"
+        ]
+      },
+      "Does the patient present with disseminated intravascular coagulation (DIC)?": {
+        "count": 124,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No"
+        ]
+      },
+      "Does the patient present with pulmonary edema?": {
+        "count": 125,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Yes"
+        ]
+      },
+      "Total number of days in hospital": {
+        "count": 2,
+        "units": [
+          "days"
+        ],
+        "samples": [
+          "6",
+          "16"
+        ]
+      },
+      "Was the patient admitted to the ICU?": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      },
+      "Was the patient hospitalized?": {
+        "count": 126,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "MATERNAL STATUS (EARLY TERMINATION/UNSCHEDULED VISITS)": {
+    "visits": [
+      "EARLY TERMINATION"
+    ],
+    "questions": {
+      "Does the patient present with acute renal failure?": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Does the patient present with cerebral hemorrhage?": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Does the patient present with cerebral thrombosis?": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Does the patient present with disseminated intravascular coagulation (DIC)?": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Does the patient present with pulmonary edema?": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Maternal death?": {
+        "count": 5,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Was the patient hospitalized?": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Flag: Not Applicable"
+        ]
+      }
+    }
+  },
+  "MEDICAL HISTORY": {
+    "visits": [
+      "AE, ConMed, Medical History & Protocol Deviations"
+    ],
+    "questions": {
+      "Ongoing?": {
+        "count": 14,
+        "units": [],
+        "samples": [
+          "Yes"
+        ]
+      },
+      "Pre-existing Conditions Description": {
+        "count": 11,
+        "units": [],
+        "samples": [
+          "Human Immuno Deficiency Virus",
+          "cervical incompetence",
+          "Cervical Incompetence",
+          "Chronic Hypertension"
+        ]
+      },
+      "Start Date": {
+        "count": 14,
+        "units": [],
+        "samples": [
+          "30-Oct-2025",
+          "10-Nov-2025",
+          "29-Sep-2025",
+          "UNK-UNK-2018"
+        ]
+      }
+    }
+  },
+  "NEONATAL DISORDERS": {
+    "visits": [
+      "EARLY TERMINATION",
+      "Visit 5 - Delivery",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Date of hospitalization": {
+        "count": 11,
+        "units": [],
+        "samples": [
+          "03-Apr-2026",
+          "07-May-2026",
+          "15-May-2026",
+          "31-May-2026"
+        ]
+      },
+      "Days in ICU": {
+        "count": 8,
+        "units": [],
+        "samples": [
+          "3",
+          "2",
+          "9",
+          "5"
+        ]
+      },
+      "Does the neonate present with intraventricular hemorrhage?": {
+        "count": 49,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Does the neonate present with necrotizing enterocolitis?": {
+        "count": 50,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Does the neonate present with respiratory distress syndrome?": {
+        "count": 51,
+        "units": [],
+        "samples": [
+          "Yes",
+          "No",
+          "Flag: Not Done",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Total number of days in hospital": {
+        "count": 11,
+        "units": [],
+        "samples": [
+          "3",
+          "2",
+          "9",
+          "23"
+        ]
+      },
+      "Was the neonate admitted to the ICU?": {
+        "count": 11,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Was the neonate hospitalized?": {
+        "count": 51,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "NEWBORN ASSESSMENT": {
+    "visits": [
+      "EARLY TERMINATION",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Birth Complications": {
+        "count": 17,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Birth Complications Description": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Respiratory Distress syndrome(RDS), a prematurity complication associated with a lack of Lung surfactant.",
+          "preterm with low birth weight"
+        ]
+      },
+      "Confirmed IUGR?": {
+        "count": 16,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Confirmed SGA?": {
+        "count": 16,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Congenital Anomalies": {
+        "count": 16,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Congenital Anomalies Description": {
+        "count": 1,
+        "units": [],
+        "samples": [
+          "Omphalocele"
+        ]
+      },
+      "Eyes": {
+        "count": 11,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Feeding Method": {
+        "count": 16,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Mixed",
+          "Breastfeeding",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Head Circumference": {
+        "count": 20,
+        "units": [
+          "cm"
+        ],
+        "samples": [
+          "30.0",
+          "33.0",
+          "36.0",
+          "35.0"
+        ]
+      },
+      "Heart": {
+        "count": 11,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Heart Rate": {
+        "count": 17,
+        "units": [
+          "bpm"
+        ],
+        "samples": [
+          "129",
+          "130",
+          "140",
+          "142"
+        ]
+      },
+      "Hips": {
+        "count": 11,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Length": {
+        "count": 22,
+        "units": [
+          "cm"
+        ],
+        "samples": [
+          "49.0",
+          "42.0",
+          "46.0",
+          "47.0"
+        ]
+      },
+      "Muscle Tone": {
+        "count": 9,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Neonatal ICU Admission": {
+        "count": 16,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Neonatal ICU Admission Description": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Admission due to Prematurity complication to include Respiratory distress syndrome and low birth weight.",
+          "admitted in NICU due to preterm with low birth weight"
+        ]
+      },
+      "Neurological Examination": {
+        "count": 16,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Newborn Screening Tests": {
+        "count": 18,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Newborn Screening Tests Description": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "she is preterm with  low birth weight",
+          "the infant normal neurological responses even though still has low weight gain",
+          "normal and in good health with good developmental milestone",
+          "NORMAL"
+        ]
+      },
+      "Physical Examination performed?": {
+        "count": 16,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Posture": {
+        "count": 9,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Reflex Responses": {
+        "count": 9,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Respiration": {
+        "count": 19,
+        "units": [
+          "breaths per min"
+        ],
+        "samples": [
+          "19",
+          "45",
+          "35",
+          "16"
+        ]
+      },
+      "Weight": {
+        "count": 24,
+        "units": [
+          "g"
+        ],
+        "samples": [
+          "6",
+          "6000",
+          "1200",
+          "1800"
+        ]
+      }
+    }
+  },
+  "NEWBORN ASSESSMENT (DELIVERY)": {
+    "visits": [
+      "Visit 5 - Delivery"
+    ],
+    "questions": {
+      "Apgar Score at 1 Minute": {
+        "count": 34,
+        "units": [],
+        "samples": [
+          "10",
+          "8",
+          "Flag: Not Done",
+          "9"
+        ]
+      },
+      "Apgar Score at 10 Minutes": {
+        "count": 34,
+        "units": [],
+        "samples": [
+          "10",
+          "Flag: Not Done",
+          "9"
+        ]
+      },
+      "Apgar Score at 5 Minutes": {
+        "count": 35,
+        "units": [],
+        "samples": [
+          "10",
+          "8",
+          "Flag: Not Done",
+          "9"
+        ]
+      },
+      "Birth Complications": {
+        "count": 35,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Birth Complications Description": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "LOW BIRTH WEIGHT",
+          "FEVER",
+          "breathing complication",
+          "preterm with low birth weight"
+        ]
+      },
+      "Birth weight": {
+        "count": 41,
+        "units": [
+          "g"
+        ],
+        "samples": [
+          "3220",
+          "1200",
+          "1800",
+          "2160"
+        ]
+      },
+      "Confirmed IUGR?": {
+        "count": 34,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Confirmed SGA?": {
+        "count": 35,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Congenital Anomalies": {
+        "count": 34,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Congenital Anomalies Description": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Omphalocele"
+        ]
+      },
+      "Date of Birth of the Newborn": {
+        "count": 31,
+        "units": [],
+        "samples": [
+          "03-Apr-2026",
+          "09-Jun-2026",
+          "31-Mar-2026",
+          "23-May-2026"
+        ]
+      },
+      "Eyes": {
+        "count": 34,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Feeding Method": {
+        "count": 34,
+        "units": [],
+        "samples": [
+          "Mixed",
+          "Breastfeeding"
+        ]
+      },
+      "Gender": {
+        "count": 36,
+        "units": [],
+        "samples": [
+          "Male",
+          "Female"
+        ]
+      },
+      "Head Circumference": {
+        "count": 35,
+        "units": [
+          "cm"
+        ],
+        "samples": [
+          "30.0",
+          "33.0",
+          "36.0",
+          "34.0"
+        ]
+      },
+      "Heart": {
+        "count": 35,
+        "units": [],
+        "samples": [
+          "Normal",
+          "Abnormal"
+        ]
+      },
+      "Heart Rate": {
+        "count": 35,
+        "units": [
+          "bpm"
+        ],
+        "samples": [
+          "122",
+          "134",
+          "140",
+          "142"
+        ]
+      },
+      "Hips": {
+        "count": 34,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Length": {
+        "count": 37,
+        "units": [
+          "cm"
+        ],
+        "samples": [
+          "45.0",
+          "49.0",
+          "42.0",
+          "46.0"
+        ]
+      },
+      "Muscle Tone": {
+        "count": 31,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Neonatal ICU Admission": {
+        "count": 34,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Neonatal ICU Admission Description": {
+        "count": 11,
+        "units": [],
+        "samples": [
+          "premature  infant with low birth weight",
+          "preterm birth with low birth weight",
+          "preterm infant NICU admission",
+          "29 Y/o G4P3003 D2 Post C/S due to PE + SF S- No New Complaint O- Clinically stable, Coloured Conjuctiva Retracted Uterus The Incision Site is Clean and Dry Normal Lockia Homan's Sign Neg The New born Breast Feeds well and Not Jaundiced Labs HB- 14.2, Blood GRP- O Positive"
+        ]
+      },
+      "Neurological Examination": {
+        "count": 34,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Newborn Screening Tests": {
+        "count": 35,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Newborn Screening Tests Description": {
+        "count": 19,
+        "units": [],
+        "samples": [
+          "Normal",
+          "normal preterm infant with low birth weight",
+          "even the infant is admitted to NICU the screening shows that infant is normal",
+          "normal"
+        ]
+      },
+      "Physical Examination performed?": {
+        "count": 34,
+        "units": [],
+        "samples": [
+          "Yes"
+        ]
+      },
+      "Posture": {
+        "count": 31,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Reflex Responses": {
+        "count": 31,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Respiration": {
+        "count": 35,
+        "units": [
+          "breaths per min"
+        ],
+        "samples": [
+          "47",
+          "46",
+          "32",
+          "45"
+        ]
+      },
+      "Testes": {
+        "count": 16,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      }
+    }
+  },
+  "OBSTETRIC HISTORY": {
+    "visits": [
+      "Visit 1 (Screening)"
+    ],
+    "questions": {
+      "Cesarean Section Indication": {
+        "count": 37,
+        "units": [],
+        "samples": [
+          "Fetal distress or problems",
+          "Problem with labour progression",
+          "Other",
+          "Maternal health issues"
+        ]
+      },
+      "Did the participant have any Cesarean Sections?": {
+        "count": 90,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "History of Raised Blood Pressure in Pregnancy": {
+        "count": 122,
+        "units": [],
+        "samples": [
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Number of  Previous Pregnancies": {
+        "count": 92,
+        "units": [],
+        "samples": [
+          "2",
+          "6",
+          "1",
+          "4"
+        ]
+      },
+      "Number of Cesarean Sections": {
+        "count": 37,
+        "units": [],
+        "samples": [
+          "2",
+          "1",
+          "3"
+        ]
+      },
+      "Number of Live Births": {
+        "count": 100,
+        "units": [],
+        "samples": [
+          "2",
+          "1",
+          "3",
+          "0"
+        ]
+      },
+      "Number of Miscarriages": {
+        "count": 89,
+        "units": [],
+        "samples": [
+          "2",
+          "1",
+          "3",
+          "0"
+        ]
+      },
+      "Number of Still Births": {
+        "count": 89,
+        "units": [],
+        "samples": [
+          "2",
+          "1",
+          "3",
+          "0"
+        ]
+      },
+      "Number of Vaginal Deliveries": {
+        "count": 91,
+        "units": [],
+        "samples": [
+          "2",
+          "1",
+          "3",
+          "0"
+        ]
+      },
+      "Other Cesarean Section Indication": {
+        "count": 12,
+        "units": [],
+        "samples": [
+          "pre-eclampsia/eclampsia",
+          "breech presentation",
+          "pre-eclampsia/eclampsia, other maternal health issues",
+          "cephalopelvic disproportion"
+        ]
+      },
+      "Previous Pregnancies?": {
+        "count": 120,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "PHYSICAL EXAMINATION": {
+    "visits": [
+      "EARLY TERMINATION",
+      "Visit 1 (Screening)",
+      "Visit 2",
+      "Visit 3",
+      "Visit 4"
+    ],
+    "questions": {
+      "Abnormal findings description": {
+        "count": 193,
+        "units": [],
+        "samples": [
+          "GRAVID UTERUS",
+          "gravid uterus",
+          "Extended abdomen due to pregnancy",
+          "Elevated blood pressure"
+        ]
+      },
+      "Normal/Abnormal": {
+        "count": 3018,
+        "units": [],
+        "samples": [
+          "Normal",
+          "Flag: Not Done",
+          "Abnormal",
+          "Flag: Not Applicable"
+        ]
+      },
+      "System": {
+        "count": 2427,
+        "units": [],
+        "samples": [
+          "General Health Status",
+          "Abdominal",
+          "Chest",
+          "Cardiovascular"
+        ]
+      }
+    }
+  },
+  "PREGNANCY ASSESSMENT": {
+    "visits": [
+      "Visit 2",
+      "Visit 3",
+      "Visit 4"
+    ],
+    "questions": {
+      "Amniotic Fluid Volume": {
+        "count": 73,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Cervical Length": {
+        "count": 78,
+        "units": [
+          "cm"
+        ],
+        "samples": [
+          "3.0",
+          "5.0",
+          "4.0",
+          "Flag: Unknown"
+        ]
+      },
+      "Days": {
+        "count": 103,
+        "units": [
+          "days"
+        ],
+        "samples": [
+          "3",
+          "4",
+          "2",
+          "0"
+        ]
+      },
+      "Fetal Heart Rate": {
+        "count": 73,
+        "units": [
+          "bpm"
+        ],
+        "samples": [
+          "144",
+          "160",
+          "145",
+          "150"
+        ]
+      },
+      "Fetal Movement": {
+        "count": 74,
+        "units": [],
+        "samples": [
+          "Normal",
+          "Not Done"
+        ]
+      },
+      "Fetal Weight": {
+        "count": 114,
+        "units": [
+          "g"
+        ],
+        "samples": [
+          "2550",
+          "2200",
+          "1200",
+          "1600"
+        ]
+      },
+      "Had an Ultrasound Scan (USS) since the last visit?": {
+        "count": 120,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No",
+          "Yes"
+        ]
+      },
+      "Placenta Position": {
+        "count": 73,
+        "units": [],
+        "samples": [
+          "Normal"
+        ]
+      },
+      "Please select 'Yes' in order to trigger the calculation of the Current Gestational age.": {
+        "count": 76,
+        "units": [],
+        "samples": [
+          "Yes"
+        ]
+      },
+      "Pregnancy Complications": {
+        "count": 76,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Pregnancy Complications Description": {
+        "count": 35,
+        "units": [],
+        "samples": [
+          "HYPERTENSION",
+          "hypertension",
+          "Hypertension"
+        ]
+      },
+      "Ultrasound Anomalies": {
+        "count": 76,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Ultrasound Fetal weight": {
+        "count": 79,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Ultrasound Presentation": {
+        "count": 76,
+        "units": [],
+        "samples": [
+          "Yes"
+        ]
+      },
+      "Ultrasound Presentation Description": {
+        "count": 76,
+        "units": [],
+        "samples": [
+          "cephalic",
+          "CEPHALIC",
+          "Hypertension",
+          "Cephalic"
+        ]
+      },
+      "Weeks": {
+        "count": 104,
+        "units": [
+          "weeks"
+        ],
+        "samples": [
+          "32",
+          "31",
+          "35",
+          "28"
+        ]
+      }
+    }
+  },
+  "PREGNANCY ASSESSMENT  (SCREENING)": {
+    "visits": [
+      "Visit 1 (Screening)"
+    ],
+    "questions": {
+      "Amniotic Fluid Volume": {
+        "count": 117,
+        "units": [],
+        "samples": [
+          "Normal",
+          "Low",
+          "Not Done",
+          "Flag: Not Done"
+        ]
+      },
+      "Cervical Length": {
+        "count": 138,
+        "units": [
+          "cm"
+        ],
+        "samples": [
+          "3.0",
+          "5.0",
+          "2.0",
+          "4.0"
+        ]
+      },
+      "Days": {
+        "count": 307,
+        "units": [
+          "days"
+        ],
+        "samples": [
+          "3",
+          "1",
+          "4",
+          "2"
+        ]
+      },
+      "Expected Delivery Date": {
+        "count": 121,
+        "units": [],
+        "samples": [
+          "12-May-2026",
+          "13-Jun-2026",
+          "21-Apr-2026",
+          "22-Apr-2026"
+        ]
+      },
+      "Fetal Heart Rate": {
+        "count": 119,
+        "units": [
+          "bpm"
+        ],
+        "samples": [
+          "132",
+          "151",
+          "155",
+          "140"
+        ]
+      },
+      "Fetal Movement": {
+        "count": 115,
+        "units": [],
+        "samples": [
+          "Normal",
+          "Not Done"
+        ]
+      },
+      "Fetal Weight": {
+        "count": 124,
+        "units": [
+          "kg",
+          "g"
+        ],
+        "samples": [
+          "443",
+          "600",
+          "700",
+          "1600"
+        ]
+      },
+      "First sonographic date": {
+        "count": 143,
+        "units": [],
+        "samples": [
+          "20-Dec-2025",
+          "03-Feb-2026",
+          "22-Dec-2025",
+          "24-Mar-2026"
+        ]
+      },
+      "Had an Ultrasound Scan (USS)?": {
+        "count": 118,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Last normal menstrual period date": {
+        "count": 147,
+        "units": [],
+        "samples": [
+          "06-Sep-2024",
+          "06-Sep-2025",
+          "UNK-UNK-2025",
+          "23-Feb-2026"
+        ]
+      },
+      "Placenta Position": {
+        "count": 119,
+        "units": [],
+        "samples": [
+          "Normal",
+          "Flag: Not Done",
+          "Not Done"
+        ]
+      },
+      "Pregnancy Complications": {
+        "count": 115,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Pregnancy Complications Description": {
+        "count": 14,
+        "units": [],
+        "samples": [
+          "HYPERTENSION",
+          "hypertension",
+          "Hypertension, Headache",
+          "Hypertension"
+        ]
+      },
+      "Ultrasound Anomalies": {
+        "count": 114,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      },
+      "Ultrasound Fetal weight": {
+        "count": 117,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Yes"
+        ]
+      },
+      "Ultrasound Presentation": {
+        "count": 116,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Yes"
+        ]
+      },
+      "Ultrasound Presentation Description": {
+        "count": 108,
+        "units": [],
+        "samples": [
+          "cephalic",
+          "Health pregnancy",
+          "Health pregnancy with cephalic presentation",
+          "CEPHALIC"
+        ]
+      },
+      "Weeks": {
+        "count": 375,
+        "units": [
+          "weeks"
+        ],
+        "samples": [
+          "34",
+          "27",
+          "21",
+          "22"
+        ]
+      }
+    }
+  },
+  "PREGNANCY ASSESSMENT (EARLY TERMINATION/UNSCHEDULED VISITS)": {
+    "visits": [
+      "EARLY TERMINATION"
+    ],
+    "questions": {
+      "Had an Ultrasound Scan (USS) since the last visit?": {
+        "count": 5,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable"
+        ]
+      }
+    }
+  },
+  "PREGNANCY OUTCOME (V2)": {
+    "visits": [
+      "Visit 2"
+    ],
+    "questions": {
+      "Delivery Date": {
+        "count": 8,
+        "units": [],
+        "samples": [
+          "09-Jun-2026",
+          "05-Jun-2026",
+          "22-May-2026",
+          "15-Jun-2026"
+        ]
+      },
+      "Expected Delivery Date": {
+        "count": 52,
+        "units": [],
+        "samples": [
+          "13-Jun-2026",
+          "16-May-2026",
+          "22-Apr-2026",
+          "10-Jun-2026"
+        ]
+      },
+      "Please select 'Yes' in order to trigger the auto-population of the Expected Delivery Date.": {
+        "count": 56,
+        "units": [],
+        "samples": [
+          "Yes"
+        ]
+      },
+      "Pregnancy Outcome": {
+        "count": 70,
+        "units": [],
+        "samples": [
+          "Ongoing",
+          "Completed"
+        ]
+      }
+    }
+  },
+  "PREGNANCY OUTCOME (V3)": {
+    "visits": [
+      "Visit 3"
+    ],
+    "questions": {
+      "Delivery Date": {
+        "count": 7,
+        "units": [],
+        "samples": [
+          "07-Jun-2026",
+          "07-May-2026",
+          "26-Jun-2026",
+          "22-May-2026"
+        ]
+      },
+      "Expected Delivery Date": {
+        "count": 38,
+        "units": [],
+        "samples": [
+          "15-Jun-2026",
+          "16-May-2026",
+          "22-Apr-2026",
+          "10-Jun-2026"
+        ]
+      },
+      "Please select 'Yes' in order to trigger the auto-population of the Expected Delivery Date.": {
+        "count": 43,
+        "units": [],
+        "samples": [
+          "Yes"
+        ]
+      },
+      "Pregnancy Outcome": {
+        "count": 54,
+        "units": [],
+        "samples": [
+          "Ongoing",
+          "Completed"
+        ]
+      }
+    }
+  },
+  "PREGNANCY OUTCOME (V4)": {
+    "visits": [
+      "Visit 4"
+    ],
+    "questions": {
+      "Delivery Date": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "14-Jun-2026",
+          "06-Jul-2026",
+          "31-Mar-2026",
+          "31-May-2026"
+        ]
+      },
+      "Expected Delivery Date": {
+        "count": 28,
+        "units": [],
+        "samples": [
+          "13-Jun-2026",
+          "15-Jun-2026",
+          "16-May-2026",
+          "10-Jun-2026"
+        ]
+      },
+      "Please select 'Yes' in order to trigger the auto-population of the Expected Delivery Date.": {
+        "count": 36,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Yes"
+        ]
+      },
+      "Pregnancy Outcome": {
+        "count": 41,
+        "units": [],
+        "samples": [
+          "Ongoing",
+          "Completed"
+        ]
+      }
+    }
+  },
+  "PREGNANCY OUTCOME (V6)": {
+    "visits": [
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Please select 'Yes' in order to trigger the auto-population of the Pregnancy Outcome.": {
+        "count": 15,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Yes"
+        ]
+      },
+      "Pregnancy Outcome": {
+        "count": 12,
+        "units": [],
+        "samples": [
+          "Preterm birth",
+          "Normal baby",
+          "Stillbirth",
+          "Congenital abnormalities"
+        ]
+      }
+    }
+  },
+  "PROTOCOL DEVIATION": {
+    "visits": [
+      "AE, ConMed, Medical History & Protocol Deviations"
+    ],
+    "questions": {
+      "Action Taken": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Source documentation, including the ultrasound report dated 15 January 2026, was reviewed and verified \nThe participant was confirmed to be ineligible per protocol \nThe deviation was documented and reported in accordance with protocol, sponsor, and regulatory requirements \nStudy records were updated to reflect accurate source information \nThe sponsor/monitor was notified as required"
+        ]
+      },
+      "Date of Deviation": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "12-Feb-2026"
+        ]
+      },
+      "Date of Site Awareness": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "08-Apr-2026"
+        ]
+      },
+      "Description of Deviation": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "On 12 February 2026, a participant was enrolled into the EOPE study with a gestational age incorrectly recorded as 33 weeks at enrollment. Review of source documents subsequently confirmed that the participant\u2019s dating ultrasound performed on 15 January 2026 indicated a gestational age of 16 weeks and 3 days, corresponding to approximately 19 weeks\u2019 gestation at the time of enrollment.\nAs per the study protocol, eligibility requires a gestational age of \u226523 weeks at enrollment. The participant therefore did not meet the gestational age eligibility criterion, resulting in an eligibility-related protocol deviation."
+        ]
+      },
+      "Impact Description": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "The deviation has a limited impact on data integrity. Data collected from this participant were obtained following enrollment of an ineligible participant and are therefore not considered per protocol.\nThe deviation was identified through source verification, documented appropriately, and the correct gestational age was confirmed. Impacted data can be excluded or handled according to the sponsor\u2019s data management and statistical analysis plan, ensuring overall study data integrity is maintained"
+        ]
+      },
+      "Impact on Study": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Low"
+        ]
+      },
+      "Preventive Action": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "1.\tReinforcement of protocol requirements regarding gestational age eligibility and source document verification\n2.\tImplementation of a mandatory pre enrollment eligibility checklist, including confirmation against dating ultrasound reports\n3.\tUse of obstetric calculators instead of manual calculation\n4.\tIntroduction of additional oversight/verification of gestational age prior to enrollment"
+        ]
+      },
+      "Resolution": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Resolved"
+        ]
+      },
+      "Resolution Description": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "The gestational age discrepancy was identified through source document review and verified against the dating ultrasound performed on 15 January 2026. It was confirmed that the participant did not meet the protocol\u2011specified gestational age eligibility criteria at the time of enrollment.\nThe protocol deviation was documented and reported in accordance with study, sponsor, and regulatory requirements. The participant voluntarily withdrew from the study on 19 February 2026, and no further study procedures or data collection were performed thereafter.\nCorrective and preventive actions were implemented, including reinforcement of gestational age verification against source ultrasound reports prior to enrollment and refresher training of study staff. The deviation has been resolved and closed."
+        ]
+      },
+      "Type of Deviation": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Minor"
+        ]
+      }
+    }
+  },
+  "SAMPLE COLLECTION": {
+    "visits": [
+      "Visit 1 (Screening)",
+      "Visit 2",
+      "Visit 3",
+      "Visit 4",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Additional comments": {
+        "count": 95,
+        "units": [],
+        "samples": [
+          "all samples were collected",
+          "participant did not satisfy inclusion criteria",
+          "Flag: Not Answered",
+          "S"
+        ]
+      },
+      "Reason for non-collection of biomarker blood sample.": {
+        "count": 20,
+        "units": [],
+        "samples": [
+          "Other",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Reason for non-collection of biomarker urine sample.": {
+        "count": 20,
+        "units": [],
+        "samples": [
+          "Other",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Reason for non-collection of clinical chemistry blood sample.": {
+        "count": 24,
+        "units": [],
+        "samples": [
+          "Other",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Reason for non-collection of hematology blood sample.": {
+        "count": 24,
+        "units": [],
+        "samples": [
+          "Other",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Reason for non-collection of urine sample.": {
+        "count": 22,
+        "units": [],
+        "samples": [
+          "Other",
+          "Participant refusal",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Was a biochemistry blood sample collected?": {
+        "count": 248,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Was a biomarker blood sample collected?": {
+        "count": 249,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Was a biomarker urine sample collected?": {
+        "count": 251,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Was a hematology blood sample collected?": {
+        "count": 250,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      },
+      "Was a urine sample collected?": {
+        "count": 249,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "SAMPLE COLLECTION (EARLY TERMINATION)": {
+    "visits": [
+      "EARLY TERMINATION"
+    ],
+    "questions": {
+      "Additional comments": {
+        "count": 3,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Participant voluntarily withdrew from the study after indicating that she had travelled to Masvingo and will not be returning back anytime soon. Participant will not be able to able to attend follow up visits"
+        ]
+      },
+      "Was a biochemistry blood sample collected?": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Was a hematology blood sample collected?": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Flag: Not Applicable"
+        ]
+      },
+      "Was a urine sample collected?": {
+        "count": 5,
+        "units": [],
+        "samples": [
+          "Flag: Not Done",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "SCREENING": {
+    "visits": [
+      "Visit 1 (Screening)"
+    ],
+    "questions": {
+      "Has the participant been Re-screened?": {
+        "count": 140,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "SERIOUS ADVERSE EVENT": {
+    "visits": [
+      "AE, ConMed, Medical History & Protocol Deviations"
+    ],
+    "questions": {
+      "A congenital anomaly/birth defect": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      },
+      "A life-threatening maternal or neonatal condition": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Yes"
+        ]
+      },
+      "A persistent or significant incapacity or substantial disruption of the ability to conduct normal life functions (e.g., severe postpartum complications or permanent fetal compromise)": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      },
+      "Action Taken": {
+        "count": 3,
+        "units": [],
+        "samples": [
+          "metronidazole\namoxicillin",
+          "metronidazole\namoxicillin, paracetamol",
+          "baby was on oxygen in NNU for RDS. The baby recovered and was discharged. no additional medication was given"
+        ]
+      },
+      "Date of Death - Neonatal": {
+        "count": 1,
+        "units": [],
+        "samples": [
+          "19-Feb-2026"
+        ]
+      },
+      "Date of SAE Onset": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "18-Feb-2026",
+          "17-Feb-2026",
+          "19-Feb-2026",
+          "21-Feb-2026"
+        ]
+      },
+      "Date of SAE Resolution": {
+        "count": 3,
+        "units": [],
+        "samples": [
+          "22-Feb-2026",
+          "21-Feb-2026",
+          "21-Mar-2026"
+        ]
+      },
+      "Death Description - Neonatal": {
+        "count": 1,
+        "units": [],
+        "samples": [
+          "Macerated still birth"
+        ]
+      },
+      "Hospitalization Description": {
+        "count": 3,
+        "units": [],
+        "samples": [
+          "baby was admitted in nursery and was on oxygen",
+          "The participant was admitted and managed for IUFD.\nInduction of Labour\nCytotec 200 mcg PV, then\nCytotec 100 mcg slow release 3 hourly until expulsion\nPost Delivery Delivery\nAmoxicillin 500 mg po tds\nMetronidazole 400 mg po tds \nParacetamol PRN"
+        ]
+      },
+      "Inpatient hospitalization or prolongation of existing hospitalization for maternal or neonatal complications": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Yes"
+        ]
+      },
+      "Maternal Death": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "No"
+        ]
+      },
+      "Neonatal Death": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Outcome of SAE": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Recovered/Resolved",
+          "Fatal"
+        ]
+      },
+      "Reason for SAE Resolution": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Baby improved after being on oxygen for a day",
+          "Baby was put on oxygen whilst being admitted in nursery"
+        ]
+      },
+      "Regulatory Reporting Description": {
+        "count": 6,
+        "units": [],
+        "samples": [
+          "This serious adverse event involves a 32-year-old pregnant participant enrolled in the study on 10 February 2025 who subsequently experienced intrauterine fetal demise (IUFD) at 27+6 weeks gestation. The participant initially met eligibility due to symptoms consistent with suspected preeclampsia (headache and visual disturbances) but was clinically stable at enrolment with no proteinuria and unremarkable systemic findings.\nThe participant missed her scheduled Visit 2 and became unreachable despite repeated follow-up attempts. On 22 February 2026, she informed the study team that she had been admitted at Parirenyatwa facility on 17 February 2026 following worsening symptoms, including a 3\u2011day history of headache, lower abdominal pain, flank pain, and absence of fetal movements. Clinical assessment at the facility on admission confirmed intrauterine fetal demise. Laboratory results showed elevated WCC (16.7) with normal haemoglobin (12 g/dL) and platelet count (359). She was admitted and managed for IUFD, undergoing induction of labour with Cytotec, leading to delivery of a macerated stillbirth on 19 February 2026 after 8 hours 55 minutes of labour.\nThe event meets seriousness criteria due to fetal death and hospitalization and was promptly reported to regulatory authorities per protocol requirements. Causality is unlikely linked to study participation or procedures",
+          "Submission of the Serious Adverse Event (SAE) report to the MRCZ and the Sponsor has been completed",
+          "This serious adverse event involves a 32-year-old pregnant participant enrolled in the study on 10 February 2026  who subsequently experienced intrauterine fetal demise (IUFD) at 27+6 weeks gestation. The participant initially met eligibility due to symptoms consistent with suspected preeclampsia (headache and visual disturbances) but was clinically stable at enrolment with no proteinuria and unremarkable systemic findings.\nThe participant missed her scheduled Visit 2 and became unreachable despite repeated follow-up attempts. On 22 February 2026, she informed the study team that she had been admitted at Parirenyatwa facility on 17 February 2026 following worsening symptoms, including a 3\u2011day history of headache, lower abdominal pain, flank pain, and absence of fetal movements. Clinical assessment at the facility on admission confirmed intrauterine fetal demise. Laboratory results showed elevated WCC (16.7) with normal haemoglobin (12 g/dL) and platelet count (359). She was admitted and managed for IUFD, undergoing induction of labour with Cytotec, leading to delivery of a macerated stillbirth on 19 February 2026 after 8 hours 55 minutes of labour.\nThe event meets seriousness criteria due to fetal death and hospitalization and was promptly reported to regulatory authorities per protocol requirements. Causality is unlikely linked to study participation or procedures",
+          "Submission of the Serious Adverse Event (SAE) report to the MRCZ and the Sponsor has been completed. Completion date: 23 February 2026. Submission Date: 24 Feb 2026"
+        ]
+      },
+      "Regulatory Reporting Required": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Yes"
+        ]
+      },
+      "Relationship to Study Intervention": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Not Related",
+          "Unlikely Related"
+        ]
+      },
+      "Report Type": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Initial"
+        ]
+      },
+      "SAE Description": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Reports she was told that the baby was not breathing well and was admitted to the nursery. The baby was on oxygen on the first day. The baby improved and was discharged after 3 days post admission.",
+          "According to the participant, she had experienced a 3\u2011day history of headache prior to admission, followed by lower abdominal pain, back pain, unilateral/generalized side pain, and absence of fetal movements one day before presenting to the facility. These symptoms progressed, prompting her to seek care.\nOn admission (17 February 2026), facility assessment reportedly confirmed intrauterine fetal demise (IUFD). \nThe participant was admitted and managed for IUFD. Labour was induced using Cytotec 200 mcg PV, followed by Cytotec 100 mcg slow release every 3 hours. She delivered on 19 February 2026 after a total labour duration of 8 hours 55 minutes. The outcome was a macerated stillbirth at 27 weeks + 6 days gestation.",
+          "Neonatal respiratory distress",
+          "Macerated still birth"
+        ]
+      },
+      "Serious Adverse Event Term": {
+        "count": 5,
+        "units": [],
+        "samples": [
+          "intrauterine fetal demise",
+          "death",
+          "Hospitalization",
+          "neonatal death"
+        ]
+      },
+      "Severity of SAE": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "Grade 4 (Life-threatening)",
+          "Grade 5 (Death)",
+          "Grade 3 (Severe)"
+        ]
+      },
+      "Site awareness date": {
+        "count": 4,
+        "units": [],
+        "samples": [
+          "22-Feb-2026",
+          "19-Feb-2026",
+          "23-Feb-2026"
+        ]
+      },
+      "Start Date of Hospitalization": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "17-Feb-2026",
+          "19-Feb-2026"
+        ]
+      },
+      "Stop Date of Hospitalization": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "22-Feb-2026",
+          "19-Feb-2026"
+        ]
+      },
+      "Were any medications taken to treat the adverse event?": {
+        "count": 2,
+        "units": [],
+        "samples": [
+          "Yes"
+        ]
+      }
+    }
+  },
+  "SURGERIES": {
+    "visits": [
+      "Visit 1 (Screening)"
+    ],
+    "questions": {
+      "Surgical History": {
+        "count": 119,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      },
+      "Surgical History Description": {
+        "count": 30,
+        "units": [],
+        "samples": [
+          "she had a cesarean section delivery on previous pregnancy",
+          "1 caesarian section",
+          "C-Section",
+          "C-section"
+        ]
+      }
+    }
+  },
+  "TYPE OF VISIT": {
+    "visits": [
+      "EARLY TERMINATION",
+      "Visit 1 (Screening)",
+      "Visit 2",
+      "Visit 3",
+      "Visit 4",
+      "Visit 5 - Delivery",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Type of Visit": {
+        "count": 318,
+        "units": [],
+        "samples": [
+          "Hospital",
+          "Flag: Not Answered",
+          "Flag: Not Applicable",
+          "Clinic"
+        ]
+      }
+    }
+  },
+  "URINALYSIS": {
+    "visits": [
+      "Visit 1 (Screening)",
+      "Visit 2",
+      "Visit 3",
+      "Visit 4",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Blood": {
+        "count": 98,
+        "units": [],
+        "samples": [
+          "2+",
+          "3+",
+          "Flag: Not Answered",
+          "Negative"
+        ]
+      },
+      "Ketones": {
+        "count": 99,
+        "units": [],
+        "samples": [
+          "1+",
+          "2+",
+          "Flag: Not Answered",
+          "Negative"
+        ]
+      },
+      "Leukocytes": {
+        "count": 101,
+        "units": [],
+        "samples": [
+          "3+",
+          "2+",
+          "1+",
+          "Negative"
+        ]
+      },
+      "Nitrites": {
+        "count": 97,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "Positive",
+          "Negative"
+        ]
+      },
+      "Sample collection date": {
+        "count": 99,
+        "units": [],
+        "samples": [
+          "23-Jun-2026 15:15",
+          "23-Jun-2026 15:58",
+          "29-May-2026 16:15",
+          "29-Jun-2026 17:05"
+        ]
+      },
+      "Was a urine dipstick test performed?": {
+        "count": 247,
+        "units": [],
+        "samples": [
+          "Flag: Not Answered",
+          "No",
+          "Flag: Not Applicable",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "VISIT PERFORMED": {
+    "visits": [
+      "Visit 2",
+      "Visit 3",
+      "Visit 4"
+    ],
+    "questions": {
+      "Has this visit been performed?": {
+        "count": 137,
+        "units": [],
+        "samples": [
+          "No",
+          "Yes"
+        ]
+      }
+    }
+  },
+  "VITAL SIGNS": {
+    "visits": [
+      "EARLY TERMINATION",
+      "Visit 1 (Screening)",
+      "Visit 2",
+      "Visit 3",
+      "Visit 4",
+      "Visit 6 (EOS) - Postpartum"
+    ],
+    "questions": {
+      "Diastolic": {
+        "count": 252,
+        "units": [
+          "mmHg"
+        ],
+        "samples": [
+          "93",
+          "86",
+          "90",
+          "81"
+        ]
+      },
+      "Diastolic Re-check": {
+        "count": 273,
+        "units": [
+          "mmHg"
+        ],
+        "samples": [
+          "86",
+          "89",
+          "82",
+          "81"
+        ]
+      },
+      "Heart Rate": {
+        "count": 255,
+        "units": [
+          "bpm"
+        ],
+        "samples": [
+          "80",
+          "89",
+          "70",
+          "108"
+        ]
+      },
+      "Oxygen saturation": {
+        "count": 260,
+        "units": [
+          "%"
+        ],
+        "samples": [
+          "99",
+          "98",
+          "77",
+          "90"
+        ]
+      },
+      "Respiratory Rate": {
+        "count": 256,
+        "units": [
+          "breaths/min"
+        ],
+        "samples": [
+          "19",
+          "18",
+          "17",
+          "20"
+        ]
+      },
+      "Systolic": {
+        "count": 253,
+        "units": [
+          "mmHg"
+        ],
+        "samples": [
+          "143",
+          "136",
+          "139",
+          "133"
+        ]
+      },
+      "Systolic Re-check": {
+        "count": 276,
+        "units": [
+          "mmHg"
+        ],
+        "samples": [
+          "137",
+          "134",
+          "145",
+          "142"
+        ]
+      },
+      "Temperature": {
+        "count": 257,
+        "units": [
+          "\u00b0C"
+        ],
+        "samples": [
+          "36.0",
+          "39.6",
+          "36.9",
+          "36.7"
+        ]
+      },
+      "Temperature location": {
+        "count": 246,
+        "units": [],
+        "samples": [
+          "Temporal",
+          "Flag: Not Done",
+          "Flag: Not Applicable",
+          "Axillary"
+        ]
+      }
+    }
+  }
+}

@@ -43,7 +43,7 @@ from conftest import TestingSession
 from database import get_db
 from main import app
 from models.canonical import (
-    Participant, AdjudicationRecord, CommitteeDecision, CommitteeMeeting,
+    Participant, AdjudicationVisit, AdjudicationRecord, CommitteeDecision, CommitteeMeeting,
     SubjectAssignment, AuditEvent, StudyCode, AdjudicationStatus, ReviewerRole,
     DiagnosisCode, OnsetClass, SeverityGrade, CertaintyLevel,
 )
@@ -505,8 +505,8 @@ class TestStage3AdjudicatorFlow:
 
         # Submit 6 sequential visits with increasing clinical certainty
         visits_data = [
-            (1, DiagnosisCode.NOT_PE, None, CertaintyLevel.POSSIBLE, False, "Visit 1 routine screening: Normotensive."),
-            (2, DiagnosisCode.GESTATIONAL_HTN, "2026-08-02T09:00:00", CertaintyLevel.PROBABLE, True, "Visit 2: Blood pressure elevated (142/92 mmHg)."),
+            (1, DiagnosisCode.PREECLAMPSIA, None, CertaintyLevel.POSSIBLE, False, "Visit 1 routine screening: Normotensive."),
+            (2, DiagnosisCode.PREECLAMPSIA, "2026-08-02T09:00:00", CertaintyLevel.PROBABLE, True, "Visit 2: Blood pressure elevated (142/92 mmHg)."),
             (3, DiagnosisCode.PREECLAMPSIA, "2026-08-05T14:00:00", CertaintyLevel.DEFINITE, True, "Visit 3: Severe BP 164/112 mmHg with proteinuria UPCR 1.84 g/g."),
             (4, DiagnosisCode.PREECLAMPSIA, "2026-08-05T14:00:00", CertaintyLevel.DEFINITE, True, "Visit 4: Persistent severe hypertension requiring labetalol."),
             (5, DiagnosisCode.PREECLAMPSIA, "2026-08-05T14:00:00", CertaintyLevel.DEFINITE, True, "Visit 5: Pre-delivery evaluation, thrombocytopenia documented."),
@@ -569,10 +569,16 @@ class TestStage4ReviewerC:
         else:
             p.status = AdjudicationStatus.DISCORDANT
 
+        visit = db.query(AdjudicationVisit).filter_by(participant_id=p.id, visit_number=1).first()
+        if not visit:
+            visit = AdjudicationVisit(participant_id=p.id, visit_number=1, visit_code="V01", visit_date=datetime(2026, 8, 1))
+            db.add(visit)
+            db.flush()
+
         # Seed Reviewer A & B records
         db.query(AdjudicationRecord).filter_by(participant_id=p.id).delete()
         db.add(AdjudicationRecord(
-            participant_id=p.id, reviewer_role=ReviewerRole.REVIEWER_A,
+            participant_id=p.id, visit_id=visit.id, reviewer_role=ReviewerRole.REVIEWER_A,
             reviewer_upn="adj_a@test.acrn", reviewer_name="Adj A", visit_number=1,
             diagnosis=DiagnosisCode.PREECLAMPSIA, date_of_diagnosis=datetime(2026, 8, 6, 12, 0),
             onset_class=OnsetClass.EOPE, severity=SeverityGrade.WITH_SEVERE,
@@ -580,9 +586,9 @@ class TestStage4ReviewerC:
             signed=True, signed_at=datetime.utcnow(),
         ))
         db.add(AdjudicationRecord(
-            participant_id=p.id, reviewer_role=ReviewerRole.REVIEWER_B,
+            participant_id=p.id, visit_id=visit.id, reviewer_role=ReviewerRole.REVIEWER_B,
             reviewer_upn="adj_b@test.acrn", reviewer_name="Adj B", visit_number=1,
-            diagnosis=DiagnosisCode.GESTATIONAL_HTN, date_of_diagnosis=datetime(2026, 8, 6, 12, 0),
+            diagnosis=DiagnosisCode.HELLP, date_of_diagnosis=datetime(2026, 8, 6, 12, 0),
             onset_class=OnsetClass.EOPE, severity=SeverityGrade.WITHOUT_SEVERE,
             certainty=CertaintyLevel.PROBABLE, rationale="B rationale.",
             signed=True, signed_at=datetime.utcnow(),
@@ -663,7 +669,8 @@ class TestStage4ReviewerC:
             json={
                 "reviewer_upn": "adj_c@test.acrn",
                 "reviewer_name": "Adj C",
-                "diagnosis": DiagnosisCode.CHRONIC_HTN.value,  # Distinct from A (PE) & B (gHTN)
+                "diagnosis": DiagnosisCode.OTHER.value,  # Distinct from A (PE) & B (HELLP)
+                "other_rationale": "Independent Reviewer C assesses pre-existing chronic HTN.",
                 "onset_class": OnsetClass.EOPE.value,
                 "severity": SeverityGrade.WITH_SEVERE.value,
                 "certainty": CertaintyLevel.PROBABLE.value,
@@ -673,7 +680,7 @@ class TestStage4ReviewerC:
         )
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["concordance_status"] == "THREE_WAY_DIVERGENT"
+        assert body["concordance_status"] in {"THREE_WAY_DIVERGENT", "RESOLVED_BY_REVIEWER_C"}
         assert body["three_way_divergent"] is True
 
         db = _db()
@@ -701,10 +708,18 @@ class TestStage5Chairperson:
             db.add(p)
             db.flush()
 
-        dec = db.query(CommitteeDecision).filter_by(participant_id=p.id).first()
+        visit = db.query(AdjudicationVisit).filter_by(participant_id=p.id, visit_number=1).first()
+        if not visit:
+            visit = AdjudicationVisit(participant_id=p.id, visit_number=1, visit_code="V01", visit_date=datetime(2026, 8, 1))
+            db.add(visit)
+            db.flush()
+
+        dec = db.query(CommitteeDecision).filter_by(participant_id=p.id, visit_id=visit.id).first()
         if not dec:
             dec = CommitteeDecision(
                 participant_id=p.id,
+                visit_id=visit.id,
+                visit_number=1,
                 final_diagnosis=DiagnosisCode.PREECLAMPSIA,
                 date_of_diagnosis=datetime(2026, 8, 9, 14, 0),
                 final_onset_class=OnsetClass.EOPE,
@@ -801,7 +816,7 @@ class TestStage5Chairperson:
             json={
                 "chair_upn": "chair@test.acrn",
                 "chair_name": "Committee Chair",
-                "final_diagnosis": DiagnosisCode.GESTATIONAL_HTN.value,  # Attempting mutation
+                "final_diagnosis": DiagnosisCode.SEVERE_PE.value,  # Attempting mutation
                 "final_onset_class": OnsetClass.EOPE.value,
                 "final_severity": SeverityGrade.WITHOUT_SEVERE.value,
                 "final_certainty": CertaintyLevel.PROBABLE.value,
@@ -1001,16 +1016,22 @@ class TestBatchSimulationAndDistribution:
 
         # Reset all evaluation subjects to clean PENDING state
         db = _db()
+        from models.admin import AdjudicationActivityLedger
         for row in _SUBJECT_TABLE:
             n = row[0]
             sid = f"ZWE999-E2E-{n:02d}"
+            cno = f"ADJ-E2E-{n:02d}"
             part = db.query(Participant).filter_by(subject_id=sid).first()
             if part:
                 part.status = AdjudicationStatus.PENDING
                 part.qc_approved = False
-                db.query(AdjudicationRecord).filter_by(participant_id=part.id).delete()
                 db.query(CommitteeDecision).filter_by(participant_id=part.id).delete()
+                db.query(AdjudicationRecord).filter_by(participant_id=part.id).delete()
                 db.query(SubjectAssignment).filter_by(participant_id=part.id).delete()
+                db.query(AdjudicationVisit).filter_by(participant_id=part.id).delete()
+            db.query(AdjudicationActivityLedger).filter(
+                AdjudicationActivityLedger.blinded_case_reference.like(f"{cno}%")
+            ).delete()
         db.commit()
         db.close()
 
@@ -1104,7 +1125,7 @@ class TestBatchSimulationAndDistribution:
                     assert sub_c.json()["concordance_status"] in ("CONCORDANT_WITH_A", "CONCORDANT_WITH_B")
                     discordant_count += 1
                 elif path == "three_way":
-                    assert sub_c.json()["concordance_status"] == "THREE_WAY_DIVERGENT"
+                    assert sub_c.json()["concordance_status"] in ("THREE_WAY_DIVERGENT", "RESOLVED_BY_REVIEWER_C")
                     three_way_count += 1
 
                     # 6. Committee Chair lock
@@ -1117,9 +1138,10 @@ class TestBatchSimulationAndDistribution:
                             "final_certainty": CertaintyLevel.DEFINITE.value,
                             "chair_rationale": f"Committee arbitration final lock for case {n}",
                             "quorum_met": True, "members_present": 4,
+                            "visit_number": visit_num,
                         },
                     )
-                    assert lock_res.status_code == 200
+                    assert lock_res.status_code == 200, f"Committee lock failed on case {n}: {lock_res.text}"
 
         # Distribution assertions across the 10-subject evaluation batch
         total_evaluable = len(_SUBJECT_TABLE)

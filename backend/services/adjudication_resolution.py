@@ -5,10 +5,16 @@ from models.canonical import AdjudicationStatus, ReviewerRole
 
 def clinical_signature(record):
     """Fields that must agree before two determinations are clinically concordant."""
-    return (
+    base_sig = [
         record.meets_criteria, record.diagnosis, record.onset_class,
         record.severity, record.certainty, record.date_of_diagnosis,
-    )
+    ]
+    if getattr(record, "visit_number", None) == 5:
+        fetal_assessments = tuple(sorted(getattr(record, "fetal_neonatal_assessments", None) or []))
+        ga = round(record.gestational_age_at_delivery, 1) if getattr(record, "gestational_age_at_delivery", None) is not None else None
+        outcome = getattr(record, "pregnancy_outcome", None)
+        base_sig.extend([fetal_assessments, ga, outcome])
+    return tuple(base_sig)
 
 
 def resolve_visit(visit, records):
@@ -33,6 +39,8 @@ def apply_visit_resolution(participant, visit, records):
     visit.resolution_type = resolution
     visit.final_record_id = adopted.id if adopted else None
     visit.finalized_at = datetime.utcnow() if adopted else None
+    if adopted and visit.visit_number == 5:
+        visit.final_fetal_assessments = getattr(adopted, "fetal_neonatal_assessments", None)
     visit.filing_status = "PENDING" if adopted else "NOT_READY"
     # Participant state is a roll-up; never let one visit hide another open visit.
     statuses = [v.status for v in participant.visits]

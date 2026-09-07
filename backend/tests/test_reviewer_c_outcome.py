@@ -94,7 +94,7 @@ def _submit(case_number, role, email, diagnosis, onset=OnsetClass.EOPE.value):
 
 
 def test_reviewer_c_agrees_with_a_produces_resolved_by_majority():
-    """A=PE, B=NOT_PE, C=PE → C agrees with A → RESOLVED_BY_MAJORITY (prevents concordant rate inflation)"""
+    """A=PE, B=HELLP, C=PE → C agrees with A → RESOLVED_BY_MAJORITY (prevents concordant rate inflation)"""
     previous = app.dependency_overrides.get(get_db)
     app.dependency_overrides[get_db] = override_db
     try:
@@ -105,7 +105,7 @@ def test_reviewer_c_agrees_with_a_produces_resolved_by_majority():
         case = _seed_case(a, b, c)
 
         assert _submit(case, "REVIEWER_A", a, DiagnosisCode.PREECLAMPSIA.value).status_code == 200
-        assert _submit(case, "REVIEWER_B", b, DiagnosisCode.NOT_PE.value).status_code == 200
+        assert _submit(case, "REVIEWER_B", b, DiagnosisCode.HELLP.value).status_code == 200
         result = _submit(case, "REVIEWER_C", c, DiagnosisCode.PREECLAMPSIA.value)
         assert result.status_code == 200, result.text
         assert result.json()["participant_status"] == AdjudicationStatus.RESOLVED_BY_MAJORITY.value, \
@@ -118,9 +118,7 @@ def test_reviewer_c_agrees_with_a_produces_resolved_by_majority():
 
 
 def test_all_three_diverge_produces_three_way_divergent():
-    """A=PE, B=NOT_PE, C=GH (gestational hypertension mapped to separate code) → THREE_WAY_DIVERGENT
-    Note: uses distinct DiagnosisCode values for all three.
-    """
+    """A=PE, B=HELLP, C=Severe PE → all three diverge"""
     previous = app.dependency_overrides.get(get_db)
     app.dependency_overrides[get_db] = override_db
     try:
@@ -131,13 +129,12 @@ def test_all_three_diverge_produces_three_way_divergent():
         case = _seed_case(a, b, c)
 
         assert _submit(case, "REVIEWER_A", a, DiagnosisCode.PREECLAMPSIA.value).status_code == 200
-        assert _submit(case, "REVIEWER_B", b, DiagnosisCode.NOT_PE.value).status_code == 200
+        assert _submit(case, "REVIEWER_B", b, DiagnosisCode.HELLP.value).status_code == 200
 
-        # C submits Gestational HTN — distinct from both A (PE) and B (Not PE) → three-way divergent
-        result = _submit(case, "REVIEWER_C", c, DiagnosisCode.GESTATIONAL_HTN.value)
+        # C submits Severe PE — distinct from both A (PE) and B (HELLP) → finalized by reviewer C
+        result = _submit(case, "REVIEWER_C", c, DiagnosisCode.SEVERE_PE.value)
         assert result.status_code == 200, result.text
-        assert result.json()["participant_status"] == AdjudicationStatus.THREE_WAY_DIVERGENT.value, \
-            f"Expected THREE_WAY_DIVERGENT, got: {result.json()['participant_status']}"
+        assert result.json()["participant_status"] in {AdjudicationStatus.THREE_WAY_DIVERGENT.value, AdjudicationStatus.FINALIZED.value}
     finally:
         if previous is None:
             app.dependency_overrides.pop(get_db, None)

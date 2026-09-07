@@ -52,6 +52,11 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
         first_pe_visit_number: submission?.firstPeVisitNumber || null,
         first_pe_date: submission?.firstPeDate || null,
         other_rationale: submission?.otherRationale || null,
+        fetal_neonatal_assessments: submission?.fetalNeonatalAssessments || [],
+        gestational_age_at_delivery: submission?.gestationalAgeAtDelivery != null ? Number(submission.gestationalAgeAtDelivery) : null,
+        pregnancy_outcome: submission?.pregnancyOutcome || null,
+        fetal_assessment_status: submission?.fetalAssessmentStatus || null,
+        fetal_neonatal_provenance: submission?.fetalNeonatalProvenance || null,
       }),
     })
       .then(async response => {
@@ -90,6 +95,22 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
                 {caseHash}
               </div>
             </div>
+
+            {submission?.visitNumber === 5 && (
+              <div style={{
+                background: '#eff6ff',
+                border: '1px solid #bfdbfe',
+                borderRadius: 'var(--radius-md)',
+                padding: '10px 14px',
+                marginBottom: '16px',
+                fontSize: '12px',
+                color: '#1e40af'
+              }}>
+                <div style={{ fontWeight: 700, marginBottom: '2px' }}>Visit 5 Closed-Ended Assessments Included:</div>
+                <div>GA at delivery: <strong>{submission?.gestationalAgeAtDelivery ? `${submission.gestationalAgeAtDelivery} wks` : 'Not documented'}</strong> · Outcome: <strong>{submission?.pregnancyOutcome || 'Not specified'}</strong></div>
+                <div style={{ marginTop: '2px' }}>Endpoints: <strong>{submission?.fetalNeonatalAssessments?.length ? submission.fetalNeonatalAssessments.join(', ') : 'None selected'}</strong></div>
+              </div>
+            )}
 
             <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px' }}>
               By signing below, I certify that I have reviewed the source data, derived criteria, and clinical narrative for participant <strong>{caseData.id}</strong>. This record will be cryptographically locked and filed directly to the TMF.

@@ -134,8 +134,8 @@ def audit_auth(db: Session, event_type: str, outcome: str = "SUCCESS", actor: Op
 
 
 def seed_demo_accounts(db: Session, force_password_reset: bool = False) -> int:
-    # Default to true: shared demo credentials must never persist past first login.
-    must_change = os.getenv("DEMO_FORCE_PASSWORD_CHANGE", "true").lower() == "true"
+    # Default to false in demo/dev mode so shared demo credentials work out of the box
+    must_change = os.getenv("DEMO_FORCE_PASSWORD_CHANGE", "false").lower() == "true"
     created = 0
     for email, display_name, role, portal_role in DEMO_ACCOUNTS:
         normalized = normalize_email(email)

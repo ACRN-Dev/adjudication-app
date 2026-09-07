@@ -13,11 +13,11 @@ from models.admin import (AdminUser, AdminRole, UserRole, StudyAccess, AdminStud
 from models.auth import PortalUser
 from models.canonical import AdjudicationRecord, CommitteeMeeting, Participant, SubjectAssignment
 from services.admin_demo import seed_demo, reset_demo
+from services.demo_reset_service import is_demo_environment, reset_demo_environment, purge_all_demo_data, purge_csv_scenarios
 from services.admin_security import Identity, get_identity, require, enforce_study, validate_delegation, risk_warnings, validate_mapping, validate_workflow_definition, add_audit
 
 router = APIRouter()
 ACTIVE_STATUSES = {"Active","Approved","Scheduled"}
-
 class ReasonedRequest(BaseModel): reason: str = Field(min_length=3); effective_at: Optional[datetime] = None
 class UserCreate(ReasonedRequest):
     display_name: str; email: str; organisation: str = "ACRN Foundation"; country: str; job_title: str = ""; role_codes: list[str] = []; study_codes: list[str] = []; access_expiry: Optional[datetime] = None
@@ -304,106 +304,21 @@ def report(report_code:str,identity:Identity=Depends(require("reports.read")),db
     add_audit(db,identity,"REPORT_EXPORTED","REPORT",report_code,"Controlled administrative report generated",new={"scope":identity.studies}); db.commit(); return {"demo":True,"report":report_code,"generated_at":datetime.utcnow(),"study_scope":identity.studies,"note":"Synthetic demonstration report; production export adapter not connected."}
 @router.post("/demo/reset")
 def demo_reset(req:ReasonedRequest,identity:Identity=Depends(require("integrations.manage")),db:Session=Depends(get_db)):
-    if os.getenv("ENABLE_DEMO_DATA","false").lower()!="true": raise HTTPException(409,"Demo data is disabled in this environment.")
+    if not is_demo_environment(): raise HTTPException(409,"Demo data reset is disabled in production environments.")
     counts=reset_demo(db); add_audit(db,identity,"DEMO_ADMIN_DATA_RESET","DEMO_DATA","administration",req.reason,new=counts); db.commit(); return {"demo":True,"reset":counts,"production_records_affected":0}
 
 @router.post("/demo/reset-all")
 def demo_reset_all(req:ReasonedRequest,identity:Identity=Depends(require("integrations.manage")),db:Session=Depends(get_db)):
-    if os.getenv("ENABLE_DEMO_DATA","false").lower()!="true": raise HTTPException(409,"Demo data is disabled in this environment.")
-    from models.canonical import (
-        ImportBatch, Participant, CanonicalField, DerivationResult, Narrative,
-        AdjudicationRecord, CommitteeDecision, AuditEvent, AdjudicationVisit,
-        VisitMeasurementDate, SignedCaseArtifact,
-    )
-    from models.longitudinal import (
-        RTImportBatch, LongitudinalParticipant, VisitInstance, CanonicalObservation,
-        ReviewerAssignment, RestrictedIdentityCrosswalk, VisitDerivation,
-        LongitudinalCaseDerivation, ImportIssue,
-    )
-    from models.history import PatientHistory, PatientHistoryField, PatientRiskSummary
-    counts = {}
-
-    csv_batches = db.query(ImportBatch).filter(
-        or_(
-            ImportBatch.edc_filename.ilike("%.csv"),
-            ImportBatch.esource_filename.ilike("%.csv"),
-            ImportBatch.edc_filename.ilike("%demo%"),
-            ImportBatch.esource_filename.ilike("%demo%"),
-        )
-    ).all()
-    csv_batch_ids = [b.id for b in csv_batches]
-    participant_ids = [
-        p.id for p in db.query(Participant.id)
-        .filter(Participant.import_batch_id.in_(csv_batch_ids))
-        .all()
-    ] if csv_batch_ids else []
-    visit_ids = [
-        v.id for v in db.query(AdjudicationVisit.id)
-        .filter(AdjudicationVisit.participant_id.in_(participant_ids))
-        .all()
-    ] if participant_ids else []
-
-    rt_batches = db.query(RTImportBatch).filter(
-        or_(RTImportBatch.filename.ilike("%.csv"), RTImportBatch.filename.ilike("%demo%"))
-    ).all()
-    rt_batch_ids = [b.id for b in rt_batches]
-    rt_participant_ids = [
-        p.id for p in db.query(LongitudinalParticipant.id)
-        .filter(LongitudinalParticipant.source_batch_id.in_(rt_batch_ids))
-        .all()
-    ] if rt_batch_ids else []
-    rt_visit_ids = [
-        v.id for v in db.query(VisitInstance.id)
-        .filter(VisitInstance.source_batch_id.in_(rt_batch_ids))
-        .all()
-    ] if rt_batch_ids else []
-
-    def delete_count(model, *criteria):
-        q = db.query(model)
-        for criterion in criteria:
-            q = q.filter(criterion)
-        count = q.delete(synchronize_session=False)
-        counts[model.__tablename__] = counts.get(model.__tablename__, 0) + count
-
-    if visit_ids:
-        delete_count(SignedCaseArtifact, SignedCaseArtifact.visit_id.in_(visit_ids))
-        delete_count(VisitMeasurementDate, VisitMeasurementDate.visit_id.in_(visit_ids))
-        delete_count(CommitteeDecision, CommitteeDecision.visit_id.in_(visit_ids))
-        delete_count(AdjudicationRecord, AdjudicationRecord.visit_id.in_(visit_ids))
-    if participant_ids:
-        delete_count(SubjectAssignment, SubjectAssignment.participant_id.in_(participant_ids))
-        delete_count(Narrative, Narrative.participant_id.in_(participant_ids))
-        delete_count(DerivationResult, DerivationResult.participant_id.in_(participant_ids))
-        delete_count(CanonicalField, CanonicalField.participant_id.in_(participant_ids))
-        delete_count(AuditEvent, AuditEvent.participant_id.in_(participant_ids))
-    if visit_ids:
-        delete_count(AdjudicationVisit, AdjudicationVisit.id.in_(visit_ids))
-    if participant_ids:
-        delete_count(Participant, Participant.id.in_(participant_ids))
-    if csv_batch_ids:
-        delete_count(AuditEvent, AuditEvent.import_batch_id.in_(csv_batch_ids))
-        delete_count(ImportBatch, ImportBatch.id.in_(csv_batch_ids))
-
-    if rt_visit_ids:
-        delete_count(VisitDerivation, VisitDerivation.visit_id.in_(rt_visit_ids))
-        delete_count(ImportIssue, ImportIssue.visit_id.in_(rt_visit_ids))
-        delete_count(CanonicalObservation, CanonicalObservation.visit_id.in_(rt_visit_ids))
-    if rt_participant_ids:
-        delete_count(ReviewerAssignment, ReviewerAssignment.participant_id.in_(rt_participant_ids))
-        delete_count(LongitudinalCaseDerivation, LongitudinalCaseDerivation.participant_id.in_(rt_participant_ids))
-        delete_count(RestrictedIdentityCrosswalk, RestrictedIdentityCrosswalk.participant_id.in_(rt_participant_ids))
-        delete_count(ImportIssue, ImportIssue.participant_id.in_(rt_participant_ids))
-        delete_count(PatientHistoryField, PatientHistoryField.participant_id.in_(rt_participant_ids))
-        delete_count(PatientHistory, PatientHistory.participant_id.in_(rt_participant_ids))
-        delete_count(PatientRiskSummary, PatientRiskSummary.participant_id.in_(rt_participant_ids))
-    if rt_visit_ids:
-        delete_count(VisitInstance, VisitInstance.id.in_(rt_visit_ids))
-    if rt_participant_ids:
-        delete_count(LongitudinalParticipant, LongitudinalParticipant.id.in_(rt_participant_ids))
-    if rt_batch_ids:
-        delete_count(ImportIssue, ImportIssue.batch_id.in_(rt_batch_ids))
-        delete_count(RTImportBatch, RTImportBatch.id.in_(rt_batch_ids))
-
+    if not is_demo_environment(): raise HTTPException(409,"Demo data reset is disabled in production environments.")
+    counts = purge_csv_scenarios(db)
     add_audit(db,identity,"DEMO_CSV_ASSIGNMENT_RESET","DEMO_DATA","csv-imports-and-assignments",req.reason,new=counts)
     db.commit()
     return {"demo":True,"reset":counts,"production_records_affected":0}
+
+@router.post("/demo/reset-environment")
+def demo_reset_environment(req:ReasonedRequest,identity:Identity=Depends(require("integrations.manage")),db:Session=Depends(get_db)):
+    if not is_demo_environment(): raise HTTPException(409,"Demo data reset is disabled in production environments.")
+    result = reset_demo_environment(db, reseed_cases=True)
+    add_audit(db,identity,"DEMO_ENVIRONMENT_RESET","DEMO_DATA","complete-demo-environment",req.reason,new=result.get("purged_records",{}))
+    db.commit()
+    return {"demo":True,"result":result,"production_records_affected":0}

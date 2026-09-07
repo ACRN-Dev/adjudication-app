@@ -74,6 +74,20 @@ export default function CommitteeDashboard({ caseData, onAdoptOutcome }) {
         adoptedRole = 'CHAIR';
       }
 
+      const visitNum = discordantCase.visitNumber || discordantCase.visit_number || 1;
+      let adoptedFetalAssessments = [];
+      let adoptedGa = null;
+      let adoptedPregnancyOutcome = null;
+
+      if (visitNum === 5) {
+        const adoptedSource = selectedOutcomeMode === 'ADOPT_B' ? discordance.reviewerB
+          : selectedOutcomeMode === 'ADOPT_C' ? discordance.reviewerC
+          : discordance.reviewerA;
+        adoptedFetalAssessments = adoptedSource?.fetalNeonatalAssessments || discordantCase.fetalNeonatalAssessments || [];
+        adoptedGa = adoptedSource?.gestationalAgeAtDelivery ?? discordantCase.gestationalAgeAtDelivery ?? null;
+        adoptedPregnancyOutcome = adoptedSource?.pregnancyOutcome || discordantCase.pregnancyOutcome || null;
+      }
+
       const res = await fetch(`/api/committee/${discordantCase.id || discordantCase.caseNo}/lock`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -88,7 +102,10 @@ export default function CommitteeDashboard({ caseData, onAdoptOutcome }) {
           chair_name: 'Adjudication Chairperson',
           quorum_met: true,
           members_present: 4,
-          visit_number: 1
+          visit_number: visitNum,
+          final_fetal_assessments: adoptedFetalAssessments,
+          final_ga_at_delivery: adoptedGa != null ? Number(adoptedGa) : null,
+          final_pregnancy_outcome: adoptedPregnancyOutcome,
         })
       });
 

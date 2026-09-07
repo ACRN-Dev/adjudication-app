@@ -127,14 +127,14 @@ def _subject(n: int, visit_count: int) -> dict:
 _SUBJECT_TABLE = [
     (1,  2, DiagnosisCode.PREECLAMPSIA,     DiagnosisCode.PREECLAMPSIA,     CertaintyLevel.DEFINITE,  CertaintyLevel.DEFINITE,  None,                         None,                         "concordant", "2026-08-01T10:00:00"),
     (2,  1, DiagnosisCode.PREECLAMPSIA,     DiagnosisCode.PREECLAMPSIA,     CertaintyLevel.DEFINITE,  CertaintyLevel.DEFINITE,  None,                         None,                         "concordant", "2026-08-02T11:00:00"),
-    (3,  3, DiagnosisCode.GESTATIONAL_HTN,  DiagnosisCode.GESTATIONAL_HTN,  CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  None,                         None,                         "concordant", "2026-08-03T09:30:00"),
+    (3,  3, DiagnosisCode.SEVERE_PE,        DiagnosisCode.SEVERE_PE,        CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  None,                         None,                         "concordant", "2026-08-03T09:30:00"),
     (4,  1, DiagnosisCode.PREECLAMPSIA,     DiagnosisCode.PREECLAMPSIA,     CertaintyLevel.DEFINITE,  CertaintyLevel.DEFINITE,  None,                         None,                         "concordant", "2026-08-04T14:15:00"),
-    (5,  2, DiagnosisCode.GESTATIONAL_HTN,  DiagnosisCode.GESTATIONAL_HTN,  CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  None,                         None,                         "concordant", "2026-08-05T08:45:00"),
-    (6,  1, DiagnosisCode.PREECLAMPSIA,     DiagnosisCode.GESTATIONAL_HTN,  CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  DiagnosisCode.PREECLAMPSIA,   None,                         "discordant", "2026-08-06T13:00:00"),
-    (7,  2, DiagnosisCode.PREECLAMPSIA,     DiagnosisCode.GESTATIONAL_HTN,  CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  DiagnosisCode.GESTATIONAL_HTN,None,                         "discordant", "2026-08-07T15:30:00"),
-    (8,  1, DiagnosisCode.GESTATIONAL_HTN,  DiagnosisCode.PREECLAMPSIA,     CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  DiagnosisCode.GESTATIONAL_HTN,None,                         "discordant", "2026-08-08T11:20:00"),
-    (9,  1, DiagnosisCode.PREECLAMPSIA,     DiagnosisCode.GESTATIONAL_HTN,  CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  DiagnosisCode.CHRONIC_HTN,    DiagnosisCode.PREECLAMPSIA,   "three_way",  "2026-08-09T16:00:00"),
-    (10, 2, DiagnosisCode.PREECLAMPSIA,     DiagnosisCode.GESTATIONAL_HTN,  CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  DiagnosisCode.NOT_PE,         DiagnosisCode.PREECLAMPSIA,   "three_way",  "2026-08-10T12:00:00"),
+    (5,  2, DiagnosisCode.HELLP,            DiagnosisCode.HELLP,            CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  None,                         None,                         "concordant", "2026-08-05T08:45:00"),
+    (6,  1, DiagnosisCode.PREECLAMPSIA,     DiagnosisCode.HELLP,            CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  DiagnosisCode.PREECLAMPSIA,   None,                         "discordant", "2026-08-06T13:00:00"),
+    (7,  2, DiagnosisCode.PREECLAMPSIA,     DiagnosisCode.HELLP,            CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  DiagnosisCode.HELLP,          None,                         "discordant", "2026-08-07T15:30:00"),
+    (8,  1, DiagnosisCode.HELLP,            DiagnosisCode.PREECLAMPSIA,     CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  DiagnosisCode.HELLP,          None,                         "discordant", "2026-08-08T11:20:00"),
+    (9,  1, DiagnosisCode.PREECLAMPSIA,     DiagnosisCode.HELLP,            CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  DiagnosisCode.SEVERE_PE,      DiagnosisCode.PREECLAMPSIA,   "three_way",  "2026-08-09T16:00:00"),
+    (10, 2, DiagnosisCode.PREECLAMPSIA,     DiagnosisCode.HELLP,            CertaintyLevel.PROBABLE,  CertaintyLevel.PROBABLE,  DiagnosisCode.ECLAMPSIA,      DiagnosisCode.PREECLAMPSIA,   "three_way",  "2026-08-10T12:00:00"),
 ]
 
 

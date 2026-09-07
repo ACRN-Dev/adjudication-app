@@ -79,3 +79,66 @@ def test_compute_risk_summary():
 def test_not_known_remains_distinct_value():
     field = PatientHistoryField(field_key="family_history_known", value="Not known", domain="conditions")
     assert field.value == "Not known"
+
+def test_make_field_key_page_disambiguation():
+    # Medical conditions primary page retains standard keys
+    assert make_field_key("End Date", "Medical Conditions") == "end_date"
+    assert make_field_key("Start Date", "Medical Conditions") == "start_date"
+    assert make_field_key("Medical Condition", "Medical Conditions") == "medical_condition"
+    
+    # Other condition pages with repeating end_date/start_date are disambiguated
+    assert make_field_key("End Date", "Allergies") == "allergies_end_date"
+    assert make_field_key("End Date", "Surgeries, Procedures and Hospitalizations") == "surgeries_procedures_and_hospitalizations_end_date"
+    assert make_field_key("Start Date", "Surgeries, Procedures and Hospitalizations") == "surgeries_procedures_and_hospitalizations_start_date"
+    assert make_field_key("Electronic Signature Lock Date/Time", "Obstetric history") == "obstetric_history_electronic_signature_lock_date_time"
+    assert make_field_key("Electronic Signature Lock Date/Time", "Medical History") == "medical_history_electronic_signature_lock_date_time"
+
+def test_process_history_row_in_session_deduplication():
+    from conftest import TestingSession
+    from models.history import PatientHistoryField, PatientHistory
+    from models.longitudinal import RTImportBatch, LongitudinalParticipant
+    import uuid
+    from services.history_parser import process_history_row
+    
+    db = TestingSession()
+    
+    batch = RTImportBatch(id=uuid.uuid4(), filename="test.csv", checksum="dummy-checksum-123", file_size=100, uploaded_by="tester", status="PROCESSING")
+    p = LongitudinalParticipant(id=uuid.uuid4(), blinded_subject_id="ACRN-TEST-01", study="PROTECT-Africa", source_batch_id=batch.id)
+    db.add(batch)
+    db.add(p)
+    db.flush()
+    
+    # First occurrence: allergy question with 'Yes'
+    row1 = {
+        "Form Title": "Medical History / Prior & Concomitant Medications + Sync",
+        "Page Title": "Allergies",
+        "Field Label": "Does the subject have any allergies or intolerances to report?",
+        "Field type": "yes_no",
+        "Data Value": "Yes",
+        "Audit Trails": "Makaha, Edward - 04/Mar/2026 01:20:21 PM CAT"
+    }
+    history_fields = {}
+    patient_histories = {}
+    process_history_row(db, batch, p, row1, 1, history_fields=history_fields, patient_histories=patient_histories)
+    
+    # Second occurrence in same session without commit (simulating RealTime duplicate row with empty update):
+    row2 = {
+        "Form Title": "Medical History / Prior & Concomitant Medications + Sync",
+        "Page Title": "Allergies",
+        "Field Label": "Does the subject have any allergies or intolerances to report?",
+        "Field type": "yes_no",
+        "Data Value": "",
+        "Audit Trails": ""
+    }
+    process_history_row(db, batch, p, row2, 2, history_fields=history_fields, patient_histories=patient_histories)
+    
+    # Commit must not raise sqlite3.IntegrityError
+    db.commit()
+    
+    # Must only have 1 PatientHistoryField record, and value must be preserved as 'Yes'
+    fields = db.query(PatientHistoryField).filter_by(participant_id=p.id).all()
+    assert len(fields) == 1
+    assert fields[0].value == "Yes"
+    
+    db.close()
+

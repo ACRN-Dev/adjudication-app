@@ -215,6 +215,7 @@ class AdjudicationVisit(Base):
     resolution_type = Column(String(40), nullable=True)
     final_record_id = Column(UUID(as_uuid=True), nullable=True)
     finalized_at = Column(DateTime, nullable=True)
+    final_fetal_assessments = Column(JSON, nullable=True)
     filing_status = Column(String(30), nullable=False, default="NOT_READY",
                            server_default="NOT_READY", index=True)
     filing_error = Column(Text, nullable=True)
@@ -426,6 +427,13 @@ class AdjudicationRecord(Base):
     other_rationale = Column(Text)
     narrative_id = Column(UUID(as_uuid=True), ForeignKey("narratives.id"))
 
+    # Visit 5 Fetal and Neonatal Assessments
+    fetal_neonatal_assessments = Column(JSON, nullable=True)
+    gestational_age_at_delivery = Column(Float, nullable=True)
+    pregnancy_outcome = Column(String(100), nullable=True)
+    fetal_assessment_status = Column(String(50), nullable=True)
+    fetal_neonatal_provenance = Column(JSON, nullable=True)
+
     # 21 CFR Part 11 e-signature
     signed = Column(Boolean, default=False)
     signed_at = Column(DateTime)
@@ -476,6 +484,12 @@ class CommitteeDecision(Base):
     reviewer_c_diagnosis = Column(String(100), nullable=True)
     reviewer_c_rationale = Column(Text, nullable=True)
     concordance_status = Column(String(50), default="DISCORDANT")
+
+    # Visit 5 Fetal and Neonatal Final Decision
+    final_fetal_assessments = Column(JSON, nullable=True)
+    final_ga_at_delivery = Column(Float, nullable=True)
+    final_pregnancy_outcome = Column(String(100), nullable=True)
+    fetal_neonatal_provenance = Column(JSON, nullable=True)
 
     # Meeting link and case closure
     meeting_id = Column(String(100), nullable=True)

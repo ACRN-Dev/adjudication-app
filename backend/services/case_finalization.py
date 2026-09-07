@@ -59,6 +59,9 @@ def finalize_case_pdf(db: Session, participant, visit, determination) -> SignedC
         "signedAt": determination.signed_at.isoformat(),
         "signatureHash": determination.signature_hash,
         "fullText": determination.comment or determination.rationale or "",
+        "fetalNeonatalAssessments": getattr(determination, "fetal_neonatal_assessments", None) or getattr(visit, "final_fetal_assessments", None) or [],
+        "gestationalAgeAtDelivery": getattr(determination, "gestational_age_at_delivery", None),
+        "pregnancyOutcome": getattr(determination, "pregnancy_outcome", None),
     }
     pdf_bytes = generate_adjudication_pdf(case_data)
     digest = hashlib.sha256(pdf_bytes).hexdigest()

@@ -8,6 +8,15 @@ import { downloadPdfReport } from '../services/api';
 import { isReviewerVisitSigned, isVisitComplete, normalizeVisitEvidence } from '../services/visitEvidence';
 
 const DEFAULT_VISIT_CODES = ['V01', 'V02', 'V03', 'V04', 'V05', 'V06'];
+
+export const VISIT5_ASSESSMENT_OPTIONS = [
+  { code: 'PERINATAL_FETAL_DEATH', label: 'Perinatal / fetal death', adverse: true },
+  { code: 'DELIVERY_GE_37W', label: 'Delivery at or after 37 weeks', adverse: false },
+  { code: 'DELIVERY_LT_34W', label: 'Delivery before 34 weeks', adverse: true },
+  { code: 'IUGR', label: 'IUGR (Intrauterine Growth Restriction)', adverse: true },
+  { code: 'SGA', label: 'SGA (Small for Gestational Age)', adverse: true },
+  { code: 'NORMAL_OUTCOME', label: 'Normal fetal / neonatal outcome, where clinically approved', adverse: false, isNormal: true },
+];
 function visitNumberOf(visit, fallbackIndex = 0) {
   const raw = visit?.visit_number ?? visit?.visitNumber ?? visit?.number ?? visit?.visit;
   const numeric = Number(raw);
@@ -94,6 +103,12 @@ export default function AdjudicatorWorkbench({
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [pdfDownloadError, setPdfDownloadError] = useState('');
+  const [fetalNeonatalAssessments, setFetalNeonatalAssessments] = useState([]);
+  const [gestationalAgeAtDelivery, setGestationalAgeAtDelivery] = useState('');
+  const [pregnancyOutcome, setPregnancyOutcome] = useState('Normal baby');
+  const [fetalProvenance, setFetalProvenance] = useState({});
+  const [visit5MappingLoading, setVisit5MappingLoading] = useState(false);
+  const [visit5ValidationWarning, setVisit5ValidationWarning] = useState('');
   const isSigned = activeCase?.status?.includes('Finalized');
   const isReviewerC = activeCase?.reviewerRole === 'REVIEWER_C';
   const finalDiagnosis = selectedDiagnosis;
@@ -101,7 +116,7 @@ export default function AdjudicatorWorkbench({
   const evidenceVisits = normalizeVisitEvidence({ ...(activeCase || {}), visits: pages }).slice(0, 6);
   const selectedVisit = pages[selectedVisitIndex] || pages[0] || null;
   const selectedEvidenceVisit = evidenceVisits[Math.min(selectedVisitIndex, evidenceVisits.length - 1)] || null;
-  const isVisitFive = /V05|visit\s*5/i.test(selectedVisit?.name || selectedVisit?.visit_code || '');
+  const isVisitFive = /V05|visit\s*5/i.test(selectedVisit?.name || selectedVisit?.visit_code || '') || selectedVisit?.visit_number === 5;
   const firstUnsignedVisitIndex = pages.findIndex((visit) => !isReviewerVisitSigned(visit));
   const allReviewerVisitsSigned = pages.length > 0 && firstUnsignedVisitIndex === -1;
   const allVisitsFinalized = pages.length > 0 && pages.every(isVisitComplete);
@@ -116,6 +131,10 @@ export default function AdjudicatorWorkbench({
     selectedCertainty,
     narrativeText,
     diagnosisDateTime,
+    fetalNeonatalAssessments,
+    gestationalAgeAtDelivery,
+    pregnancyOutcome,
+    fetalProvenance,
   });
 
   const handleVisitSelect = (nextIndex) => {
@@ -134,6 +153,12 @@ export default function AdjudicatorWorkbench({
       setSelectedCertainty(saved.selectedCertainty);
       setNarrativeText(saved.narrativeText);
       setDiagnosisDateTime(saved.diagnosisDateTime);
+      if (saved.fetalNeonatalAssessments !== undefined) {
+        setFetalNeonatalAssessments(saved.fetalNeonatalAssessments);
+        setGestationalAgeAtDelivery(saved.gestationalAgeAtDelivery || '');
+        setPregnancyOutcome(saved.pregnancyOutcome || 'Normal baby');
+        setFetalProvenance(saved.fetalProvenance || {});
+      }
     } else if (nextIndex < pages.length) {
       setSelectedDiagnosis('PE');
       setMeetsCriteria(true);
@@ -144,15 +169,106 @@ export default function AdjudicatorWorkbench({
       setSelectedCertainty('Probable');
       setNarrativeText('');
       setDiagnosisDateTime(toDateTimeLocal(pages[nextIndex]?.visit_date || pages[nextIndex]?.date));
+      if (nextIndex + 1 === 5) {
+        setFetalNeonatalAssessments([]);
+        setGestationalAgeAtDelivery('');
+        setPregnancyOutcome('Normal baby');
+      }
     }
     setSelectedVisitIndex(nextIndex);
   };
+
+  const handleToggleAssessment = (code) => {
+    if (isSigned) return;
+    setFetalNeonatalAssessments(prev => {
+      const next = new Set(prev);
+      if (next.has(code)) {
+        next.delete(code);
+      } else {
+        if (code === 'NORMAL_OUTCOME') {
+          next.delete('PERINATAL_FETAL_DEATH');
+          next.delete('DELIVERY_LT_34W');
+          next.delete('IUGR');
+          next.delete('SGA');
+        } else if (['PERINATAL_FETAL_DEATH', 'DELIVERY_LT_34W', 'IUGR', 'SGA'].includes(code)) {
+          next.delete('NORMAL_OUTCOME');
+        }
+        if (code === 'DELIVERY_GE_37W') {
+          next.delete('DELIVERY_LT_34W');
+        } else if (code === 'DELIVERY_LT_34W') {
+          next.delete('DELIVERY_GE_37W');
+        }
+        next.add(code);
+      }
+      return Array.from(next);
+    });
+  };
+
+  useEffect(() => {
+    if (!activeCase?.id || !isVisitFive) return;
+    let isCancelled = false;
+    setVisit5MappingLoading(true);
+    fetch(`/api/adjudication/${encodeURIComponent(activeCase.id)}/visit-5-mapping`, {
+      credentials: 'include',
+    })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (isCancelled || !data) return;
+        setFetalProvenance(data.assessments || {});
+        setFetalNeonatalAssessments(prev => (prev.length > 0 ? prev : (data.suggested_assessments || [])));
+        setGestationalAgeAtDelivery(prev => (prev !== '' ? prev : (data.gestational_age_at_delivery != null ? String(data.gestational_age_at_delivery) : '')));
+        setPregnancyOutcome(prev => (prev !== '' ? prev : (data.pregnancy_outcome || 'Normal baby')));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!isCancelled) setVisit5MappingLoading(false);
+      });
+    return () => { isCancelled = true; };
+  }, [activeCase?.id, isVisitFive]);
+
+  useEffect(() => {
+    if (!isVisitFive) {
+      setVisit5ValidationWarning('');
+      return;
+    }
+    const selected = new Set(fetalNeonatalAssessments);
+    if (selected.has('NORMAL_OUTCOME')) {
+      const adversePresent = ['PERINATAL_FETAL_DEATH', 'DELIVERY_LT_34W', 'IUGR', 'SGA'].filter(c => selected.has(c));
+      if (adversePresent.length > 0) {
+        setVisit5ValidationWarning(
+          `Normal fetal / neonatal outcome cannot coexist with adverse outcome(s): ${adversePresent.join(', ')}.`
+        );
+        return;
+      }
+    }
+    if (selected.has('DELIVERY_GE_37W') && selected.has('DELIVERY_LT_34W')) {
+      setVisit5ValidationWarning(
+        "A delivery cannot be both 'Delivery at or after 37 weeks' and 'Delivery before 34 weeks'."
+      );
+      return;
+    }
+    const gaNum = parseFloat(gestationalAgeAtDelivery);
+    if (!Number.isNaN(gaNum)) {
+      if (selected.has('DELIVERY_GE_37W') && gaNum < 37.0) {
+        setVisit5ValidationWarning(`Gestational age (${gaNum} weeks) contradicts 'Delivery at or after 37 weeks'.`);
+        return;
+      }
+      if (selected.has('DELIVERY_LT_34W') && gaNum >= 34.0) {
+        setVisit5ValidationWarning(`Gestational age (${gaNum} weeks) contradicts 'Delivery before 34 weeks'.`);
+        return;
+      }
+    }
+    if (selected.has('PERINATAL_FETAL_DEATH') && pregnancyOutcome.toLowerCase() === 'normal baby') {
+      setVisit5ValidationWarning("Perinatal / fetal death cannot be selected when pregnancy outcome is 'Normal baby'.");
+      return;
+    }
+    setVisit5ValidationWarning('');
+  }, [isVisitFive, fetalNeonatalAssessments, gestationalAgeAtDelivery, pregnancyOutcome]);
 
   const getVisitLabel = (bp, index) => {
     if (bp.visitName) return bp.visitName;
     if (bp.visit) return `Visit ${bp.visit}`;
     const gaNum = parseFloat(bp.ga || '0');
-    if (gaNum > 0 && gaNum < 16) return 'Visit 1 (11–14w Booking)';
     if (gaNum >= 16 && gaNum < 24) return 'Visit 2 (18–22w Anatomy)';
     if (gaNum >= 24 && gaNum < 30) return 'Visit 3 (26–28w Routine)';
     if (gaNum >= 30 && gaNum < 36) return 'Visit 4 (32–34w Escalation)';
@@ -911,8 +1027,210 @@ export default function AdjudicatorWorkbench({
             />
           )}
           <small>Include the supporting findings and dates, clinical reasoning, alternatives considered, and any missing or conflicting evidence.</small>
-          {isVisitFive && <div style={{ marginTop: 6, color: '#475569', fontSize: 11 }}><strong>Visit 5 narrative:</strong> open-ended clinical narrative is required; diagnosis selection remains restricted to the standard outcomes.</div>}
+          {isVisitFive && <div style={{ marginTop: 6, color: '#0369a1', fontSize: 11 }}><strong>Visit 5 note:</strong> Document delivery details and infant clinical condition in the clinical narrative. Closed-ended assessment fields below record final trial endpoints.</div>}
         </div></DropdownSection>}
+
+        {/* Visit 5 Fetal and Neonatal Closed-Ended Assessments Panel */}
+        {selectedVisitIndex < pages.length && isVisitFive && (
+          <DropdownSection title="Visit 5 Fetal &amp; Neonatal Closed-Ended Endpoint Assessments" icon={<Activity size={16} />} defaultOpen>
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{
+                background: '#f8fafc',
+                border: '1px solid #cbd5e1',
+                borderRadius: '6px',
+                padding: '12px 14px',
+                marginBottom: '14px',
+                fontSize: '12px',
+                color: '#334155',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '8px'
+              }}>
+                <div>
+                  <strong>Mandatory Closed-Ended Endpoint Assessments:</strong> Map study team collected source evidence to the closed-ended fetal and neonatal outcome fields. Selections are audited with source-data provenance.
+                </div>
+                {visit5MappingLoading && (
+                  <span style={{ fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <RefreshCw size={12} className="spin" /> Syncing source mapping...
+                  </span>
+                )}
+              </div>
+
+              {/* Supporting Fields Grid */}
+              <div className="summary-card-grid" style={{ marginBottom: '16px' }}>
+                <div className="form-group">
+                  <label style={{ fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Gestational Age at Delivery (weeks)</span>
+                    {fetalProvenance?.GA_AT_DELIVERY && (
+                      <span style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: 600 }}>
+                        CRF: {fetalProvenance.GA_AT_DELIVERY.raw_value || 'Documented'}
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="15"
+                    max="45"
+                    className="form-input"
+                    placeholder="e.g. 38.2"
+                    value={gestationalAgeAtDelivery}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setGestationalAgeAtDelivery(val);
+                      const n = parseFloat(val);
+                      if (!Number.isNaN(n)) {
+                        if (n >= 37.0) {
+                          setFetalNeonatalAssessments(prev => Array.from(new Set([...prev.filter(c => c !== 'DELIVERY_LT_34W'), 'DELIVERY_GE_37W'])));
+                        } else if (n < 34.0) {
+                          setFetalNeonatalAssessments(prev => Array.from(new Set([...prev.filter(c => c !== 'DELIVERY_GE_37W' && c !== 'NORMAL_OUTCOME'), 'DELIVERY_LT_34W'])));
+                        }
+                      }
+                    }}
+                    disabled={isSigned}
+                  />
+                  <small>Numeric gestational age in weeks. Delivery outcome precedence applied.</small>
+                </div>
+
+                <div className="form-group">
+                  <label style={{ fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Pregnancy Outcome</span>
+                    {fetalProvenance?.PREGNANCY_OUTCOME && (
+                      <span style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: 600 }}>
+                        CRF: {fetalProvenance.PREGNANCY_OUTCOME.raw_value || 'Documented'}
+                      </span>
+                    )}
+                  </label>
+                  <select
+                    className="form-select"
+                    value={pregnancyOutcome}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setPregnancyOutcome(val);
+                      if (val.toLowerCase() === 'stillbirth' || val.toLowerCase().includes('death')) {
+                        setFetalNeonatalAssessments(prev => Array.from(new Set([...prev.filter(c => c !== 'NORMAL_OUTCOME'), 'PERINATAL_FETAL_DEATH'])));
+                      }
+                    }}
+                    disabled={isSigned}
+                  >
+                    <option value="Normal baby">Normal baby</option>
+                    <option value="Preterm birth">Preterm birth</option>
+                    <option value="Stillbirth">Stillbirth (Intrauterine / Fetal Death)</option>
+                    <option value="Early neonatal death">Early neonatal death</option>
+                    <option value="Ongoing pregnancy">Ongoing pregnancy</option>
+                    <option value="Other">Other</option>
+                  </select>
+                  <small>Applies delivery-outcome precedence (Death &gt; Preterm &gt; Normal baby).</small>
+                </div>
+              </div>
+
+              {/* 6 Target Assessment Checkbox Cards */}
+              <label style={{ fontWeight: 700, display: 'block', marginBottom: '8px' }}>
+                Closed-Ended Fetal and Neonatal Assessments (Select all that apply)
+              </label>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                gap: '10px',
+                marginBottom: '12px'
+              }}>
+                {VISIT5_ASSESSMENT_OPTIONS.map((opt) => {
+                  const isChecked = fetalNeonatalAssessments.includes(opt.code);
+                  const prov = fetalProvenance[opt.code];
+                  const provState = prov?.state;
+
+                  return (
+                    <div
+                      key={opt.code}
+                      onClick={() => handleToggleAssessment(opt.code)}
+                      style={{
+                        border: isChecked ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                        background: isChecked ? '#f0f9ff' : '#ffffff',
+                        borderRadius: '6px',
+                        padding: '12px',
+                        cursor: isSigned ? 'default' : 'pointer',
+                        transition: 'all 0.15s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: '6px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleToggleAssessment(opt.code)}
+                          disabled={isSigned}
+                          style={{ marginTop: '3px', cursor: 'pointer' }}
+                        />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: isChecked ? 700 : 600, fontSize: '13px', color: isChecked ? '#0369a1' : '#1e293b' }}>
+                            {opt.label}
+                          </div>
+                          {opt.adverse && (
+                            <span style={{ fontSize: '10.5px', color: '#b91c1c', fontWeight: 600 }}>
+                              Adverse endpoint
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Source Provenance Info */}
+                      {prov && (
+                        <div style={{
+                          marginTop: '4px',
+                          padding: '4px 8px',
+                          background: provState === 'CONFIRMED_POSITIVE' ? '#dcfce7' : provState === 'CONFIRMED_NEGATIVE' ? '#f1f5f9' : '#fef3c7',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          color: provState === 'CONFIRMED_POSITIVE' ? '#166534' : provState === 'CONFIRMED_NEGATIVE' ? '#475569' : '#92400e',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <span>
+                            {provState === 'CONFIRMED_POSITIVE' && '✓ Source Confirmed'}
+                            {provState === 'CONFIRMED_NEGATIVE' && '— Source Confirmed Negative'}
+                            {provState === 'NOT_ASSESSED_OR_MISSING' && '⚠ Not Assessed / Missing in CRF'}
+                          </span>
+                          {prov.provenance?.field && (
+                            <span style={{ fontSize: '10px', opacity: 0.85 }}>
+                              {prov.provenance.form ? `${prov.provenance.form} / ` : ''}{prov.provenance.field}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Validation Warning Alert */}
+              {visit5ValidationWarning && (
+                <div role="alert" style={{
+                  background: '#fef2f2',
+                  border: '1px solid #f87171',
+                  borderRadius: '6px',
+                  padding: '10px 14px',
+                  color: '#991b1b',
+                  fontSize: '12.5px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginTop: '10px'
+                }}>
+                  <AlertTriangle size={18} color="#dc2626" />
+                  <div>
+                    <strong>Validation Rule Violation:</strong> {visit5ValidationWarning}
+                  </div>
+                </div>
+              )}
+            </div>
+          </DropdownSection>
+        )}
 
         {/* Diagnosis Selection */}
         {selectedVisitIndex<pages.length && <DropdownSection title="Final Adjudication Controls" icon={<ShieldCheck size={16} />} defaultOpen><div className="summary-card-grid" style={{ marginBottom: '16px' }}>
@@ -1081,8 +1399,13 @@ export default function AdjudicatorWorkbench({
               visitCode: selectedVisit?.visit_code || selectedVisit?.name,
               visitDate: selectedVisit?.visit_date || selectedVisit?.date,
               dateOfDiagnosis: diagnosisDateTime ? new Date(diagnosisDateTime).toISOString() : (selectedVisit?.visit_date || selectedVisit?.date || new Date().toISOString()),
+              fetalNeonatalAssessments: isVisitFive ? fetalNeonatalAssessments : [],
+              gestationalAgeAtDelivery: isVisitFive && gestationalAgeAtDelivery !== '' ? Number(gestationalAgeAtDelivery) : null,
+              pregnancyOutcome: isVisitFive ? pregnancyOutcome : null,
+              fetalNeonatalProvenance: isVisitFive ? fetalProvenance : null,
+              fetalAssessmentStatus: isVisitFive ? 'CONFIRMED' : null,
             });
-          }} disabled={(selectedDiagnosis === 'Other' && !otherDiagnosis.trim()) || !diagnosisDateTime}>
+          }} disabled={(selectedDiagnosis === 'Other' && !otherDiagnosis.trim()) || !diagnosisDateTime || (isVisitFive && !!visit5ValidationWarning)}>
             <ShieldCheck size={16} /> Sign &amp; Lock Adjudication Record
           </button>}
 

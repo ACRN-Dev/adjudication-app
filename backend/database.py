@@ -68,6 +68,50 @@ def _create_engine_with_fallback():
         return eng, True
 
 engine, DB_OFFLINE = _create_engine_with_fallback()
+
+
+def _migrate_sqlite_schema(eng):
+    """Ensure newly added columns exist in existing SQLite databases."""
+    try:
+        with eng.connect() as conn:
+            # Check adjudication_visits
+            res = conn.execute(text("PRAGMA table_info(adjudication_visits)"))
+            cols = {row[1] for row in res.fetchall()}
+            if cols and "final_fetal_assessments" not in cols:
+                conn.execute(text("ALTER TABLE adjudication_visits ADD COLUMN final_fetal_assessments JSON"))
+
+            # Check adjudication_records
+            res = conn.execute(text("PRAGMA table_info(adjudication_records)"))
+            cols = {row[1] for row in res.fetchall()}
+            if cols:
+                for col_name, col_type in (
+                    ("fetal_neonatal_assessments", "JSON"),
+                    ("gestational_age_at_delivery", "FLOAT"),
+                    ("pregnancy_outcome", "VARCHAR(100)"),
+                    ("fetal_assessment_status", "VARCHAR(50)"),
+                    ("fetal_neonatal_provenance", "JSON"),
+                ):
+                    if col_name not in cols:
+                        conn.execute(text(f"ALTER TABLE adjudication_records ADD COLUMN {col_name} {col_type}"))
+
+            # Check committee_decisions
+            res = conn.execute(text("PRAGMA table_info(committee_decisions)"))
+            cols = {row[1] for row in res.fetchall()}
+            if cols:
+                for col_name, col_type in (
+                    ("final_fetal_assessments", "JSON"),
+                    ("final_ga_at_delivery", "FLOAT"),
+                    ("final_pregnancy_outcome", "VARCHAR(100)"),
+                    ("fetal_neonatal_provenance", "JSON"),
+                ):
+                    if col_name not in cols:
+                        conn.execute(text(f"ALTER TABLE committee_decisions ADD COLUMN {col_name} {col_type}"))
+            conn.commit()
+    except Exception as exc:
+        logger.debug(f"Schema migration note: {exc}")
+
+
+_migrate_sqlite_schema(engine)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

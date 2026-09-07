@@ -87,5 +87,5 @@ def test_other_is_reviewer_c_only_and_requires_rationale_at_database_boundary():
 
 def test_standard_outcome_list_is_closed():
     assert {item.value for item in DiagnosisCode} == {
-        "PE", "Severe PE", "Eclampsia", "HELLP", "Other"
+        "PE", "Not PE", "Severe PE", "Eclampsia", "HELLP", "Other"
     }

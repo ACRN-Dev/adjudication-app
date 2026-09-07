@@ -1,15 +1,15 @@
 """Streaming, chunk-committed RealTime batch pipeline."""
-import base64, csv, hashlib, hmac, os, re
+import base64, csv, hashlib, hmac, os, re, uuid
 from collections import defaultdict
 from datetime import datetime
 from cryptography.fernet import Fernet
 from database import SessionLocal
-from models.longitudinal import RTImportBatch,LongitudinalParticipant,RestrictedIdentityCrosswalk,VisitInstance,CanonicalObservation,ImportIssue,LongitudinalAuditEvent
+from models.history import PatientHistory, PatientHistoryField, PatientRiskSummary
+from models.longitudinal import RTImportBatch,LongitudinalParticipant,RestrictedIdentityCrosswalk,VisitInstance,CanonicalObservation,ImportIssue,LongitudinalAuditEvent,LongitudinalCaseDerivation
 from services.realtime_mapping import classify,map_variable,source_value,parse_datetime,parse_numeric,parse_coded,visit_code,MAPPING_VERSION
 from services.longitudinal_derivation import derive_participant
 from services.history_parser import is_history_form, process_history_row, finalize_history
-from services.edc_mapping import is_edc_schema, normalize_edc_rows
-
+from services.edc_mapping import is_edc_schema, is_clinical_one_schema, normalize_edc_rows, normalize_clinical_one_rows
 REQUIRED_HEADERS={"MRN","Screening #","Randomization #","Form Title","Form Version","Page Title","Field type","Field Label","Data Input","Data Value","Audit Trails","Export Variable Name"}
 PSEUDO_SECRET=os.getenv("RT_PSEUDONYM_SECRET","acrn-demo-only-change-in-production").encode()
 FERNET_KEY=os.getenv("RT_IDENTITY_ENCRYPTION_KEY")
@@ -28,7 +28,12 @@ def audit(db,actor,role,action,etype,eid,details=None,outcome="SUCCESS"):
     stamp=datetime.utcnow().isoformat(); safe=details or {}; digest=hashlib.sha256(f"{stamp}|{actor}|{action}|{eid}".encode()).hexdigest()
     db.add(LongitudinalAuditEvent(actor=actor,actor_role=role,action=action,entity_type=etype,entity_id=str(eid),safe_details=safe,record_hash=digest))
 
-def process_batch(batch_id):
+def process_batch(batch_id, reset=False):
+    if isinstance(batch_id, str):
+        try:
+            batch_id = uuid.UUID(batch_id)
+        except Exception:
+            pass
     db=SessionLocal(); batch=db.get(RTImportBatch,batch_id)
     if not batch:
         db.close()
@@ -36,6 +41,23 @@ def process_batch(batch_id):
     try:
         if batch.status in {"MONITOR_QC_REQUIRED","PUBLISHED","SUPERSEDED"}:
             return
+        if reset or batch.status == "FAILED":
+            db.query(CanonicalObservation).filter_by(source_batch_id=batch.id).delete()
+            db.query(VisitInstance).filter_by(source_batch_id=batch.id).delete()
+            db.query(PatientHistoryField).filter_by(source_batch_id=batch.id).delete()
+            p_ids = [p[0] for p in db.query(LongitudinalParticipant.id).filter_by(source_batch_id=batch.id).all()]
+            if p_ids:
+                db.query(RestrictedIdentityCrosswalk).filter(RestrictedIdentityCrosswalk.participant_id.in_(p_ids)).delete(synchronize_session=False)
+                db.query(PatientRiskSummary).filter(PatientRiskSummary.participant_id.in_(p_ids)).delete(synchronize_session=False)
+                db.query(PatientHistory).filter(PatientHistory.participant_id.in_(p_ids)).delete(synchronize_session=False)
+                db.query(LongitudinalCaseDerivation).filter(LongitudinalCaseDerivation.participant_id.in_(p_ids)).delete(synchronize_session=False)
+                db.query(LongitudinalParticipant).filter(LongitudinalParticipant.id.in_(p_ids)).delete(synchronize_session=False)
+            batch.rows_processed = 0
+            batch.prohibited_count = 0
+            batch.warning_count = 0
+            batch.error_count = 0
+            batch.error_summary = None
+            db.commit()
         batch.status="STRUCTURE_VALIDATION"; batch.processing_started_at=datetime.utcnow(); db.commit()
         with open(batch.source_path,encoding="utf-8-sig",errors="replace",newline="") as f:
             pos=0
@@ -46,7 +68,11 @@ def process_batch(batch_id):
                 try:
                     row=next(csv.reader([line]))
                     cleaned={x.strip().strip('"\'') for x in row if x}
-                    if {"MRN","Screening #"}.issubset(cleaned) or ({"MRN"}.issubset(cleaned) and {"Form Title"}.issubset(cleaned)):
+                    is_rt_hdr = {"MRN","Screening #"}.issubset(cleaned) or ({"MRN"}.issubset(cleaned) and {"Form Title"}.issubset(cleaned))
+                    is_c1_hdr = ({"Subject ID", "Screening Number"}.issubset(cleaned) or
+                                 {"Subject Number", "Visit/Event Title"}.issubset(cleaned) or
+                                 ({"Question Label", "Value"}.issubset(cleaned) and {"Form Title"}.issubset(cleaned)))
+                    if is_rt_hdr or is_c1_hdr:
                         header_pos=pos
                         found=True
                         break
@@ -57,14 +83,19 @@ def process_batch(batch_id):
             f.seek(header_pos if found else 0)
             reader=csv.DictReader(f)
             fieldnames_clean={x.strip() for x in (reader.fieldnames or [])}
+            is_c1 = is_clinical_one_schema(reader.fieldnames)
             edc_schema = is_edc_schema(reader.fieldnames)
             missing={"MRN","Screening #","Form Title","Field Label"}-fieldnames_clean
-            if missing and not edc_schema and not ({"MRN","Form Title"}.issubset(fieldnames_clean)):
+            if missing and not edc_schema and not is_c1 and not ({"MRN","Form Title"}.issubset(fieldnames_clean)):
                 raise ValueError(f"Missing required headers: {sorted(missing)}")
-            if edc_schema:
+            if is_c1:
+                reader = normalize_clinical_one_rows(reader)
+                batch.source_system="EDC_CLINICAL_ONE"; batch.mapping_version="CLINICAL-ONE-1.0"
+            elif edc_schema:
                 reader = normalize_edc_rows(reader)
                 batch.source_system="EDC"; batch.mapping_version="EDC-MAP-1.0"
-            batch.validation_result={"passed":True,"schema":"EDC_WIDE" if edc_schema else "REALTIME_LONG","headers":len(fieldnames_clean)}; batch.status="ROWS_STAGED"; db.commit()
+            schema_name = "EDC_CLINICAL_ONE" if is_c1 else ("EDC_WIDE" if edc_schema else "REALTIME_LONG")
+            batch.validation_result={"passed":True,"schema":schema_name,"headers":len(fieldnames_clean)}; batch.status="ROWS_STAGED"; db.commit()
             resume_at=batch.rows_processed or 0
             existing_participants=db.query(LongitudinalParticipant).filter_by(source_batch_id=batch.id).all()
             participants={p.blinded_subject_id:p for p in existing_participants}
@@ -72,6 +103,8 @@ def process_batch(batch_id):
             visits={(str(v.participant_id),v.form_title,v.visit_occurrence):v for v in existing_visits}
             form_occurrence=defaultdict(int); last_form={}; prohibited_labels=set()
             seen_fingerprints={x[0] for x in db.query(CanonicalObservation.source_fingerprint).filter_by(source_batch_id=batch.id).all()}
+            history_fields={(f.participant_id, f.domain, f.field_key, f.instance_index): f for f in db.query(PatientHistoryField).filter_by(source_batch_id=batch.id).all()}
+            patient_histories={(ph.participant_id, ph.source_form): ph for ph in db.query(PatientHistory).filter_by(source_file=batch.filename).all()}
             total_rows=resume_at
             for row_no,row in enumerate(reader,2):
                 total_rows=row_no-1
@@ -97,7 +130,7 @@ def process_batch(batch_id):
                     visit.qc_status="EXCLUDED_MISSING_KEY_FIELDS"
                 if category=="PROHIBITED_BLINDED": batch.prohibited_count+=1; prohibited_labels.add(hashlib.sha256((row.get("Field Label") or "").encode()).hexdigest()[:12]); continue
                 canonical=map_variable(row)
-                if is_history_form(form): process_history_row(db, batch, p, row, row_no)
+                if is_history_form(form): process_history_row(db, batch, p, row, row_no, history_fields=history_fields, patient_histories=patient_histories)
                 if not canonical: continue
                 value=source_value(row); fp=hashlib.sha256(f"{key}|{form}|{occ}|{canonical}|{value}|{row.get('Page Title')}|{row.get('Field Label')}".encode()).hexdigest()
                 if fp in seen_fingerprints: continue

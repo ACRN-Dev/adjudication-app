@@ -167,6 +167,22 @@ def cancel(batch_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends(get_db
     b=db.get(RTImportBatch,batch_id)
     if not b or b.status in {"PUBLISHED","SUPERSEDED"}: raise HTTPException(409,"Batch cannot be cancelled")
     b.cancel_requested=True; audit(db,i[0],i[1],"IMPORT_CANCEL_REQUESTED","IMPORT_BATCH",b.id); db.commit(); return {"status":"CANCEL_REQUESTED"}
+@router.post("/batches/{batch_id}/reprocess")
+@router.post("/batches/{batch_id}/retry")
+def reprocess_batch_endpoint(batch_id:uuid.UUID,background:BackgroundTasks,i=Depends(authenticated),db:Session=Depends(get_db)):
+    b=db.get(RTImportBatch,batch_id)
+    if not b: raise HTTPException(404,"Batch not found")
+    if b.status in {"PUBLISHED","SUPERSEDED"}: raise HTTPException(409,"Published or superseded batch cannot be reprocessed")
+    if not b.source_path or not os.path.exists(b.source_path):
+        raise HTTPException(400,"Source file no longer available on staging")
+    b.status="CHECKSUM_CALCULATED"
+    b.error_count=0
+    b.error_summary=None
+    b.cancel_requested=False
+    audit(db,i[0],i[1],"BATCH_REPROCESS_REQUESTED","IMPORT_BATCH",b.id)
+    db.commit()
+    background.add_task(process_batch,b.id,True)
+    return {"status":"QUEUED","batch":bjson(b)}
 def pjson(p):
     assignments = []
     try:

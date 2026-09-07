@@ -12,11 +12,14 @@ __pycache__/
 # Local databases and generated runtime data
 *.db
 backend/.rt-staging/
+backend/.etmf_local/
+dist/
 
 # OS/editor noise
 .DS_Store
 Thumbs.db
 .idea/
+.vscode/
 
 # Superpowers scratch workspace (plan ledgers, briefs, review packages)
 .superpowers/

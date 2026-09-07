@@ -31,6 +31,7 @@ from models.longitudinal import LongitudinalParticipant, ReviewerAssignment
 from services.auth_service import verify_password
 from services.case_finalization import finalize_case_pdf, record_determination_activity
 from services.adjudication_resolution import apply_visit_resolution
+from services.visit5_service import validate_visit5_submission, map_source_to_visit5_assessments, compare_visit5_concordance
 
 router = APIRouter()
 
@@ -91,6 +92,13 @@ class ReviewerSubmission(BaseModel):
     visit_code: Optional[str] = None
     visit_date: Optional[datetime] = None
     measurement_dates: List[dict] = Field(default_factory=list)
+
+    # Visit 5 Fetal and Neonatal Assessments
+    fetal_neonatal_assessments: Optional[List[str]] = Field(default_factory=list)
+    gestational_age_at_delivery: Optional[float] = None
+    pregnancy_outcome: Optional[str] = None
+    fetal_assessment_status: Optional[str] = None
+    fetal_neonatal_provenance: Optional[dict] = None
 
 
 @router.post("/{subject_id}/submit")
@@ -406,6 +414,15 @@ def submit_adjudication(
             ),
         )
 
+    if sub.visit_number == 5 and sub.fetal_neonatal_assessments:
+        is_valid, err_msg = validate_visit5_submission(
+            sub.fetal_neonatal_assessments,
+            sub.gestational_age_at_delivery,
+            sub.pregnancy_outcome,
+        )
+        if not is_valid:
+            raise HTTPException(status_code=422, detail=err_msg)
+
     # ── 6. Generate e-signature hash (SHA-256, 21 CFR Part 11) ───────────────
     # Bound to reviewer_user.id (immutable, unique per person) rather than just the
     # UPN string, so the credential used to sign can never be attributed to anyone else.
@@ -444,6 +461,14 @@ def submit_adjudication(
     rec.first_pe_visit_number = sub.first_pe_visit_number
     rec.first_pe_date = sub.first_pe_date
     rec.other_rationale = sub.other_rationale.strip() if sub.other_rationale else None
+
+    # Visit 5 Fetal and Neonatal Outcomes
+    rec.fetal_neonatal_assessments = sub.fetal_neonatal_assessments
+    rec.gestational_age_at_delivery = sub.gestational_age_at_delivery
+    rec.pregnancy_outcome = sub.pregnancy_outcome
+    rec.fetal_assessment_status = sub.fetal_assessment_status or ("CONFIRMED" if sub.fetal_neonatal_assessments else None)
+    rec.fetal_neonatal_provenance = sub.fetal_neonatal_provenance
+
     rec.signed = True
     rec.signed_at = datetime.utcnow()
     rec.signature_hash = sig_hash
@@ -492,13 +517,27 @@ def submit_adjudication(
         criteria_b = rev_b.meets_criteria
         criteria_c = rev_c.meets_criteria
 
-        # C agrees with A
-        c_agrees_a = (diag_c == diag_a and onset_c == onset_a and criteria_c == criteria_a)
-        # C agrees with B
-        c_agrees_b = (diag_c == diag_b and onset_c == onset_b and criteria_c == criteria_b)
+        if sub.visit_number == 5:
+            c_matches_a_v5 = compare_visit5_concordance(
+                rev_c.fetal_neonatal_assessments,
+                rev_a.fetal_neonatal_assessments,
+                rev_c.gestational_age_at_delivery,
+                rev_a.gestational_age_at_delivery
+            )
+            c_matches_b_v5 = compare_visit5_concordance(
+                rev_c.fetal_neonatal_assessments,
+                rev_b.fetal_neonatal_assessments,
+                rev_c.gestational_age_at_delivery,
+                rev_b.gestational_age_at_delivery
+            )
+            c_agrees_a = (diag_c == diag_a and onset_c == onset_a and criteria_c == criteria_a and c_matches_a_v5)
+            c_agrees_b = (diag_c == diag_b and onset_c == onset_b and criteria_c == criteria_b and c_matches_b_v5)
+        else:
+            c_agrees_a = (diag_c == diag_a and onset_c == onset_a and criteria_c == criteria_a)
+            c_agrees_b = (diag_c == diag_b and onset_c == onset_b and criteria_c == criteria_b)
+
         # All three agree
-        all_agree = (diag_a == diag_b == diag_c and onset_a == onset_b == onset_c
-                     and criteria_a == criteria_b == criteria_c)
+        all_agree = (c_agrees_a and c_agrees_b)
 
         if all_agree:
             participant.status = AdjudicationStatus.CONCORDANT
@@ -527,11 +566,24 @@ def submit_adjudication(
 
     elif rev_a and rev_b:
         # ── Two-reviewer A/B check (C not yet submitted) ──────────────────────
-        is_concordant = (
-            rev_a.diagnosis == rev_b.diagnosis and
-            rev_a.onset_class == rev_b.onset_class and
-            rev_a.meets_criteria == rev_b.meets_criteria
-        )
+        if sub.visit_number == 5:
+            is_concordant = (
+                rev_a.diagnosis == rev_b.diagnosis and
+                rev_a.onset_class == rev_b.onset_class and
+                rev_a.meets_criteria == rev_b.meets_criteria and
+                compare_visit5_concordance(
+                    rev_a.fetal_neonatal_assessments,
+                    rev_b.fetal_neonatal_assessments,
+                    rev_a.gestational_age_at_delivery,
+                    rev_b.gestational_age_at_delivery
+                )
+            )
+        else:
+            is_concordant = (
+                rev_a.diagnosis == rev_b.diagnosis and
+                rev_a.onset_class == rev_b.onset_class and
+                rev_a.meets_criteria == rev_b.meets_criteria
+            )
         if is_concordant:
             participant.status = AdjudicationStatus.CONCORDANT
         else:
@@ -658,6 +710,11 @@ def get_adjudication_status(
                 "first_pe_visit_number": r.first_pe_visit_number,
                 "first_pe_date": r.first_pe_date.isoformat() if r.first_pe_date else None,
                 "other_rationale": r.other_rationale,
+                "fetal_neonatal_assessments": r.fetal_neonatal_assessments,
+                "gestational_age_at_delivery": r.gestational_age_at_delivery,
+                "pregnancy_outcome": r.pregnancy_outcome,
+                "fetal_assessment_status": r.fetal_assessment_status,
+                "fetal_neonatal_provenance": r.fetal_neonatal_provenance,
                 "signed_at": r.signed_at.isoformat() if r.signed_at else None,
                 "signature_hash": r.signature_hash,
             })
@@ -676,6 +733,7 @@ def get_adjudication_status(
                 "visit_date": v.visit_date.isoformat() if v.visit_date else None,
                 "status": v.status,
                 "resolution_type": v.resolution_type,
+                "final_fetal_assessments": v.final_fetal_assessments,
                 "filing_status": v.filing_status,
                 "filing_error": v.filing_error,
                 "measurement_dates": [
@@ -697,3 +755,37 @@ def get_adjudication_status(
             for v in participant.visits
         ],
     }
+
+
+@router.get("/{subject_id}/visit-5-mapping")
+def get_visit_5_mapping(
+    subject_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Returns pre-mapped Visit 5 closed-ended fetal/neonatal assessments and supporting
+    delivery fields derived from study team source records, with provenance and suggestions.
+    """
+    p = db.query(Participant).filter(
+        (Participant.case_number == subject_id) | (Participant.subject_id == subject_id)
+    ).first()
+    lp = db.query(LongitudinalParticipant).filter_by(blinded_subject_id=subject_id).first()
+    if not lp and p:
+        lp = db.query(LongitudinalParticipant).filter(
+            (LongitudinalParticipant.blinded_subject_id == p.case_number) |
+            (LongitudinalParticipant.subject_id == p.subject_id)
+        ).first()
+
+    observations = []
+    if lp:
+        ordered_visits = sorted(lp.visits, key=lambda x: (x.visit_datetime is None, x.visit_datetime or datetime.max, x.visit_sequence))
+        v5 = None
+        for idx, v in enumerate(ordered_visits, start=1):
+            if idx == 5 or v.scheduled_visit_code in ("V05", "VISIT 5") or (v.form_title and "visit 5" in v.form_title.lower()):
+                v5 = v
+                break
+        if v5:
+            observations = [o for o in v5.observations if not o.prohibited_flag]
+
+    return map_source_to_visit5_assessments(observations)
+

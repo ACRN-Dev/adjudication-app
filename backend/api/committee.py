@@ -10,6 +10,8 @@ from typing import Optional, List, Any
 from datetime import datetime
 import hashlib
 from services.case_finalization import finalize_case_pdf, record_determination_activity
+from services.visit5_service import validate_visit5_submission, compare_visit5_concordance
+from services.adjudication_resolution import apply_visit_resolution
 
 from database import get_db
 from models.canonical import (
@@ -32,6 +34,11 @@ class ReviewerCSubmissionRequest(BaseModel):
     comment: Optional[str] = None
     other_rationale: Optional[str] = None
     visit_number: int = 1
+    # Visit 5 Fetal and Neonatal Assessments
+    fetal_neonatal_assessments: Optional[List[str]] = Field(default_factory=list)
+    gestational_age_at_delivery: Optional[float] = None
+    pregnancy_outcome: Optional[str] = None
+    fetal_neonatal_provenance: Optional[dict] = None
 
 
 class CommitteeLockRequest(BaseModel):
@@ -47,6 +54,11 @@ class CommitteeLockRequest(BaseModel):
     quorum_met: bool = True
     members_present: int = 3
     visit_number: int = 1
+    # Visit 5 Fetal and Neonatal Final Decision
+    final_fetal_assessments: Optional[List[str]] = Field(default_factory=list)
+    final_ga_at_delivery: Optional[float] = None
+    final_pregnancy_outcome: Optional[str] = None
+    fetal_neonatal_provenance: Optional[dict] = None
 
 
 @router.get("/discordant-cases")
@@ -106,7 +118,29 @@ def submit_reviewer_c(subject_id: str, req: ReviewerCSubmissionRequest, db: Sess
     rec_b = next((r for r in records if r.reviewer_role == ReviewerRole.REVIEWER_B), None)
     if not rec_a or not rec_b or not rec_a.signed or not rec_b.signed:
         raise HTTPException(status_code=409, detail="Reviewer C is available only after both A and B have signed this visit.")
-    if rec_a.diagnosis == rec_b.diagnosis:
+
+    if req.visit_number == 5:
+        is_valid, err_msg = validate_visit5_submission(
+            req.fetal_neonatal_assessments or [],
+            req.gestational_age_at_delivery,
+            req.pregnancy_outcome,
+        )
+        if not is_valid:
+            raise HTTPException(status_code=422, detail=err_msg)
+
+        a_b_agree = (
+            rec_a.diagnosis == rec_b.diagnosis and
+            compare_visit5_concordance(
+                rec_a.fetal_neonatal_assessments,
+                rec_b.fetal_neonatal_assessments,
+                rec_a.gestational_age_at_delivery,
+                rec_b.gestational_age_at_delivery,
+            )
+        )
+    else:
+        a_b_agree = rec_a.diagnosis == rec_b.diagnosis
+
+    if a_b_agree:
         raise HTTPException(status_code=409, detail="Reviewer A and B agree; Reviewer C escalation is not permitted.")
     if req.diagnosis == DiagnosisCode.OTHER and (not req.other_rationale or not req.other_rationale.strip()):
         raise HTTPException(status_code=422, detail="other_rationale is mandatory when Reviewer C selects Other.")
@@ -140,8 +174,22 @@ def submit_reviewer_c(subject_id: str, req: ReviewerCSubmissionRequest, db: Sess
     # Check concordance with A and B
     diag_a = rec_a.diagnosis if rec_a else None
     diag_b = rec_b.diagnosis if rec_b else None
-    matches_a = req.diagnosis == diag_a
-    matches_b = req.diagnosis == diag_b
+    if req.visit_number == 5:
+        matches_a = (req.diagnosis == diag_a and compare_visit5_concordance(
+            req.fetal_neonatal_assessments,
+            rec_a.fetal_neonatal_assessments if rec_a else None,
+            req.gestational_age_at_delivery,
+            rec_a.gestational_age_at_delivery if rec_a else None,
+        ))
+        matches_b = (req.diagnosis == diag_b and compare_visit5_concordance(
+            req.fetal_neonatal_assessments,
+            rec_b.fetal_neonatal_assessments if rec_b else None,
+            req.gestational_age_at_delivery,
+            rec_b.gestational_age_at_delivery if rec_b else None,
+        ))
+    else:
+        matches_a = req.diagnosis == diag_a
+        matches_b = req.diagnosis == diag_b
 
     is_three_way_divergent = not (matches_a or matches_b)
 
@@ -168,6 +216,13 @@ def submit_reviewer_c(subject_id: str, req: ReviewerCSubmissionRequest, db: Sess
     rec_c.rationale = req.rationale
     rec_c.comment = req.comment
     rec_c.other_rationale = req.other_rationale.strip() if req.other_rationale else None
+    if req.visit_number == 5:
+        rec_c.fetal_neonatal_assessments = req.fetal_neonatal_assessments
+        rec_c.gestational_age_at_delivery = req.gestational_age_at_delivery
+        rec_c.pregnancy_outcome = req.pregnancy_outcome
+        rec_c.fetal_neonatal_provenance = req.fetal_neonatal_provenance
+        rec_c.fetal_assessment_status = "CONFIRMED"
+
     rec_c.signed = True
     rec_c.signed_at = datetime.utcnow()
     rec_c.signature_hash = hashlib.sha256(
@@ -183,6 +238,17 @@ def submit_reviewer_c(subject_id: str, req: ReviewerCSubmissionRequest, db: Sess
         concordance_state = "CONCORDANT_WITH_A" if matches_a else "CONCORDANT_WITH_B"
 
     # Audit event for Reviewer C submission
+    audit_meta = {
+        "diagnosis": req.diagnosis.value,
+        "certainty": req.certainty.value,
+        "three_way_divergent": is_three_way_divergent,
+        "concordance_state": concordance_state,
+    }
+    if req.visit_number == 5:
+        audit_meta["fetal_neonatal_assessments"] = req.fetal_neonatal_assessments
+        audit_meta["gestational_age_at_delivery"] = req.gestational_age_at_delivery
+        audit_meta["pregnancy_outcome"] = req.pregnancy_outcome
+
     db.add(AuditEvent(
         event_type="REVIEWER_C_SIGNED",
         participant_id=participant.id,
@@ -193,14 +259,12 @@ def submit_reviewer_c(subject_id: str, req: ReviewerCSubmissionRequest, db: Sess
             f"certainty={req.certainty.value} / "
             f"concordance={concordance_state}"
         ),
-        event_metadata={
-            "diagnosis": req.diagnosis.value,
-            "certainty": req.certainty.value,
-            "three_way_divergent": is_three_way_divergent,
-            "concordance_state": concordance_state,
-        },
+        event_metadata=audit_meta,
         timestamp=datetime.utcnow(),
     ))
+
+    # Apply standard visit resolution and persist final fetal assessments if resolved
+    apply_visit_resolution(participant, visit, [rec_a, rec_b, rec_c])
 
     db.flush()
     try:
@@ -265,6 +329,15 @@ def lock_committee_decision(subject_id: str, req: CommitteeLockRequest, db: Sess
         db.add(decision)
 
 
+    if req.visit_number == 5:
+        is_valid, err_msg = validate_visit5_submission(
+            req.final_fetal_assessments or [],
+            req.final_ga_at_delivery,
+            req.final_pregnancy_outcome,
+        )
+        if not is_valid:
+            raise HTTPException(status_code=422, detail=err_msg)
+
     decision.adopted_reviewer = req.adopted_reviewer
     decision.final_diagnosis = req.final_diagnosis
     decision.date_of_diagnosis = req.date_of_diagnosis
@@ -276,6 +349,12 @@ def lock_committee_decision(subject_id: str, req: CommitteeLockRequest, db: Sess
     decision.members_present = req.members_present
     decision.chair_upn = req.chair_upn
     decision.chair_name = req.chair_name
+    if req.visit_number == 5:
+        decision.final_fetal_assessments = req.final_fetal_assessments
+        decision.final_ga_at_delivery = req.final_ga_at_delivery
+        decision.final_pregnancy_outcome = req.final_pregnancy_outcome
+        decision.fetal_neonatal_provenance = req.fetal_neonatal_provenance
+        visit.final_fetal_assessments = req.final_fetal_assessments
     decision.signed_at = datetime.utcnow()
     decision.signature_hash = sig_hash
     decision.locked = True
@@ -283,6 +362,17 @@ def lock_committee_decision(subject_id: str, req: CommitteeLockRequest, db: Sess
     decision.concordance_status = "CHAIR_LOCKED"
 
     participant.status = AdjudicationStatus.FINALIZED
+
+    lock_audit_meta = {
+        "final_diagnosis": req.final_diagnosis.value,
+        "adopted_reviewer": req.adopted_reviewer.value,
+        "chair_rationale": req.chair_rationale,
+        "signature_hash": sig_hash,
+    }
+    if req.visit_number == 5:
+        lock_audit_meta["final_fetal_assessments"] = req.final_fetal_assessments
+        lock_audit_meta["final_ga_at_delivery"] = req.final_ga_at_delivery
+        lock_audit_meta["final_pregnancy_outcome"] = req.final_pregnancy_outcome
 
     # Audit event for committee lock
     db.add(AuditEvent(
@@ -294,12 +384,7 @@ def lock_committee_decision(subject_id: str, req: CommitteeLockRequest, db: Sess
             f"Committee locked final decision: {req.final_diagnosis.value} "
             f"(adopted {req.adopted_reviewer.value})"
         ),
-        event_metadata={
-            "final_diagnosis": req.final_diagnosis.value,
-            "adopted_reviewer": req.adopted_reviewer.value,
-            "chair_rationale": req.chair_rationale,
-            "signature_hash": sig_hash,
-        },
+        event_metadata=lock_audit_meta,
         timestamp=datetime.utcnow(),
     ))
 

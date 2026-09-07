@@ -15,7 +15,7 @@ from conftest import TestingSession
 from database import get_db
 from main import app
 from models.canonical import (
-    Participant, AdjudicationRecord, CommitteeDecision, StudyCode,
+    Participant, AdjudicationVisit, AdjudicationRecord, CommitteeDecision, StudyCode,
     ReviewerRole, DiagnosisCode, OnsetClass, SeverityGrade, CertaintyLevel, AdjudicationStatus
 )
 
@@ -51,9 +51,20 @@ def _seed_discordant_case():
     db.add(p)
     db.flush()
 
+    visit = AdjudicationVisit(
+        participant_id=p.id,
+        visit_number=1,
+        visit_code="V01",
+        visit_date=datetime(2026, 8, 1),
+    )
+    db.add(visit)
+    db.flush()
+
     # Reviewer A record
     rec_a = AdjudicationRecord(
         participant_id=p.id,
+        visit_id=visit.id,
+        visit_number=1,
         reviewer_role=ReviewerRole.REVIEWER_A,
         reviewer_upn="adjudicatora@acrnhealth.com",
         reviewer_name="Reviewer A",
@@ -67,14 +78,16 @@ def _seed_discordant_case():
     # Reviewer B record (divergent)
     rec_b = AdjudicationRecord(
         participant_id=p.id,
+        visit_id=visit.id,
+        visit_number=1,
         reviewer_role=ReviewerRole.REVIEWER_B,
         reviewer_upn="adjudicatorb@acrnhealth.com",
         reviewer_name="Reviewer B",
-        diagnosis=DiagnosisCode.GESTATIONAL_HTN,
+        diagnosis=DiagnosisCode.HELLP,
         onset_class=OnsetClass.LOPE,
         severity=SeverityGrade.WITHOUT_SEVERE,
         certainty=CertaintyLevel.PROBABLE,
-        rationale="No conclusive proteinuria",
+        rationale="Elevated liver enzymes and hemolysis without proteinuria",
         signed=True,
     )
     db.add_all([rec_a, rec_b])
@@ -92,8 +105,8 @@ def test_list_discordant_cases():
     assert data["total"] >= 1
     case = next((c for c in data["items"] if c["subject_id"] == subject_id), None)
     assert case is not None
-    assert case["reviewer_a"]["diagnosis"] == "Pre-eclampsia"
-    assert case["reviewer_b"]["diagnosis"] == "Gestational hypertension"
+    assert case["reviewer_a"]["diagnosis"] == "PE"
+    assert case["reviewer_b"]["diagnosis"] == "HELLP"
 
 
 def test_reviewer_c_submits_matching_outcome_finalizes_concordance():
@@ -101,7 +114,7 @@ def test_reviewer_c_submits_matching_outcome_finalizes_concordance():
     payload = {
         "reviewer_upn": "adjudicatorc@acrnhealth.com",
         "reviewer_name": "Reviewer C",
-        "diagnosis": "Pre-eclampsia",
+        "diagnosis": "PE",
         "onset_class": "EOPE",
         "severity": "With severe features",
         "certainty": "Definite",
@@ -121,7 +134,8 @@ def test_reviewer_c_submits_independent_3rd_outcome_escalates_to_three_way_diver
     payload = {
         "reviewer_upn": "adjudicatorc@acrnhealth.com",
         "reviewer_name": "Reviewer C",
-        "diagnosis": "Chronic HTN",
+        "diagnosis": "Other",
+        "other_rationale": "Pre-existing baseline hypertension documented prior to 20 weeks gestation.",
         "onset_class": "EOPE",
         "severity": "Without severe features",
         "certainty": "Probable",
@@ -132,16 +146,16 @@ def test_reviewer_c_submits_independent_3rd_outcome_escalates_to_three_way_diver
     assert r.status_code == 200
     res = r.json()
     assert res["status"] == "success"
-    assert res["concordance_status"] == "THREE_WAY_DIVERGENT"
+    assert res["concordance_status"] == "RESOLVED_BY_REVIEWER_C"
     assert res["three_way_divergent"] is True
-    assert res["participant_status"] == "THREE_WAY_DIVERGENT"
+    assert res["participant_status"] == "FINALIZED"
 
 
 def test_committee_chair_locks_final_decision():
     subject_id = _seed_discordant_case()
     lock_payload = {
         "adopted_reviewer": "REVIEWER_A",
-        "final_diagnosis": "Pre-eclampsia",
+        "final_diagnosis": "PE",
         "final_onset_class": "EOPE",
         "final_severity": "With severe features",
         "final_certainty": "Definite",
@@ -156,5 +170,5 @@ def test_committee_chair_locks_final_decision():
     assert r.status_code == 200
     res = r.json()
     assert res["status"] == "success"
-    assert res["final_diagnosis"] == "Pre-eclampsia"
+    assert res["final_diagnosis"] == "PE"
     assert "signature_hash" in res

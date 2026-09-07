@@ -99,12 +99,12 @@ def generate_adjudication_pdf(case_data: dict) -> bytes:
     # ── Official Header Block ──────────────────────────────────────────────────
     elements.append(Paragraph("AFRICA CLINICAL RESEARCH NETWORK (ACRN)", title_style))
     elements.append(Paragraph("PROTECT-Africa / LOPE-Nigeria Clinical Endpoint Adjudication Committee", subtitle_style))
-    elements.append(Paragraph(f"FORM-ADJ-15A/15B — Blinded Endpoint Adjudication Certificate & Record", subtitle_style))
+    elements.append(Paragraph("FORM-ADJ-15A/15B — Blinded Endpoint Adjudication Certificate &amp; Record", subtitle_style))
     elements.append(Spacer(1, 6))
     elements.append(HRFlowable(width="100%", thickness=1.5, color=c_orange, spaceAfter=8))
 
     # ── Part A Header ──────────────────────────────────────────────────────────
-    t_part_a = Table([[Paragraph("PART A — BLINDED CLINICAL CASE NARRATIVE & COORDINATOR FACTUAL REPORT", part_header_style)]], colWidths=[540])
+    t_part_a = Table([[Paragraph("PART A — BLINDED CLINICAL CASE NARRATIVE &amp; COORDINATOR FACTUAL REPORT", part_header_style)]], colWidths=[540])
     t_part_a.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), c_navy),
         ('PADDING', (0,0), (-1,-1), 4),
@@ -185,7 +185,7 @@ def generate_adjudication_pdf(case_data: dict) -> bytes:
     elements.append(Spacer(1, 10))
 
     # ── Part B Header ──────────────────────────────────────────────────────────
-    t_part_b = Table([[Paragraph("PART B — REVIEWER & OAC PANEL FINAL DETERMINATION", part_header_style)]], colWidths=[540])
+    t_part_b = Table([[Paragraph("PART B — REVIEWER &amp; OAC PANEL FINAL DETERMINATION", part_header_style)]], colWidths=[540])
     t_part_b.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), c_navy),
         ('PADDING', (0,0), (-1,-1), 4),
@@ -193,7 +193,66 @@ def generate_adjudication_pdf(case_data: dict) -> bytes:
     elements.append(t_part_b)
     elements.append(Spacer(1, 6))
 
-    # ── Section 3: Final Classification & 21 CFR Part 11 Signature Block ─────
+    # ── Section 3: Visit 5 Fetal and Neonatal Closed-Ended Assessments ─────────
+    fetal_assessments = case_data.get("fetalNeonatalAssessments")
+    visit_num = case_data.get("visitNumber")
+    if visit_num == 5 or fetal_assessments:
+        elements.append(Paragraph("3. Visit 5 Fetal &amp; Neonatal Endpoint Assessments (FORM-ADJ-V05)", section_heading_style))
+        ga_del = case_data.get("gestationalAgeAtDelivery")
+        preg_out = case_data.get("pregnancyOutcome")
+        ga_text = f"{ga_del} weeks" if ga_del is not None else "Not documented"
+        preg_text = str(preg_out) if preg_out else "Not documented"
+
+        supp_grid = [
+            [
+                Paragraph("<b>Gestational Age at Delivery:</b>", body_style),
+                Paragraph(ga_text, body_style),
+                Paragraph("<b>Pregnancy Outcome:</b>", body_style),
+                Paragraph(preg_text, body_style),
+            ]
+        ]
+        t_supp = Table(supp_grid, colWidths=[150, 120, 130, 140])
+        t_supp.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), c_bg_light),
+            ('BOX', (0,0), (-1,-1), 0.5, c_border),
+            ('INNERGRID', (0,0), (-1,-1), 0.5, c_border),
+            ('PADDING', (0,0), (-1,-1), 4),
+        ]))
+        elements.append(t_supp)
+        elements.append(Spacer(1, 4))
+
+        selected_set = set(fetal_assessments or [])
+        fetal_defs = [
+            ("PERINATAL_FETAL_DEATH", "Perinatal / fetal death"),
+            ("DELIVERY_GE_37W", "Delivery at or after 37 weeks"),
+            ("DELIVERY_LT_34W", "Delivery before 34 weeks"),
+            ("IUGR", "Intrauterine Growth Restriction (IUGR)"),
+            ("SGA", "Small for Gestational Age (SGA)"),
+            ("NORMAL_OUTCOME", "Normal fetal / neonatal outcome, where clinically approved"),
+        ]
+
+        f_rows = [["Standardized Assessment / Endpoint", "Determination Status"]]
+        for code, label in fetal_defs:
+            is_present = code in selected_set
+            status_html = "<b><font color='#15803d'>CONFIRMED POSITIVE</font></b>" if is_present else "<font color='#64748b'>Not Selected</font>"
+            f_rows.append([
+                Paragraph(label, body_style),
+                Paragraph(status_html, body_style),
+            ])
+
+        t_fetal = Table(f_rows, colWidths=[380, 160])
+        t_fetal.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), c_navy),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,0), 8),
+            ('GRID', (0,0), (-1,-1), 0.5, c_border),
+            ('PADDING', (0,0), (-1,-1), 4),
+        ]))
+        elements.append(t_fetal)
+        elements.append(Spacer(1, 8))
+
+    # ── Section 4: Final Classification & 21 CFR Part 11 Signature Block ─────
     final_diag = case_data.get("finalDiagnosis", "PE")
     onset_class = case_data.get("derivedSubtype", "Early-onset pre-eclampsia (EOPE)")
     severity_val = case_data.get("derivedSeverity", "With severe features")

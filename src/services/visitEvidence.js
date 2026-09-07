@@ -274,8 +274,8 @@ export function normalizeVisitEvidence(caseData = {}) {
     const symptoms = textEvidence(visit, ['SYMPTOMS', 'HEADACHE', 'VISUAL_SYMPTOMS', 'RUQ_PAIN'], legacyForVisit(caseData.symptomsLog, visit, index));
     const medications = textEvidence(visit, ['MEDICATION', 'INTERVENTION'], legacyForVisit(caseData.medicationLog, visit, index));
     const fetal = textEvidence(visit, ['FETAL_ASSESSMENT', 'EFW_CENTILE', 'UA_DOPPLER'], legacyForVisit(caseData.fetalLog, visit, index));
-    const maternal = textEvidence(visit, ['MATERNAL_OUTCOME', 'DELIVERY_MODE', 'DELIVERY_COMPLICATION', 'MATERNAL_STATUS'], []);
-    const neonatal = textEvidence(visit, ['NEONATAL_OUTCOME', 'BIRTH_WEIGHT', 'APGAR', 'NICU_ADMISSION', 'STILLBIRTH'], []);
+    const maternal = textEvidence(visit, ['MATERNAL_OUTCOME', 'DELIVERY_MODE', 'DELIVERY_COMPLICATION', 'MATERNAL_STATUS', 'PREGNANCY_OUTCOME', 'GA_AT_DELIVERY', 'DELIVERY_LT_34W'], []);
+    const neonatal = textEvidence(visit, ['NEONATAL_OUTCOME', 'BIRTH_WEIGHT', 'APGAR', 'APGAR_1MIN', 'APGAR_5MIN', 'NICU_ADMISSION', 'NEONATAL_ICU_ADMISSION', 'STILLBIRTH', 'CONFIRMED_IUGR', 'CONFIRMED_SGA', 'IUGR_SGA_ASSESSMENT_DONE', 'CONGENITAL_ANOMALIES', 'BIRTH_COMPLICATIONS'], []);
     return {
       ...visit,
       id: visit.id || `${caseData.id || 'case'}-${visitLabel(visit, index)}`,

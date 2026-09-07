@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import * as I from 'lucide-react';
 import {
   buildLongitudinalRows,
@@ -324,10 +324,33 @@ function OtherEvidenceGroup({ visit }) {
 
 function VisitFiveOutcomeGroup({ visit }) {
   const groups = [
-    ['Maternal outcome', visit.maternal || [], I.Stethoscope],
-    ['Neonatal outcome', visit.neonatal || [], I.Baby],
+    ['Maternal & Delivery outcome', visit.maternal || [], I.Stethoscope],
+    ['Fetal & Neonatal outcome', visit.neonatal || [], I.Baby],
   ];
-  return <section className="clinical-block"><h5><I.ClipboardList size={14} />Visit 5 maternal and neonatal outcomes</h5><div className="other-evidence-grid">{groups.map(([title, rows, Icon]) => <div key={title}><strong><Icon size={13}/>{title}</strong><EvidenceList rows={rows} empty="Not collected or not available" render={(row)=><p key={row.id}>{row.value}<small>{formatVisitDateTime(row.observed_at)} Â· {row.source_label}</small><EvidenceStatusBadge state={row.evidence_state}/></p>}/></div>)}</div></section>;
+  return (
+    <section className="clinical-block">
+      <h5><I.ClipboardList size={14} />Visit 5 maternal and neonatal source evidence</h5>
+      <div className="other-evidence-grid">
+        {groups.map(([title, rows, Icon]) => (
+          <div key={title}>
+            <strong><Icon size={13} />{title}</strong>
+            <EvidenceList
+              rows={rows}
+              empty="Not collected or not available in source packet"
+              render={(row) => (
+                <p key={row.id}>
+                  {row.label ? <span><strong>{row.label}: </strong></span> : null}
+                  {row.value}
+                  <small>{formatVisitDateTime(row.observed_at)} · {row.source_label || 'Source CRF'}</small>
+                  <EvidenceStatusBadge state={row.evidence_state} />
+                </p>
+              )}
+            />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 export function VisitInterpretationCard({ visit }) {

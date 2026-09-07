@@ -200,6 +200,8 @@ def study_analysis_export(
         "onset_class", "severity", "certainty",
         "date_of_diagnosis", "visit_comment", "first_pe_visit_number",
         "first_pe_date", "overall_longitudinal_comment", "concordance_source",
+        "ga_at_delivery", "pregnancy_outcome", "fetal_neonatal_assessments",
+        "fetal_death", "delivery_ge_37w", "delivery_lt_34w", "iugr", "sga", "normal_fetal_outcome",
     ])
 
     for p in participants:
@@ -231,6 +233,36 @@ def study_analysis_export(
                 source = "CONCORDANT"
             else:
                 continue
+
+            ga_at_delivery = ""
+            pregnancy_outcome = ""
+            fetal_assessments_str = ""
+            fetal_death = ""
+            delivery_ge_37w = ""
+            delivery_lt_34w = ""
+            iugr = ""
+            sga = ""
+            normal_fetal_outcome = ""
+
+            if visit.visit_number == 5:
+                ga_val = committee_dec.final_ga_at_delivery if (committee_dec and committee_dec.final_ga_at_delivery is not None) else getattr(source_record, "gestational_age_at_delivery", None)
+                if ga_val is not None:
+                    ga_at_delivery = str(ga_val)
+
+                preg_val = committee_dec.final_pregnancy_outcome if (committee_dec and committee_dec.final_pregnancy_outcome) else getattr(source_record, "pregnancy_outcome", "")
+                if preg_val:
+                    pregnancy_outcome = str(preg_val)
+
+                fetal_list = (committee_dec.final_fetal_assessments if (committee_dec and committee_dec.final_fetal_assessments) else getattr(source_record, "fetal_neonatal_assessments", None)) or visit.final_fetal_assessments or []
+                f_set = set(fetal_list)
+                fetal_assessments_str = ";".join(sorted(f_set))
+                fetal_death = "YES" if "PERINATAL_FETAL_DEATH" in f_set else "NO"
+                delivery_ge_37w = "YES" if "DELIVERY_GE_37W" in f_set else "NO"
+                delivery_lt_34w = "YES" if "DELIVERY_LT_34W" in f_set else "NO"
+                iugr = "YES" if "IUGR" in f_set else "NO"
+                sga = "YES" if "SGA" in f_set else "NO"
+                normal_fetal_outcome = "YES" if "NORMAL_OUTCOME" in f_set else "NO"
+
             writer.writerow([
                 blinded_id,
                 visit.visit_number,
@@ -244,6 +276,15 @@ def study_analysis_export(
                 source_record.first_pe_date.isoformat() if source_record and source_record.first_pe_date else "",
                 source_record.longitudinal_comment if source_record else "",
                 source,
+                ga_at_delivery,
+                pregnancy_outcome,
+                fetal_assessments_str,
+                fetal_death,
+                delivery_ge_37w,
+                delivery_lt_34w,
+                iugr,
+                sga,
+                normal_fetal_outcome,
             ])
 
     output.seek(0)

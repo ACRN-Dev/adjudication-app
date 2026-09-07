@@ -34,9 +34,21 @@ def normalize_field_label(label):
     norm = re.sub(r'\s+', ' ', label).strip()
     return norm
 
-def make_field_key(label):
+GENERIC_LABELS = {
+    "end_date", "start_date", "comment", "comments_if_applicable",
+    "severity", "file_upload", "reviewer_s_comments_if_applicable",
+    "electronic_signature_lock_date_time", "date_of_onset"
+}
+
+def make_field_key(label, page_title=None):
     norm = normalize_field_label(label).lower()
-    return re.sub(r'[^a-z0-9]+', '_', norm).strip('_')
+    base_key = re.sub(r'[^a-z0-9]+', '_', norm).strip('_')
+    if not page_title:
+        return base_key
+    if base_key in GENERIC_LABELS and page_title not in {"Medical Conditions", "Medications / Treatments"}:
+        page_prefix = re.sub(r'[^a-z0-9]+', '_', page_title.lower()).strip('_')
+        return f"{page_prefix}_{base_key}"
+    return base_key
 
 def parse_partial_date(value_str):
     if not value_str or str(value_str).strip() in {"0", ""}:
@@ -111,7 +123,7 @@ def sanitize_audit_trail(audit_str):
             return None, actor_hash
     return None, None
 
-def process_history_row(db, batch, participant, row, row_no):
+def process_history_row(db, batch, participant, row, row_no, history_fields=None, patient_histories=None):
     form_title = (row.get("Form Title") or "").strip()
     page_title = (row.get("Page Title") or "").strip()
     domain = history_domain(form_title, page_title)
@@ -129,7 +141,7 @@ def process_history_row(db, batch, participant, row, row_no):
         
     audit_trail = row.get("Audit Trails")
     
-    field_key = make_field_key(field_label_raw)
+    field_key = make_field_key(field_label_raw, page_title)
     instances = parse_php_serialized_instances(data_value)
     
     signed_at, actor_hash = sanitize_audit_trail(audit_trail)
@@ -148,21 +160,42 @@ def process_history_row(db, batch, participant, row, row_no):
         # Tri-state handling: keep Yes / No / Not known verbatim
         # (Already handled since we store it as text)
 
-        # Idempotency check:
-        existing = db.query(PatientHistoryField).filter_by(
-            participant_id=participant.id,
-            domain=domain,
-            field_key=field_key,
-            instance_index=idx,
-            source_batch_id=batch.id
-        ).first()
+        # Idempotency / Deduplication check:
+        k = (participant.id, domain, field_key, idx)
+        existing = None
+        if history_fields is not None:
+            existing = history_fields.get(k)
+        else:
+            existing = db.query(PatientHistoryField).filter_by(
+                participant_id=participant.id,
+                domain=domain,
+                field_key=field_key,
+                instance_index=idx,
+                source_batch_id=batch.id
+            ).first()
+            if not existing:
+                for obj in db.new:
+                    if (isinstance(obj, PatientHistoryField) and
+                        obj.participant_id == participant.id and
+                        obj.domain == domain and
+                        obj.field_key == field_key and
+                        obj.instance_index == idx and
+                        obj.source_batch_id == batch.id):
+                        existing = obj
+                        break
         
         if existing:
-            # Update if changed
-            existing.value = val
-            existing.value_precision = precision
-            existing.signed_at = signed_at
-            existing.audit_actor_hash = actor_hash
+            # Update only if incoming value is not empty or has newer signature
+            if val is not None and val != "":
+                if existing.value is None or existing.value == "":
+                    existing.value = val
+                    existing.value_precision = precision
+                elif signed_at and (not existing.signed_at or signed_at >= existing.signed_at):
+                    existing.value = val
+                    existing.value_precision = precision
+            if signed_at and (not existing.signed_at or signed_at >= existing.signed_at):
+                existing.signed_at = signed_at
+                existing.audit_actor_hash = actor_hash
         else:
             pf = PatientHistoryField(
                 participant_id=participant.id,
@@ -179,21 +212,38 @@ def process_history_row(db, batch, participant, row, row_no):
                 source_batch_id=batch.id
             )
             db.add(pf)
+            if history_fields is not None:
+                history_fields[k] = pf
             
     # Record the patient history container if not present
-    ph = db.query(PatientHistory).filter_by(
-        participant_id=participant.id, 
-        source_form=row.get("Form Title")
-    ).first()
+    ph_key = (participant.id, form_title)
+    ph = None
+    if patient_histories is not None:
+        ph = patient_histories.get(ph_key)
+    else:
+        ph = db.query(PatientHistory).filter_by(
+            participant_id=participant.id, 
+            source_form=form_title
+        ).first()
+        if not ph:
+            for obj in db.new:
+                if (isinstance(obj, PatientHistory) and
+                    obj.participant_id == participant.id and
+                    obj.source_form == form_title):
+                    ph = obj
+                    break
+
     if not ph:
         ph = PatientHistory(
             participant_id=participant.id,
             subject_id=participant.blinded_subject_id,
-            source_form=row.get("Form Title"),
+            source_form=form_title,
             form_version=row.get("Form Version"),
             source_file=batch.filename
         )
         db.add(ph)
+        if patient_histories is not None:
+            patient_histories[ph_key] = ph
 
 def get_field_val(fields, key, idx=None):
     for f in fields:
@@ -316,11 +366,12 @@ def compute_risk_summary(fields):
     }
 
 def calculate_history_completeness(fields):
-    # Determine if obstetric and medical domains are populated
+    # Determine if obstetric and medical/conditions domains are populated
     domains = {f.domain for f in fields}
-    if "obstetric" in domains and "medical" in domains:
+    has_medical = ("medical" in domains) or ("conditions" in domains)
+    if "obstetric" in domains and has_medical:
         return 1.0
-    elif "obstetric" in domains or "medical" in domains:
+    elif "obstetric" in domains or has_medical:
         return 0.5
     return 0.0
 
