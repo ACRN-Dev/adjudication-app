@@ -205,6 +205,7 @@ def _public_user(user: PortalUser) -> dict:
         "is_demo_account": user.is_demo_account,
         "demo": user.is_demo_account,
         "must_change_password": user.must_change_password,
+        "has_password": bool(user.password_hash),
         "last_login_at": user.last_login_at,
     }
 
@@ -285,12 +286,15 @@ def current_user(request: Request, acrn_demo_session: Optional[str] = Cookie(Non
 
 
 def change_password(db: Session, user: PortalUser, current_password: str, new_password: str, request: Optional[Request] = None) -> dict:
-    if not user.password_hash or not verify_password(current_password, user.password_hash):
+    # SSO-only accounts have no password yet (they authenticate purely via Microsoft), so the
+    # first password they set has nothing to verify against. Once one exists, changing it always
+    # requires proving the current one.
+    if user.password_hash and not verify_password(current_password, user.password_hash):
         audit_auth(db, "PASSWORD_CHANGE_FAILURE", "FAILURE", actor=user, affected=user, request=request, reason="Current password incorrect")
         db.commit()
         raise HTTPException(401, "Current password is incorrect.")
     validate_password_strength(new_password, user.email)
-    if verify_password(new_password, user.password_hash):
+    if user.password_hash and verify_password(new_password, user.password_hash):
         raise HTTPException(422, "New password must differ from your current password.")
     user.password_hash = hash_password(new_password)
     user.must_change_password = False

@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { changePassword } from '../services/authApi';
 
-// Blocks all portal access until a user replaces a shared/temporary password
-// with one only they know (21 CFR Part 11 non-repudiation requirement).
+// Blocks all portal access until a user has a password only they know (21 CFR Part 11
+// non-repudiation requirement) — either replacing a shared/temporary one, or, for accounts
+// that signed in solely via Microsoft SSO, setting one for the first time so they can also
+// sign in with it and use it to sign adjudication e-signatures.
 export default function ForceChangePassword({ user, onChanged, onLogout }) {
+  const hasPassword = user?.has_password !== false;
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -13,7 +16,7 @@ export default function ForceChangePassword({ user, onChanged, onLogout }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
-    if (!currentPassword || !newPassword || !confirmPassword) {
+    if ((hasPassword && !currentPassword) || !newPassword || !confirmPassword) {
       setErrorMsg('Please fill in all fields.');
       return;
     }
@@ -23,7 +26,7 @@ export default function ForceChangePassword({ user, onChanged, onLogout }) {
     }
     setBusy(true);
     try {
-      const updated = await changePassword(currentPassword, newPassword);
+      const updated = await changePassword(hasPassword ? currentPassword : '', newPassword);
       onChanged(updated);
     } catch (err) {
       setErrorMsg(err.message || 'Unable to change password.');
@@ -51,21 +54,25 @@ export default function ForceChangePassword({ user, onChanged, onLogout }) {
           <h1 style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a', margin: '0 0 6px' }}>Set a New Password</h1>
           <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 20px' }}>
             {user?.display_name ? `Welcome, ${user.display_name}. ` : ''}
-            For security, you must set a password known only to you before you can access the portal.
+            {hasPassword
+              ? 'For security, you must set a password known only to you before you can access the portal.'
+              : 'You signed in with Microsoft. Set a password now so you can also sign in directly with it, and use it to sign adjudication e-signatures.'}
           </p>
 
           <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '14px' }}>
-            <div>
-              <label htmlFor="current-password" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Current / Temporary Password</label>
-              <input
-                id="current-password"
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                style={inputStyle}
-                autoComplete="current-password"
-              />
-            </div>
+            {hasPassword && (
+              <div>
+                <label htmlFor="current-password" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Current / Temporary Password</label>
+                <input
+                  id="current-password"
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  style={inputStyle}
+                  autoComplete="current-password"
+                />
+              </div>
+            )}
             <div>
               <label htmlFor="new-password" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>New Password</label>
               <input

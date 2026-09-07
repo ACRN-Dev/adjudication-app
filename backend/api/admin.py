@@ -320,6 +320,7 @@ def demo_reset_all(req:ReasonedRequest,identity:Identity=Depends(require("integr
         ReviewerAssignment, RestrictedIdentityCrosswalk, VisitDerivation,
         LongitudinalCaseDerivation, ImportIssue,
     )
+    from models.history import PatientHistory, PatientHistoryField, PatientRiskSummary
     counts = {}
 
     csv_batches = db.query(ImportBatch).filter(
@@ -392,6 +393,9 @@ def demo_reset_all(req:ReasonedRequest,identity:Identity=Depends(require("integr
         delete_count(LongitudinalCaseDerivation, LongitudinalCaseDerivation.participant_id.in_(rt_participant_ids))
         delete_count(RestrictedIdentityCrosswalk, RestrictedIdentityCrosswalk.participant_id.in_(rt_participant_ids))
         delete_count(ImportIssue, ImportIssue.participant_id.in_(rt_participant_ids))
+        delete_count(PatientHistoryField, PatientHistoryField.participant_id.in_(rt_participant_ids))
+        delete_count(PatientHistory, PatientHistory.participant_id.in_(rt_participant_ids))
+        delete_count(PatientRiskSummary, PatientRiskSummary.participant_id.in_(rt_participant_ids))
     if rt_visit_ids:
         delete_count(VisitInstance, VisitInstance.id.in_(rt_visit_ids))
     if rt_participant_ids:

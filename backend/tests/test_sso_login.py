@@ -84,7 +84,29 @@ def test_sso_callback_creates_session_for_registered_user(mock_sso_app):
     assert "acrn_demo_session" in r.cookies
 
     db = TestingSession()
-    assert db.query(AuthAuditEvent).filter_by(event_type="SSO_LOGIN_SUCCESS").count() == 1
+    ssoadmin = db.query(PortalUser).filter_by(email="ssoadmin@acrnhealth.com").first()
+    assert db.query(AuthAuditEvent).filter_by(event_type="SSO_LOGIN_SUCCESS", affected_user_id=ssoadmin.id).count() == 1
+    assert ssoadmin.must_change_password is True
+    db.close()
+
+
+@patch("api.auth._sso_app")
+def test_sso_callback_does_not_force_password_change_when_one_already_set(mock_sso_app):
+    from services.auth_service import hash_password
+
+    _set_sso_env()
+    db = TestingSession()
+    db.add(PortalUser(
+        email="sso.haspwd@acrnhealth.com", display_name="Has Password", password_hash=hash_password("ACRN@2026-existing"),
+        role="ADJUDICATOR", status=ACTIVE, must_change_password=False,
+    ))
+    db.commit()
+    db.close()
+
+    _sso_callback(mock_sso_app, "sso.haspwd@acrnhealth.com", "Has Password")
+
+    db = TestingSession()
+    assert db.query(PortalUser).filter_by(email="sso.haspwd@acrnhealth.com").first().must_change_password is False
     db.close()
 
 

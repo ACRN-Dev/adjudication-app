@@ -134,16 +134,33 @@ def submit_adjudication(
         )
         db.add(participant)
         db.flush()
+    else:
+        realtime_case = db.query(LongitudinalParticipant).filter_by(blinded_subject_id=subject_id).first()
+
+    # Keep SubjectAssignment (the table the stickiness check below reads) in sync with
+    # the realtime ReviewerAssignment table on every submission — not just at the moment
+    # the Participant row is first bridged. Reviewers A and B are frequently assigned at
+    # different times (e.g. A assigned+submits before the monitor assigns B); if we only
+    # sync once, a later-assigned reviewer never gets an active SubjectAssignment row and
+    # falls through the stickiness check unauthorised, colliding with the other reviewer's
+    # already-signed record instead of being recognised under their own role.
+    if realtime_case:
         rt_assignments = db.query(ReviewerAssignment).filter_by(participant_id=realtime_case.id, status="ASSIGNED").all()
         assignment_map = {a.reviewer_role: a.reviewer_upn.strip().lower() for a in rt_assignments}
         if assignment_map.get("REVIEWER_A") and assignment_map.get("REVIEWER_B"):
-            db.add(SubjectAssignment(
-                participant_id=participant.id,
-                reviewer_a_upn=assignment_map["REVIEWER_A"],
-                reviewer_b_upn=assignment_map["REVIEWER_B"],
-                status="ACTIVE",
-                assigned_by="REALTIME_BRIDGE",
-            ))
+            existing_assignment = db.query(SubjectAssignment).filter_by(participant_id=participant.id).first()
+            if existing_assignment:
+                existing_assignment.reviewer_a_upn = assignment_map["REVIEWER_A"]
+                existing_assignment.reviewer_b_upn = assignment_map["REVIEWER_B"]
+                existing_assignment.status = "ACTIVE"
+            else:
+                db.add(SubjectAssignment(
+                    participant_id=participant.id,
+                    reviewer_a_upn=assignment_map["REVIEWER_A"],
+                    reviewer_b_upn=assignment_map["REVIEWER_B"],
+                    status="ACTIVE",
+                    assigned_by="REALTIME_BRIDGE",
+                ))
             db.flush()
 
     # ── 2. Server-side credential re-verification (21 CFR Part 11 §11.200) ───
@@ -533,6 +550,23 @@ def submit_adjudication(
                         detail="Discordant case requires Reviewer C, but no independent adjudicator is available.",
                     )
                 assignment.reviewer_c_upn = random.choice(sorted(eligible_reviewers))
+                # Mirror into ReviewerAssignment too: the realtime worklist (/assigned) and
+                # per-case access gate (/assigned/{id}) read only that table, so without this
+                # Reviewer C would be blocked from their own case the same way B was blocked
+                # for A/B assignments that were never synced to SubjectAssignment.
+                if realtime_case:
+                    rt_c = db.query(ReviewerAssignment).filter_by(
+                        participant_id=realtime_case.id, reviewer_role="REVIEWER_C"
+                    ).first()
+                    if rt_c:
+                        rt_c.reviewer_upn = assignment.reviewer_c_upn
+                        rt_c.status = "ASSIGNED"
+                    else:
+                        db.add(ReviewerAssignment(
+                            participant_id=realtime_case.id,
+                            reviewer_upn=assignment.reviewer_c_upn,
+                            reviewer_role="REVIEWER_C",
+                        ))
                 _audit(
                     db, "REVIEWER_C_ASSIGNED", participant.id, "SYSTEM", "SYSTEM",
                     f"Discordance detected; Reviewer C assigned to {assignment.reviewer_c_upn}",

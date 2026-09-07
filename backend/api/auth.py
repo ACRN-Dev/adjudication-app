@@ -115,6 +115,12 @@ def sso_callback(request: Request, code: Optional[str] = None, state: Optional[s
         db.commit()
         return redirect("/?sso_error=account_inactive")
 
+    if not user.password_hash:
+        # Adjudicators sign determinations with a password (21 CFR Part 11 re-authentication),
+        # which a Microsoft-only sign-in never establishes. Force setting one now so the account
+        # can e-sign, and can subsequently sign in either way.
+        user.must_change_password = True
+
     resp = redirect("/")
     issue_session(db, user, resp, request, event_type)
     return resp
@@ -127,7 +133,8 @@ class LoginRequest(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str = Field(min_length=1)
+    # Blank for a first-time password set on an SSO-only account, which has nothing to verify against.
+    current_password: str = Field(default="")
     new_password: str = Field(min_length=1)
 
 
@@ -180,6 +187,7 @@ def public_user(user: PortalUser) -> dict:
         "is_demo_account": user.is_demo_account,
         "demo": user.is_demo_account,
         "must_change_password": user.must_change_password,
+        "has_password": bool(user.password_hash),
         "failed_login_count": user.failed_login_count,
         "locked_until": user.locked_until,
         "last_login_at": user.last_login_at,

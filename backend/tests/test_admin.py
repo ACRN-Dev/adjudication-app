@@ -13,6 +13,7 @@ from models.admin import AdminUser, ControlledVersion, AdminAuditEvent
 from models.auth import PortalUser
 from models.canonical import ImportBatch, Participant, SubjectAssignment, AdjudicationVisit, AdjudicationRecord, ReviewerRole, StudyCode
 from models.longitudinal import RTImportBatch, LongitudinalParticipant, ReviewerAssignment
+from models.history import PatientHistory, PatientHistoryField, PatientRiskSummary
 from services.admin_security import Identity, validate_mapping, validate_workflow_definition, risk_warnings
 from services.auth_service import ACTIVE, hash_password
 from conftest import TestingSession
@@ -158,6 +159,14 @@ def test_reset_all_is_scoped_to_csv_imports_and_assignments(monkeypatch):
     db.add_all([
         ReviewerAssignment(participant_id=rt_csv_participant.id, reviewer_upn="a@demo", reviewer_role="REVIEWER_A"),
         ReviewerAssignment(participant_id=rt_retained_participant.id, reviewer_upn="a@demo", reviewer_role="REVIEWER_A"),
+        # These rows reproduce the FK violation reported in production: patient_history*
+        # tables reference longitudinal_participants but were never purged by reset-all.
+        PatientHistory(participant_id=rt_csv_participant.id, subject_id="RT-CSV-001", source_form="Baseline"),
+        PatientHistory(participant_id=rt_retained_participant.id, subject_id="RT-KEEP-001", source_form="Baseline"),
+        PatientHistoryField(participant_id=rt_csv_participant.id, subject_id="RT-CSV-001", domain="obstetric", field_key="gravidity", field_label_raw="Gravidity", source_batch_id=rt_csv.id),
+        PatientHistoryField(participant_id=rt_retained_participant.id, subject_id="RT-KEEP-001", domain="obstetric", field_key="gravidity", field_label_raw="Gravidity", source_batch_id=rt_retained.id),
+        PatientRiskSummary(participant_id=rt_csv_participant.id, subject_id="RT-CSV-001"),
+        PatientRiskSummary(participant_id=rt_retained_participant.id, subject_id="RT-KEEP-001"),
     ])
     db.commit()
     db.close()
@@ -182,4 +191,10 @@ def test_reset_all_is_scoped_to_csv_imports_and_assignments(monkeypatch):
     assert db.query(RTImportBatch).filter_by(filename="production-feed.parquet").count() == 1
     assert db.query(LongitudinalParticipant).filter_by(blinded_subject_id="RT-KEEP-001").count() == 1
     assert db.query(ReviewerAssignment).join(LongitudinalParticipant).filter(LongitudinalParticipant.blinded_subject_id == "RT-KEEP-001").count() == 1
+    assert db.query(PatientHistory).filter_by(subject_id="RT-CSV-001").count() == 0
+    assert db.query(PatientHistory).filter_by(subject_id="RT-KEEP-001").count() == 1
+    assert db.query(PatientHistoryField).filter_by(subject_id="RT-CSV-001").count() == 0
+    assert db.query(PatientHistoryField).filter_by(subject_id="RT-KEEP-001").count() == 1
+    assert db.query(PatientRiskSummary).filter_by(subject_id="RT-CSV-001").count() == 0
+    assert db.query(PatientRiskSummary).filter_by(subject_id="RT-KEEP-001").count() == 1
     db.close()
