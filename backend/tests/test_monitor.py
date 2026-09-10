@@ -1,4 +1,6 @@
 import os,sys,pytest
+import uuid
+from datetime import datetime
 sys.path.insert(0,os.path.dirname(os.path.dirname(__file__)))
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -6,6 +8,7 @@ from main import app
 from services.monitor_security import scan_blinding,validate_import,qc_gate,assignment_gate,release_gate
 from services.workflow_policy import check_reviewer_isolation,check_committee_quorum,evaluate_concordance
 from conftest import TestingSession
+from models.longitudinal import RTImportBatch, LongitudinalParticipant, VisitInstance
 
 client = TestClient(app)
 
@@ -81,4 +84,62 @@ def test_monitor_session_without_portal_role_denied(monkeypatch):
     assert login.status_code == 200
     r = client.get("/api/monitor/me", cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]})
     assert r.status_code == 403
+
+
+def test_monitor_operational_dashboard_uses_visit_level_counts(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "true")
+    r = client.get("/api/monitor/operational-dashboard", headers={"X-Demo-User": "monitor1@acrnhealth.com", "X-Demo-Role": "MONITOR_QC_REVIEWER"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["summary"]["available_visits"] >= 1
+    assert body["summary"]["overall_completion_pct"] >= 0
+    assert body["summary"]["completed_visits"] >= 0
+    assert "available_visits" in body["summary"]
+    assert "by_status" in body
+    assert "adjudicators" in body
+
+
+def test_monitor_progress_deduplicates_same_blinded_case_across_sources(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "true")
+    r = client.get("/api/realtime/progress", headers={"X-Demo-User": "monitor1@acrnhealth.com", "X-Demo-Role": "MONITOR_QC_REVIEWER"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["summary"]["unique_cases"] == len(body["items"])
+    assert body["summary"]["total_visits"] >= body["summary"]["adjudicated_visits"]
+    assert "duplicate_source_records" in body["summary"]
+    assert set(body["by_case_status"]) == {"PENDING", "IN_PROGRESS", "ADJUDICATED_CLOSED"}
+
+
+def test_monitor_progress_collapses_duplicate_source_batches(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "true")
+    db = TestingSession()
+    subject_id = f"ACRN-DUP-{uuid.uuid4().hex[:8].upper()}"
+    batches = [
+        RTImportBatch(filename=f"duplicate-{index}.csv", checksum=uuid.uuid4().hex, file_size=10, uploaded_by="monitor1@acrnhealth.com")
+        for index in (1, 2)
+    ]
+    db.add_all(batches)
+    db.flush()
+    participants = [
+        LongitudinalParticipant(blinded_subject_id=subject_id, source_batch_id=batch.id, study="PROTECT-Africa")
+        for batch in batches
+    ]
+    db.add_all(participants)
+    db.flush()
+    db.add_all([
+        VisitInstance(
+            participant_id=participant.id, source_batch_id=participant.source_batch_id,
+            form_title="Visit 1", scheduled_visit_code="V01", visit_sequence=1,
+            reconstruction_method="TEST", reconstruction_confidence="HIGH",
+        )
+        for participant in participants
+    ])
+    db.commit()
+    db.close()
+
+    response = client.get("/api/realtime/progress", headers={"X-Demo-User": "monitor1@acrnhealth.com", "X-Demo-Role": "MONITOR_QC_REVIEWER"})
+    assert response.status_code == 200, response.text
+    item = next(row for row in response.json()["items"] if row["subject_id"] == subject_id)
+    assert item["total_visits"] == 1
+    assert item["duplicate_source_count"] == 1
 

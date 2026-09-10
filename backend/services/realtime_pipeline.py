@@ -146,11 +146,16 @@ def process_batch(batch_id, reset=False):
             batch.rows_processed=total_rows
             batch.status="VISITS_RECONSTRUCTED"; db.commit()
         all_participants=db.query(LongitudinalParticipant).filter_by(source_batch_id=batch.id).all()
-        for p in all_participants:
+        # SQLite permits only one writer.  Do not retain its write lock for the
+        # full derivation pass on a large import, otherwise another upload cannot
+        # even create its import-batch record.
+        for participant_index, p in enumerate(all_participants, start=1):
             pvis=db.query(VisitInstance).filter_by(participant_id=p.id,source_batch_id=batch.id).all(); dated=[v.visit_datetime for v in pvis if v.visit_datetime]
             p.available_visit_count=len(pvis); p.first_visit_date=min(dated) if dated else None; p.latest_visit_date=max(dated) if dated else None
             derive_participant(db,p,pvis); db.flush()
             finalize_history(db, p); db.flush()
+            if participant_index % 50 == 0:
+                db.commit()
         batch.row_count=total_rows; batch.rows_processed=total_rows; batch.participant_count=len(all_participants); batch.visit_count=db.query(VisitInstance).filter_by(source_batch_id=batch.id).count()
         batch.blinding_result={"passed":True,"excluded_rows":batch.prohibited_count,"safe_field_fingerprints":sorted(prohibited_labels)}
         batch.status="MONITOR_QC_REQUIRED"; batch.error_count=0; batch.error_summary=None; batch.processing_finished_at=datetime.utcnow(); audit(db,batch.uploaded_by,"MONITOR_QC_REVIEWER","BATCH_PROCESSED","IMPORT_BATCH",batch.id,{"rows":batch.row_count,"participants":batch.participant_count,"visits":batch.visit_count,"prohibited_excluded":batch.prohibited_count}); db.commit()
@@ -158,5 +163,6 @@ def process_batch(batch_id, reset=False):
         db.rollback(); batch=db.get(RTImportBatch,batch_id)
         if batch:
             batch.status="CANCELLED" if str(exc)=="IMPORT_CANCELLED" else "FAILED"; batch.error_count+=1; batch.error_summary=str(exc)[:1000]; batch.processing_finished_at=datetime.utcnow(); audit(db,batch.uploaded_by,"MONITOR_QC_REVIEWER","IMPORT_PROCESSING_FAILED","IMPORT_BATCH",batch.id,{"stage":batch.status,"error_type":type(exc).__name__},"FAILED"); db.commit()
-    finally: db.close()
+    finally:
+        db.close()
 

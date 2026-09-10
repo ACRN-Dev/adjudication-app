@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Header from './components/Header';
 import SidebarNav from './components/SidebarNav';
-import InstructionBanner from './components/InstructionBanner';
 import AdjudicatorWorkbench from './components/AdjudicatorWorkbench';
 import SourceDocViewer from './components/SourceDocViewer';
 import SignatureModal from './components/SignatureModal';
@@ -166,7 +165,7 @@ export default function App() {
     return <AdminPortal user={user} onLogout={handleLogout} />;
   }
   if (currentPath.startsWith('/monitor')) {
-    const monitorRoles=['MONITOR','ADMIN','ADJUDICATION_COORDINATOR','MONITOR_QC_REVIEWER','QA_REVIEWER','RELEASE_OPERATOR'];
+    const monitorRoles=['MONITOR','ADMIN','CHAIRPERSON','ADJUDICATION_COORDINATOR','MONITOR_QC_REVIEWER','QA_REVIEWER','RELEASE_OPERATOR'];
     if(!monitorRoles.includes(user?.roleCode)) return <div role="alert" style={{padding:40}}><h1>Access denied</h1><p>Your role cannot access Monitor/QC operational case data.</p><button onClick={handleLogout}>Return to sign in</button></div>;
     return <MonitorPortal user={user} onLogout={handleLogout}/>;
   }
@@ -242,7 +241,6 @@ export default function App() {
           </div>
 
           <>
-            <InstructionBanner step={currentStep} />
 
             {activeView === 'committee' && isCommitteeCase ? (
               <CommitteeDashboard caseData={activeCase} onAdoptOutcome={() => setActiveView('workbench')} />

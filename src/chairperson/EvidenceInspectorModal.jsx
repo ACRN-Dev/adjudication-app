@@ -631,7 +631,16 @@ ${item.final_outcome ? `Final Decision: ${item.final_outcome.diagnosis} (${item.
                           <div className="crf-header-right">
                             {sec.isSevere && <span className="tag-severe"><AlertOctagon size={12} /> Severe Metric</span>}
                             {sec.isNotDocumented && <span className="tag-muted">Not Documented</span>}
-                            <button type="button" className="accordion-btn" aria-label="Toggle section">
+                            <button
+                              type="button"
+                              className="accordion-btn"
+                              aria-label="Toggle section"
+                              aria-expanded={isExpanded}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleSection(idx);
+                              }}
+                            >
                               {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                             </button>
                           </div>

@@ -27,7 +27,11 @@ def _demo_contract_bypass_enabled() -> bool:
 
 def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role: str | None = Header(None), db: Session = Depends(get_db)):
     token = request.cookies.get("acrn_demo_session")
-    if token:
+    demo_header_auth = (
+        os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true"
+        and x_demo_user and x_demo_role
+    )
+    if token and not demo_header_auth:
         from services.auth_service import _hash_token
         from models.auth import AuthSession
         from services.monitor_security import ROLES as MONITOR_PORTAL_ROLES
@@ -74,12 +78,14 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
             # arbitrary headers are never accepted.
             known_demo = {
                 "monitor.demo@acrnhealth.com": "MONITOR",
+                "monitor1@acrnhealth.com": "MONITOR_QC_REVIEWER",
+                "monitor2@acrnhealth.com": "QA_REVIEWER",
                 "adjudicatora@acrnhealth.com": "ADJUDICATOR",
                 "adjudicatorb@acrnhealth.com": "ADJUDICATOR",
                 "adjudicatorc@acrnhealth.com": "ADJUDICATOR",
             }
             if not demo_user and known_demo.get(claimed_email) == claimed_role:
-                return claimed_email, claimed_role, claimed_role == "MONITOR"
+                return claimed_email, claimed_role, claimed_role in MONITOR
             if not demo_user or not demo_user.is_demo_account:
                 raise HTTPException(401, detail={"message": "Unrecognized demo identity.", "reason": "no_session"})
             if demo_user.must_change_password:
@@ -363,6 +369,92 @@ def assigned(i=Depends(actor),db:Session=Depends(get_db)):
     if i[1] not in {"ADJUDICATOR","REVIEWER_A","REVIEWER_B"}: raise HTTPException(403,"Adjudicator role required")
     rows=db.query(ReviewerAssignment,LongitudinalParticipant).join(LongitudinalParticipant,ReviewerAssignment.participant_id==LongitudinalParticipant.id).filter(ReviewerAssignment.reviewer_upn==i[0],LongitudinalParticipant.workflow_status=="ASSIGNED").all()
     return [pjson(p) for _,p in rows]
+
+@router.get("/progress")
+def progress(i=Depends(actor), db:Session=Depends(get_db)):
+    """Return deduplicated case/visit progress for monitors and assigned adjudicators."""
+    query = db.query(LongitudinalParticipant)
+    if not i[2]:
+        assigned_ids = [row.participant_id for row in db.query(ReviewerAssignment).filter_by(
+            reviewer_upn=i[0], status="ASSIGNED"
+        ).all()]
+        query = query.filter(LongitudinalParticipant.id.in_(assigned_ids)) if assigned_ids else query.filter(False)
+
+    rows = query.order_by(LongitudinalParticipant.blinded_subject_id, LongitudinalParticipant.created_at).all()
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(row.blinded_subject_id, []).append(row)
+
+    adjudicated_statuses = {"COMPLETED", "FINALIZED", "LOCKED", "CLOSED", "CONCORDANT", "RESOLVED_BY_MAJORITY"}
+    items = []
+    total_visits = 0
+    completed_visits = 0
+    duplicate_source_records = 0
+    for subject_id, participants in grouped.items():
+        canonical = db.query(Participant).filter(
+            (Participant.subject_id == subject_id) | (Participant.case_number == subject_id)
+        ).first()
+        visit_rows = []
+        if canonical:
+            canonical_visits = db.query(AdjudicationVisit).filter_by(participant_id=canonical.id).order_by(AdjudicationVisit.visit_number).all()
+            for visit in canonical_visits:
+                status = (visit.status or "PENDING").upper()
+                visit_rows.append({"visit_number": visit.visit_number, "visit_code": visit.visit_code, "status": status})
+        if not visit_rows:
+            seen_visits = set()
+            for participant in participants:
+                for visit in sorted(participant.visits, key=lambda value: (value.visit_sequence or 999, value.visit_datetime or datetime.max)):
+                    key = (visit.visit_sequence or 0, visit.scheduled_visit_code or visit.form_title)
+                    if key in seen_visits:
+                        continue
+                    seen_visits.add(key)
+                    visit_rows.append({
+                        "visit_number": visit.visit_sequence or len(seen_visits),
+                        "visit_code": visit.scheduled_visit_code or visit.form_title,
+                        "status": "PENDING",
+                    })
+        case_completed = sum(1 for visit in visit_rows if visit["status"] in adjudicated_statuses)
+        total_visits += len(visit_rows)
+        completed_visits += case_completed
+        duplicate_source_records += max(0, len(participants) - 1)
+        case_status = "ADJUDICATED_CLOSED" if visit_rows and case_completed == len(visit_rows) else (
+            "IN_PROGRESS" if case_completed else "PENDING"
+        )
+        assignments = db.query(ReviewerAssignment).filter(
+            ReviewerAssignment.participant_id.in_([participant.id for participant in participants])
+        ).all()
+        items.append({
+            "subject_id": subject_id,
+            "case_number": canonical.case_number if canonical else None,
+            "status": case_status,
+            "total_visits": len(visit_rows),
+            "completed_visits": case_completed,
+            "pending_visits": len(visit_rows) - case_completed,
+            "completion_pct": round(case_completed / len(visit_rows) * 100, 1) if visit_rows else 0,
+            "visit_statuses": visit_rows,
+            "source_batches": sorted({str(participant.source_batch_id) for participant in participants}),
+            "duplicate_source_count": max(0, len(participants) - 1),
+            "adjudicators": sorted({assignment.reviewer_upn for assignment in assignments if assignment.reviewer_upn}),
+        })
+
+    unique_cases = len(items)
+    by_case_status = {
+        status: sum(1 for item in items if item["status"] == status)
+        for status in ("PENDING", "IN_PROGRESS", "ADJUDICATED_CLOSED")
+    }
+    return {
+        "items": items,
+        "summary": {
+            "unique_cases": unique_cases,
+            "total_visits": total_visits,
+            "adjudicated_visits": completed_visits,
+            "pending_visits": total_visits - completed_visits,
+            "completed_cases": sum(1 for item in items if item["status"] == "ADJUDICATED_CLOSED"),
+            "completion_pct": round(completed_visits / total_visits * 100, 1) if total_visits else 0,
+            "duplicate_source_records": duplicate_source_records,
+        },
+        "by_case_status": by_case_status,
+    }
 
 @router.get("/adjudicators")
 def adjudicators(i=Depends(monitor), db:Session=Depends(get_db)):

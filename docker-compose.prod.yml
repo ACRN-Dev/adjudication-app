@@ -4,9 +4,8 @@ services:
       - .env.prod
     environment:
       ENVIRONMENT: production
-      # Enable DB wipe (Reset All Demo Data) for the supervisor meeting
-      ENABLE_DEMO_DATA: "true"
-      # Keep spoofing/fake accounts disabled since they use real accounts
+      # Keep synthetic data and spoofing/fake accounts disabled in production.
+      ENABLE_DEMO_DATA: "false"
       ENABLE_DEMO_ACCOUNTS: "false"
       AUTH_COOKIE_SECURE: "true"
       AUTH_COOKIE_SAMESITE: "lax"

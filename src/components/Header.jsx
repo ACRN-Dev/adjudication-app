@@ -7,6 +7,7 @@ export default function Header({ activeCase, cases = [], onSelectCase, user, onL
   const [searchQuery, setSearchQuery] = useState('');
   const [showRecentSubjects, setShowRecentSubjects] = useState(false);
   const [showRecentStudies, setShowRecentStudies] = useState(false);
+  const [selectedStudy, setSelectedStudy] = useState('MUTALA (ACRN) - PROTECT-Africa');
 
   useEffect(() => {
     checkBackendHealth().then(res => {
@@ -73,16 +74,22 @@ export default function Header({ activeCase, cases = [], onSelectCase, user, onL
               type="button"
             >
               <span className="rt-recent-label">Recent Studies:</span>
-              <strong className="rt-recent-val">MUTALA (ACRN) - PROTECT-Africa</strong>
+              <strong className="rt-recent-val">{selectedStudy}</strong>
               <ChevronDown size={14} />
             </button>
             {showRecentStudies && (
               <div className="rt-dropdown-menu">
-                <div className="rt-dropdown-item active">
+                <div
+                  className={`rt-dropdown-item ${selectedStudy === 'MUTALA (ACRN) - PROTECT-Africa' ? 'active' : ''}`}
+                  onClick={() => { setSelectedStudy('MUTALA (ACRN) - PROTECT-Africa'); setShowRecentStudies(false); }}
+                >
                   <strong>MUTALA (ACRN) - PROTECT-Africa (A202501 v1.2)</strong>
                   <div style={{ fontSize: '11px', color: '#64748b' }}>Primary Study • EOPE &amp; Biomarker Trial</div>
                 </div>
-                <div className="rt-dropdown-item">
+                <div
+                  className={`rt-dropdown-item ${selectedStudy === 'LOPE-Nigeria' ? 'active' : ''}`}
+                  onClick={() => { setSelectedStudy('LOPE-Nigeria'); setShowRecentStudies(false); }}
+                >
                   <strong>LOPE-Nigeria (ACRN-202503 v1.1)</strong>
                   <div style={{ fontSize: '11px', color: '#64748b' }}>Late-Onset Pre-Eclampsia Cohort</div>
                 </div>

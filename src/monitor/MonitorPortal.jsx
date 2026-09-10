@@ -84,6 +84,235 @@ function Page({ title, desc, children }) {
   );
 }
 
+function OperationalDashboard({ user, onOpen }) {
+  const [data, setData] = useState(null);
+  const [caseProgress, setCaseProgress] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [filters, setFilters] = useState({ study: '', site: '', adjudicator: '', status: '', visit: '', date_from: '', date_to: '' });
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value);
+    });
+
+    let cancelled = false;
+    const load = () => {
+    setLoading(true);
+      setError('');
+    Promise.all([
+      fetch(`/api/monitor/operational-dashboard?${params.toString()}`, { credentials: 'include' }),
+      fetch('/api/realtime/progress', { credentials: 'include' }),
+    ])
+      .then(async ([dashboardResponse, progressResponse]) => {
+        if (!dashboardResponse.ok) {
+          const detail = await dashboardResponse.json().catch(() => ({}));
+          throw new Error(detail.detail || 'Dashboard is unavailable.');
+        }
+        if (!progressResponse.ok) {
+          const detail = await progressResponse.json().catch(() => ({}));
+          throw new Error(detail.detail || 'Case progress is unavailable.');
+        }
+        return Promise.all([dashboardResponse.json(), progressResponse.json()]);
+      })
+        .then(([payload, progressPayload]) => {
+          if (!cancelled) {
+            setData(payload);
+            setCaseProgress(progressPayload);
+          }
+        })
+        .catch((e) => { if (!cancelled) setError(e.message || 'Unable to load dashboard.'); })
+        .finally(() => { if (!cancelled) setLoading(false); });
+    };
+    load();
+    const timer = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [filters]);
+
+  const summary = data?.summary || {};
+  const summaryCards = [
+    ['Available participants', summary.available_participants ?? 0],
+    ['Available visits', summary.available_visits ?? 0],
+    ['Assigned visits', summary.assigned_visits ?? 0],
+    ['Pending', summary.pending_visits ?? 0],
+    ['Completed', summary.completed_visits ?? 0],
+    ['Overdue', summary.overdue_visits ?? 0],
+    ['Concordant', summary.concordant_visits ?? 0],
+    ['Discordant', summary.discordant_visits ?? 0],
+    ['Escalated', summary.escalated_visits ?? 0],
+  ];
+
+  return (
+    <Page
+      title="Operational Progress Dashboard"
+      desc="Visit-level workflow status for adjudication coordinators, monitors, and committee oversight."
+    >
+      {loading ? (
+        <div className="a-notice">Loading adjudication progress…</div>
+      ) : error ? (
+        <div className="a-notice a-notice-error">{error}</div>
+      ) : (
+        <>
+          <div className="a-panel" style={{ marginBottom: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
+              <label style={{ display: 'grid', gap: '6px' }}>
+                <span>Study</span>
+                <select className="chair-input" value={filters.study} onChange={(e) => setFilters((prev) => ({ ...prev, study: e.target.value }))}>
+                  <option value="">All</option>
+                  {(data?.filters?.studies || []).map((study) => (
+                    <option key={study} value={study}>{study}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'grid', gap: '6px' }}>
+                <span>Site</span>
+                <select className="chair-input" value={filters.site} onChange={(e) => setFilters((prev) => ({ ...prev, site: e.target.value }))}>
+                  <option value="">All</option>
+                  {(data?.filters?.sites || []).map((site) => (
+                    <option key={site} value={site}>{site}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'grid', gap: '6px' }}>
+                <span>Adjudicator</span>
+                <select className="chair-input" value={filters.adjudicator} onChange={(e) => setFilters((prev) => ({ ...prev, adjudicator: e.target.value }))}>
+                  <option value="">All</option>
+                  {(data?.filters?.adjudicators || []).map((adjudicator) => (
+                    <option key={adjudicator} value={adjudicator}>{adjudicator}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'grid', gap: '6px' }}>
+                <span>Status</span>
+                <select className="chair-input" value={filters.status} onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}>
+                  <option value="">All</option>
+                  {(data?.filters?.statuses || []).map((status) => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'grid', gap: '6px' }}>
+                <span>Visit</span>
+                <input className="chair-input" value={filters.visit} onChange={(e) => setFilters((prev) => ({ ...prev, visit: e.target.value }))} placeholder="V01" />
+              </label>
+              <label style={{ display: 'grid', gap: '6px' }}>
+                <span>From</span>
+                <input className="chair-input" type="date" value={filters.date_from} onChange={(e) => setFilters((prev) => ({ ...prev, date_from: e.target.value }))} />
+              </label>
+              <label style={{ display: 'grid', gap: '6px' }}>
+                <span>To</span>
+                <input className="chair-input" type="date" value={filters.date_to} onChange={(e) => setFilters((prev) => ({ ...prev, date_to: e.target.value }))} />
+              </label>
+            </div>
+          </div>
+
+          <div className="monitor-metrics" style={{ marginTop: '0' }}>
+            {summaryCards.map(([label, value]) => (
+              <div key={label}>
+                <b>{value}</b>
+                <span>{label}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="a-panel" style={{ marginTop: '16px', padding: '16px' }}>
+            <strong>Unique case progress</strong>
+            <div className="monitor-metrics" style={{ marginTop: '12px' }}>
+              <div><b>{caseProgress?.summary?.unique_cases ?? 0}</b><span>Unique cases</span></div>
+              <div><b>{caseProgress?.by_case_status?.PENDING ?? 0}</b><span>Pending cases</span></div>
+              <div><b>{caseProgress?.by_case_status?.IN_PROGRESS ?? 0}</b><span>In progress</span></div>
+              <div><b>{caseProgress?.summary?.completed_cases ?? 0}</b><span>Completed cases</span></div>
+              <div><b>{caseProgress?.summary?.adjudicated_visits ?? 0}</b><span>Adjudicated visits</span></div>
+              <div><b>{caseProgress?.summary?.duplicate_source_records ?? 0}</b><span>Duplicate source records</span></div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', margin: '14px 0 5px' }}>
+              <span>Adjudicated / closed completion rate</span>
+              <strong>{caseProgress?.summary?.completion_pct ?? 0}%</strong>
+            </div>
+            <ProgressBar pct={caseProgress?.summary?.completion_pct ?? 0} tone="success" />
+          </div>
+
+          <div className="a-panel" style={{ marginTop: '16px', padding: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <strong>Overall completion</strong>
+              <span>{summary.overall_completion_pct ?? 0}%</span>
+            </div>
+            <ProgressBar pct={summary.overall_completion_pct ?? 0} tone="success" />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginTop: '16px' }}>
+              <div className="a-stat-card"><span>Awaiting Reviewer C</span><strong>{summary.awaiting_reviewer_c ?? 0}</strong></div>
+              <div className="a-stat-card"><span>Awaiting committee review</span><strong>{summary.awaiting_committee_review ?? 0}</strong></div>
+              <div className="a-stat-card"><span>Target progress</span><strong>{summary.target_progress_pct ?? 0}%</strong></div>
+              <div className="a-stat-card"><span>Escalated</span><strong>{summary.escalated_visits ?? 0}</strong></div>
+            </div>
+          </div>
+
+          <div className="a-panel" style={{ marginTop: '16px', padding: '16px' }}>
+            <h3 style={{ margin: '0 0 12px' }}>Progress by status</h3>
+            <div style={{ display: 'grid', gap: '12px' }}>
+              {Object.entries(data?.by_status || {}).map(([key, value]) => (
+                <div key={key}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                    <span>{key}</span>
+                    <strong>{value}</strong>
+                  </div>
+                  <ProgressBar pct={Math.min(100, (value / Math.max(summary.available_visits || 1, 1)) * 100)} tone={key === 'PENDING' ? 'info' : key === 'DISCORDANT' ? 'error' : 'success'} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="a-panel" style={{ marginTop: '16px' }}>
+            <div className="a-table-wrap">
+              <table className="a-table">
+                <thead>
+                  <tr>
+                    <th>Study</th>
+                    <th>Site</th>
+                    <th>Subject</th>
+                    <th>Visit</th>
+                    <th>Status</th>
+                    <th>Adjudicators</th>
+                    <th>Overdue</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data?.items || []).length === 0 ? (
+                    <tr>
+                      <td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: '#64748b' }}>
+                        No visit-level work matches the selected filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    (data?.items || []).map((item, idx) => (
+                      <tr key={`${item.subject_id}-${item.visit_code}-${idx}`}>
+                        <td>{item.study}</td>
+                        <td>{item.site_code}</td>
+                        <td>{item.subject_id}</td>
+                        <td>{item.visit_code}</td>
+                        <td>{item.status}</td>
+                        <td>{(item.adjudicators || []).join(', ') || 'Unassigned'}</td>
+                        <td>{item.is_overdue ? 'Yes' : 'No'}</td>
+                        <td>
+                          <button className="a-link" onClick={() => onOpen('/monitor/patients')}>Open work</button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </Page>
+  );
+}
+
 function ProgressBar({ pct, tone = 'info' }) {
   const color = tone === 'error' ? '#dc2626' : tone === 'success' ? '#16a34a' : '#F07E26';
   return (
@@ -795,36 +1024,7 @@ export default function MonitorPortal({ user, onLogout }) {
   ) : path === '/monitor/reference-ranges' ? (
     <ReferenceRanges user={user} />
   ) : (
-    <Page
-      title="Monitor / QC Dashboard"
-      desc="Import, reconstruct, derive, approve and assign longitudinal patient packages."
-    >
-      <div className="a-notice">
-        <I.Shield />
-        <div>
-          <strong>Clinical Operations Boundary</strong>
-          <span>Identifiers and prohibited biomarker content are excluded from adjudicator packages. All monitor actions are audited.</span>
-        </div>
-      </div>
-      <div className="monitor-metrics" style={{ marginTop: '16px' }}>
-        <button onClick={() => go('/monitor/imports')}>
-          <b>Import</b>
-          <span>RealTime CSV Batch</span>
-        </button>
-        <button onClick={() => go('/monitor/reconstruction')}>
-          <b>QC Review</b>
-          <span>Visit Reconstructions</span>
-        </button>
-        <button onClick={() => go('/monitor/assignments')}>
-          <b>Assignments</b>
-          <span>Reviewers A &amp; B</span>
-        </button>
-        <button onClick={() => go('/monitor/patients')}>
-          <b>Database</b>
-          <span>Blinded Participants</span>
-        </button>
-      </div>
-    </Page>
+    <OperationalDashboard user={user} onOpen={go} />
   );
 
   return (

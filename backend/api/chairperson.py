@@ -40,6 +40,231 @@ class MeetingDelegationRequest(BaseModel):
     case_ids: List[str] = Field(default_factory=list)
     note: str = Field(min_length=5)
 
+class MeetingCreateRequest(BaseModel):
+    meeting_title: str = Field(min_length=3)
+    scheduled_at: Optional[datetime] = None
+    batch_id: Optional[str] = None
+    attendees: List[str] = Field(default_factory=list)
+    case_ids: List[str] = Field(default_factory=list)
+    agenda: str = Field(default="", description="Committee meeting agenda / pre-meeting notes")
+    chair_name: Optional[str] = "Adjudication Chairperson"
+
+class MeetingCancelRequest(BaseModel):
+    reason: str = Field(default="Meeting cancelled by chairperson")
+
+class CaseFinalizeRequest(BaseModel):
+    meeting_title: str = Field(default="Committee case arbitration", min_length=3)
+    minutes: str = Field(min_length=10)
+    chair_rationale: str = Field(min_length=5)
+    final_diagnosis: DiagnosisCode
+    final_onset_class: OnsetClass
+    final_severity: SeverityGrade
+    final_certainty: CertaintyLevel
+    adopted_reviewer: ReviewerRole = ReviewerRole.CHAIR
+    attendees: List[str] = Field(default_factory=list)
+    quorum_met: bool = True
+    members_present: int = Field(default=3, ge=3)
+    visit_number: int = Field(default=1, ge=1)
+
+@router.post("/meetings")
+def create_meeting(req: MeetingCreateRequest, db: Session = Depends(get_db),
+                  user: PortalUser = Depends(require_chairperson_assignment())):
+    if not req.scheduled_at:
+        raise HTTPException(422, "scheduled_at is required to create a committee meeting.")
+
+    normalized_attendees = [str(a).strip() for a in req.attendees if str(a).strip()]
+    if not normalized_attendees:
+        normalized_attendees = [user.email]
+
+    existing = db.query(CommitteeMeeting).filter(CommitteeMeeting.status != "CANCELLED").all()
+    for meeting in existing:
+        if not meeting.scheduled_at:
+            continue
+        same_chair = meeting.chair_upn == user.email
+        overlapping_attendee = bool(set(normalized_attendees) & set(meeting.attendees or []))
+        if not (same_chair or overlapping_attendee):
+            continue
+        time_delta = abs((meeting.scheduled_at - req.scheduled_at).total_seconds())
+        if time_delta < 7200:
+            raise HTTPException(409, "This time slot conflicts with an existing committee meeting for the same chair or attendees.")
+
+    meeting = CommitteeMeeting(
+        meeting_title=req.meeting_title,
+        batch_id=req.batch_id,
+        scheduled_at=req.scheduled_at,
+        chair_upn=user.email,
+        chair_name=req.chair_name or user.display_name,
+        attendees=normalized_attendees,
+        quorum_met=False,
+        minutes=req.agenda or "Meeting scheduled for committee review.",
+        case_ids=req.case_ids or [],
+        signed=False,
+        status="SCHEDULED",
+    )
+    db.add(meeting)
+    db.flush()
+    db.add(AuditEvent(
+        event_type="COMMITTEE_MEETING_SCHEDULED",
+        actor_upn=user.email,
+        actor_role="CHAIRPERSON",
+        description=f"Committee meeting '{req.meeting_title}' scheduled for {req.scheduled_at.isoformat()}.",
+        event_metadata={
+            "meeting_id": str(meeting.id),
+            "batch_id": req.batch_id,
+            "attendees": normalized_attendees,
+            "case_ids": req.case_ids or [],
+            "agenda": req.agenda or "Meeting scheduled for committee review.",
+        },
+        timestamp=datetime.utcnow(),
+    ))
+    db.commit()
+    return {
+        "id": str(meeting.id),
+        "title": meeting.meeting_title,
+        "batch_id": meeting.batch_id,
+        "status": meeting.status,
+        "scheduled_at": meeting.scheduled_at.isoformat() if meeting.scheduled_at else None,
+        "case_count": len(meeting.case_ids or []),
+        "attendees": meeting.attendees,
+    }
+
+@router.post("/meetings/{meeting_id}/cancel")
+def cancel_meeting(meeting_id: str, req: MeetingCancelRequest, db: Session = Depends(get_db),
+                  user: PortalUser = Depends(require_chairperson_assignment())):
+    meeting = db.query(CommitteeMeeting).filter_by(id=uuid.UUID(meeting_id)).first()
+    if not meeting:
+        raise HTTPException(404, "Meeting not found.")
+    meeting.status = "CANCELLED"
+    meeting.minutes = (meeting.minutes or "") + (f"\nCancelled: {req.reason}" if req.reason else "\nCancelled by chairperson.")
+    db.add(AuditEvent(
+        event_type="COMMITTEE_MEETING_CANCELLED",
+        actor_upn=user.email,
+        actor_role="CHAIRPERSON",
+        description=f"Committee meeting '{meeting.meeting_title}' cancelled. Reason: {req.reason}",
+        event_metadata={"meeting_id": str(meeting.id), "reason": req.reason},
+        timestamp=datetime.utcnow(),
+    ))
+    db.commit()
+    return {"status": "cancelled", "meeting_id": str(meeting.id), "reason": req.reason}
+
+@router.post("/cases/{subject_id}/finalize")
+def finalize_case(subject_id: str, req: CaseFinalizeRequest, db: Session = Depends(get_db),
+                  user: PortalUser = Depends(require_chairperson_assignment())):
+    """Finalize one discordant visit from the chairperson case queue."""
+    participant = db.query(Participant).filter(
+        (Participant.subject_id == subject_id) |
+        (Participant.case_number == subject_id)
+    ).first()
+    if not participant:
+        try:
+            participant = db.query(Participant).filter_by(id=uuid.UUID(subject_id)).first()
+        except (ValueError, AttributeError):
+            participant = None
+    if not participant:
+        raise HTTPException(404, "Participant not found.")
+
+    visit = db.query(AdjudicationVisit).filter_by(
+        participant_id=participant.id, visit_number=req.visit_number
+    ).first()
+    if not visit:
+        raise HTTPException(404, "The subject visit does not exist.")
+    decision = db.query(CommitteeDecision).filter_by(visit_id=visit.id).first()
+    if decision and decision.locked:
+        raise HTTPException(409, "This case already has a locked committee decision.")
+    if req.final_diagnosis == DiagnosisCode.OTHER:
+        raise HTTPException(422, "Other requires the Reviewer C escalation path and rationale.")
+
+    signed_records = db.query(AdjudicationRecord).filter_by(
+        visit_id=visit.id, signed=True
+    ).all()
+    roles = {record.reviewer_role for record in signed_records}
+    if not {ReviewerRole.REVIEWER_A, ReviewerRole.REVIEWER_B}.issubset(roles):
+        raise HTTPException(409, "Both Reviewer A and Reviewer B must be signed before committee finalization.")
+    if participant.status not in {
+        AdjudicationStatus.DISCORDANT,
+        AdjudicationStatus.COMMITTEE_PENDING,
+        AdjudicationStatus.THREE_WAY_DIVERGENT,
+    } and visit.status not in {"DISCORDANT", "COMMITTEE_PENDING", "AWAITING_REVIEWER_C", "THREE_WAY_DIVERGENT"}:
+        raise HTTPException(409, "Only discordant or escalated cases can be finalized from this queue.")
+
+    now_dt = datetime.utcnow()
+    normalized_attendees = [str(value).strip() for value in req.attendees if str(value).strip()]
+    if user.email not in normalized_attendees:
+        normalized_attendees.insert(0, user.email)
+    meeting = CommitteeMeeting(
+        meeting_title=req.meeting_title,
+        chair_upn=user.email,
+        chair_name=user.display_name or "Adjudication Chairperson",
+        attendees=normalized_attendees,
+        quorum_met=req.quorum_met,
+        minutes=req.minutes,
+        case_ids=[participant.subject_id],
+        signed=True,
+        signed_at=now_dt,
+        status="CLOSED",
+    )
+    db.add(meeting)
+    db.flush()
+
+    if not decision:
+        decision = CommitteeDecision(
+            participant_id=participant.id,
+            visit_id=visit.id,
+            visit_number=visit.visit_number,
+        )
+        db.add(decision)
+    signature_hash = hashlib.sha256(
+        f"CASE|{participant.subject_id}|{visit.visit_number}|{user.email}|{now_dt.isoformat()}".encode()
+    ).hexdigest()
+    decision.adopted_reviewer = req.adopted_reviewer
+    decision.final_diagnosis = req.final_diagnosis
+    decision.final_onset_class = req.final_onset_class
+    decision.final_severity = req.final_severity
+    decision.final_certainty = req.final_certainty
+    decision.chair_rationale = req.chair_rationale
+    decision.quorum_met = req.quorum_met
+    decision.members_present = req.members_present
+    decision.chair_upn = user.email
+    decision.chair_name = user.display_name or "Adjudication Chairperson"
+    decision.meeting_id = str(meeting.id)
+    decision.signed_at = now_dt
+    decision.signature_hash = signature_hash
+    decision.locked = True
+    decision.locked_at = now_dt
+    decision.closed = True
+    decision.closed_at = now_dt
+    decision.concordance_status = "CHAIR_LOCKED"
+    participant.status = AdjudicationStatus.CLOSED
+    visit.status = "CLOSED"
+    visit.resolution_type = "CHAIR_LOCKED"
+    visit.finalized_at = now_dt
+
+    db.add(AuditEvent(
+        event_type="CHAIRPERSON_CASE_FINALIZED",
+        participant_id=participant.id,
+        actor_upn=user.email,
+        actor_role="CHAIRPERSON",
+        description=f"Chairperson finalized {participant.subject_id} visit {visit.visit_number}.",
+        event_metadata={
+            "meeting_id": str(meeting.id),
+            "visit_id": str(visit.id),
+            "final_diagnosis": req.final_diagnosis.value,
+            "chair_rationale": req.chair_rationale,
+            "signature_hash": signature_hash,
+        },
+        timestamp=now_dt,
+    ))
+    db.commit()
+    return {
+        "status": "success",
+        "subject_id": participant.subject_id,
+        "visit_number": visit.visit_number,
+        "meeting_id": str(meeting.id),
+        "participant_status": participant.status.value,
+        "visit_status": visit.status,
+        "signature_hash": signature_hash,
+    }
+
 @router.post("/meetings/delegate")
 def delegate_meeting(req: MeetingDelegationRequest, db: Session = Depends(get_db),
                      user: PortalUser = Depends(require_chairperson_assignment())):
@@ -407,13 +632,15 @@ def list_meetings(db: Session = Depends(get_db), user: PortalUser = Depends(requ
                 "attendees": m.attendees,
                 "quorum_met": m.quorum_met,
                 "minutes": m.minutes,
+                "agenda": m.minutes or "",
                 "case_count": len(m.case_ids or []),
                 "case_ids": m.case_ids,
                 "signed_at": m.signed_at.isoformat() if m.signed_at else None,
                 "signature_hash": m.signature_hash,
-                "status": m.status
-                ,"delegated_to_upn": m.delegated_to_upn
-                ,"scheduled_at": m.scheduled_at.isoformat() if m.scheduled_at else None
+                "status": m.status,
+                "delegated_to_upn": m.delegated_to_upn,
+                "scheduled_at": m.scheduled_at.isoformat() if m.scheduled_at else None,
+                "convened_at": m.convened_at.isoformat() if m.convened_at else None,
             }
             for m in rows
         ]

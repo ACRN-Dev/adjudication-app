@@ -7,11 +7,26 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.auth import PortalUser
 from models.monitor import MonitorAuditEvent
-ROLES = {"ADJUDICATION_COORDINATOR", "MONITOR_QC_REVIEWER", "QA_REVIEWER", "RELEASE_OPERATOR", "MONITOR", "ADMIN"}
+ROLES = {
+    "ADJUDICATION_COORDINATOR",
+    "MONITOR_QC_REVIEWER",
+    "QA_REVIEWER",
+    "RELEASE_OPERATOR",
+    "MONITOR",
+    "ADMIN",
+    "CHAIRPERSON",
+    "COORDINATOR",
+    "MONITOR_QC",
+}
 PROHIBITED=("sflt-1","sflt1","plgf","seng","biomarker","poc result","treatment allocation","randomisation","randomization")
 @dataclass(frozen=True)
 class MonitorIdentity: upn:str; role:str; studies:tuple[str,...]
 def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get_db),x_demo_user:Optional[str]=Header(None),x_demo_role:Optional[str]=Header(None),x_study_scope:Optional[str]=Header(None)):
+    demo_enabled = os.getenv("ENABLE_DEMO_ACCOUNTS","false").lower()=="true"
+    if demo_enabled and x_demo_user and x_demo_role:
+        if x_demo_role.upper() not in ROLES:
+            raise HTTPException(403,"Monitor Portal access denied")
+        return MonitorIdentity(x_demo_user,x_demo_role.upper(),tuple(filter(None,(x_study_scope or "").split(","))))
     if acrn_demo_session:
         from services.auth_service import _hash_token
         from models.auth import AuthSession
@@ -29,8 +44,11 @@ def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get
                 if user.role=="ADMIN":
                     studies=tuple(filter(None,(user.study_scope or "*").split(",")))
                     return MonitorIdentity(user.email,"ADMIN",studies)
+                if user.role=="CHAIRPERSON":
+                    studies=tuple(filter(None,(user.study_scope or "*").split(",")))
+                    return MonitorIdentity(user.email,"CHAIRPERSON",studies)
                 raise HTTPException(403,"Monitor Portal access denied")
-    if os.getenv("ENABLE_DEMO_ACCOUNTS","false").lower()!="true": raise HTTPException(401,"Authentication required")
+    if not demo_enabled: raise HTTPException(401,"Authentication required")
     if not x_demo_user or not x_demo_role: raise HTTPException(401,"Authentication required")
     if x_demo_role.upper() not in ROLES: raise HTTPException(403,"Monitor Portal access denied")
     return MonitorIdentity(x_demo_user,x_demo_role.upper(),tuple(filter(None,(x_study_scope or "").split(","))))

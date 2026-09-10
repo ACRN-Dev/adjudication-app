@@ -40,7 +40,7 @@ export default function SidebarNav({
   const menuItems = [
     {
       id: 'subjects',
-      label: 'Subject Queue (Step 1)',
+      label: 'Subject Queue',
       icon: Users,
       action: () => { setActiveView('workbench'); setCurrentStep(1); },
       active: activeView === 'workbench' && currentStep === 1,
@@ -48,21 +48,21 @@ export default function SidebarNav({
     },
     {
       id: 'evidence',
-      label: 'eSource Evidence (Step 2)',
+      label: 'eSource Evidence',
       icon: Activity,
       action: () => { setActiveView('workbench'); setCurrentStep(2); },
       active: activeView === 'workbench' && currentStep === 2,
     },
     {
       id: 'sign',
-      label: 'Approve & Sign (Step 3)',
+      label: 'Approve & Sign',
       icon: FileText,
       action: () => { setActiveView('workbench'); setCurrentStep(3); },
       active: activeView === 'workbench' && currentStep === 3,
     },
     {
       id: 'tmf',
-      label: 'Locked eTMF (Step 4)',
+      label: 'Locked eTMF',
       icon: Lock,
       action: () => { if (isSigned) { setActiveView('workbench'); setCurrentStep(4); } },
       active: activeView === 'workbench' && currentStep === 4,

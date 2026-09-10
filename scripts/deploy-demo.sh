@@ -18,7 +18,7 @@ $COMPOSE build
 echo "Applying and verifying database migrations (no data purge)..."
 $COMPOSE run --rm --no-deps app python backend/scripts/init_prod.py --schema-only
 
-echo "Starting demo deployment with ENABLE_DEMO_ACCOUNTS=true ..."
+echo "Starting demo deployment with ENABLE_DEMO_DATA=true and ENABLE_DEMO_ACCOUNTS=true ..."
 $COMPOSE up -d
 
 echo "Waiting for health check..."

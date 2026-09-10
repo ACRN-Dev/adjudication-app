@@ -19,7 +19,7 @@ export default function HelpModal({ onClose }) {
           <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
             <div style={{ background: '#f97316', color: '#fff', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, flexShrink: 0 }}>1</div>
             <div>
-              <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>Step 1: Pick a Patient or Upload CSV</h4>
+              <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>Pick a Patient or Upload CSV</h4>
               <p style={{ fontSize: '13px', color: '#64748b', marginTop: '2px' }}>
                 Select an existing study patient card or drag-and-drop a patient CSV data file (from EDC or LIMS).
               </p>
@@ -29,7 +29,7 @@ export default function HelpModal({ onClose }) {
           <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
             <div style={{ background: '#0284c7', color: '#fff', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, flexShrink: 0 }}>2</div>
             <div>
-              <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>Step 2: Review Findings</h4>
+              <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>Review Findings</h4>
               <p style={{ fontSize: '13px', color: '#64748b', marginTop: '2px' }}>
                 Look over the 3 summary boxes: Blood Pressure timeline, Lab alerts (proteinuria, platelets, liver/kidney values), and the automated rule diagnosis.
               </p>
@@ -39,7 +39,7 @@ export default function HelpModal({ onClose }) {
           <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
             <div style={{ background: '#10b981', color: '#fff', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, flexShrink: 0 }}>3</div>
             <div>
-              <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>Step 3: Approve & Sign</h4>
+              <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>Approve & Sign</h4>
               <p style={{ fontSize: '13px', color: '#64748b', marginTop: '2px' }}>
                 Read the clear clinical summary text, choose your final diagnosis, and enter your password to sign and lock the record.
               </p>

@@ -14,7 +14,10 @@
 services:
   app:
     environment:
-      # Enable demo mode features (like reset data)
+      # Enable resettable synthetic data in the deployed demonstration environment.
+      ENABLE_DEMO_DATA: "true"
+
+      # Enable demo mode features and demo-account authentication.
       ENABLE_DEMO_ACCOUNTS: "true"
 
       # Prevent seeding the default demo accounts (admin@acrnhealth.com, etc)

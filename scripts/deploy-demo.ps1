@@ -19,7 +19,7 @@ Write-Host "Applying and verifying database migrations (no data purge)..."
 docker compose @composeFiles run --rm --no-deps app python backend/scripts/init_prod.py --schema-only
 if ($LASTEXITCODE -ne 0) { throw "Database migration failed; the existing app was not replaced." }
 
-Write-Host "Starting demo deployment with ENABLE_DEMO_ACCOUNTS=true ..."
+Write-Host "Starting demo deployment with ENABLE_DEMO_DATA=true and ENABLE_DEMO_ACCOUNTS=true ..."
 docker compose @composeFiles up -d
 if ($LASTEXITCODE -ne 0) { throw "Docker startup failed." }
 

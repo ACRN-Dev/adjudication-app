@@ -26,6 +26,24 @@ export default function ChairpersonPortal({ user, onLogout }) {
   const [isSigning, setIsSigning] = useState(false);
   const [signSuccess, setSignSuccess] = useState(null);
   const [inspectionItem, setInspectionItem] = useState(null);
+  const [finalizeItem, setFinalizeItem] = useState(null);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [finalizeDraft, setFinalizeDraft] = useState({
+    meeting_title: 'Single-case committee arbitration',
+    minutes: '',
+    chair_rationale: '',
+    final_diagnosis: 'PE',
+    final_onset_class: 'EOPE',
+    final_severity: 'With severe features',
+    final_certainty: 'Definite',
+    attendees: 'chairperson@acrnhealth.com, adjudicatora@acrnhealth.com, adjudicatorb@acrnhealth.com',
+    members_present: 3,
+  });
+  const [newMeetingTitle, setNewMeetingTitle] = useState('Committee review and discordant case arbitration');
+  const [newMeetingDateTime, setNewMeetingDateTime] = useState('2026-09-15T14:00');
+  const [newMeetingAttendees, setNewMeetingAttendees] = useState('chairperson@acrnhealth.com, adjudicatora@acrnhealth.com, adjudicatorb@acrnhealth.com');
+  const [newMeetingBatchId, setNewMeetingBatchId] = useState('BATCH-2026-08');
+  const [newMeetingAgenda, setNewMeetingAgenda] = useState('Review discordant cases, confirm consensus and finalize decisions, then record chairperson sign-off.');
   const meetingCases = adjudications.filter((item, index, rows) =>
     rows.findIndex(candidate => candidate.subject_id === item.subject_id) === index
   );
@@ -97,6 +115,100 @@ export default function ChairpersonPortal({ user, onLogout }) {
     }
   };
 
+  const createMeeting = async (e) => {
+    e.preventDefault();
+    try {
+      const attendees = newMeetingAttendees.split(',').map(item => item.trim()).filter(Boolean);
+      const payload = {
+        meeting_title: newMeetingTitle,
+        scheduled_at: newMeetingDateTime,
+        batch_id: newMeetingBatchId || 'BATCH-UNSPECIFIED',
+        attendees,
+        case_ids: selectedCaseIds,
+        agenda: newMeetingAgenda,
+        chair_name: user?.display_name || 'Adjudication Chairperson'
+      };
+      const res = await fetch('/api/chairperson/meetings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Unable to create meeting.');
+      }
+      await fetchMeetings();
+      setNewMeetingTitle('Committee review and discordant case arbitration');
+      setNewMeetingAttendees('chairperson@acrnhealth.com, adjudicatora@acrnhealth.com, adjudicatorb@acrnhealth.com');
+      setNewMeetingAgenda('Review discordant cases, confirm consensus and finalize decisions, then record chairperson sign-off.');
+      setActiveTab('archive');
+    } catch (err) {
+      alert(err.message || 'Meeting could not be created.');
+    }
+  };
+
+  const cancelMeeting = async (meetingId, reason = 'Meeting cancelled by chairperson.') => {
+    try {
+      const res = await fetch(`/api/chairperson/meetings/${meetingId}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Unable to cancel meeting.');
+      }
+      await fetchMeetings();
+      alert('Meeting cancelled successfully.');
+    } catch (err) {
+      alert(err.message || 'Meeting cancellation failed.');
+    }
+  };
+
+  const openFinalizeCase = (item) => {
+    const reviewer = item.reviewer_a || {};
+    setFinalizeItem(item);
+    setFinalizeDraft({
+      meeting_title: 'Single-case committee arbitration',
+      minutes: '',
+      chair_rationale: '',
+      final_diagnosis: reviewer.diagnosis || 'PE',
+      final_onset_class: reviewer.onset_class || 'EOPE',
+      final_severity: reviewer.severity || 'With severe features',
+      final_certainty: reviewer.certainty || 'Definite',
+      attendees: 'chairperson@acrnhealth.com, adjudicatora@acrnhealth.com, adjudicatorb@acrnhealth.com',
+      members_present: 3,
+    });
+  };
+
+  const handleFinalizeCase = async (e) => {
+    e.preventDefault();
+    if (!finalizeItem) return;
+    setIsFinalizing(true);
+    try {
+      const res = await fetch(`/api/chairperson/cases/${encodeURIComponent(finalizeItem.subject_id)}/finalize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...finalizeDraft,
+          attendees: finalizeDraft.attendees.split(',').map(value => value.trim()).filter(Boolean),
+          members_present: Number(finalizeDraft.members_present),
+          visit_number: finalizeItem.visit_number || 1,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || 'Unable to finalize case.');
+      setFinalizeItem(null);
+      setSignSuccess(data);
+      await fetchAdjudications();
+      await fetchMeetings();
+      await fetchAgenda();
+    } catch (err) {
+      alert(err.message || 'Case finalization failed.');
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
 
   useEffect(() => {
     fetchAdjudications();
@@ -371,7 +483,14 @@ export default function ChairpersonPortal({ user, onLogout }) {
                           <td>{renderRev(adj.reviewer_b)}</td>
                           <td>{renderRev(adj.reviewer_c, true)}</td>
                           <td>{renderBadge()}</td>
-                          <td><button className="chair-btn chair-btn-secondary inspect-btn" onClick={() => setInspectionItem(adj)}><Eye size={14} /> Inspect evidence</button></td>
+                          <td>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <button className="chair-btn chair-btn-secondary inspect-btn" onClick={() => setInspectionItem(adj)}><Eye size={14} /> Inspect evidence</button>
+                              {(rawStatus.includes('DISCORDANT') || rawStatus.includes('DIVERGENT') || rawStatus.includes('REVIEWER_C')) && (
+                                <button className="chair-btn chair-btn-primary inspect-btn" onClick={() => openFinalizeCase(adj)}><CheckSquare size={14} /> Finalize case</button>
+                              )}
+                            </div>
+                          </td>
                         </tr>
                         </React.Fragment>
                       );
@@ -390,6 +509,31 @@ export default function ChairpersonPortal({ user, onLogout }) {
             onClose={() => setInspectionItem(null)}
             onSelectVisit={(v) => setInspectionItem(v)}
           />
+        )}
+
+        {finalizeItem && (
+          <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(15, 23, 42, 0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+            <form onSubmit={handleFinalizeCase} className="chair-table-card" style={{ width: 'min(720px, 100%)', maxHeight: '90vh', overflowY: 'auto', padding: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '16px', marginBottom: '18px' }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '18px' }}>Finalize {finalizeItem.subject_id}</h2>
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Visit {finalizeItem.visit_number || 1} · {finalizeItem.concordance}</div>
+                </div>
+                <button type="button" className="chair-btn chair-btn-secondary" onClick={() => setFinalizeItem(null)} aria-label="Close finalization form"><X size={16} /></button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div className="chair-form-group"><label>Final diagnosis</label><select className="chair-input" value={finalizeDraft.final_diagnosis} onChange={e => setFinalizeDraft({ ...finalizeDraft, final_diagnosis: e.target.value })}><option value="PE">PE</option><option value="Not PE">Not PE</option><option value="Severe PE">Severe PE</option><option value="Eclampsia">Eclampsia</option><option value="HELLP">HELLP</option></select></div>
+                <div className="chair-form-group"><label>Adopted onset</label><select className="chair-input" value={finalizeDraft.final_onset_class} onChange={e => setFinalizeDraft({ ...finalizeDraft, final_onset_class: e.target.value })}><option value="EOPE">EOPE</option><option value="LOPE">LOPE</option><option value="POSTPARTUM">POSTPARTUM</option><option value="UNCLASSIFIABLE">UNCLASSIFIABLE</option></select></div>
+                <div className="chair-form-group"><label>Final severity</label><select className="chair-input" value={finalizeDraft.final_severity} onChange={e => setFinalizeDraft({ ...finalizeDraft, final_severity: e.target.value })}><option value="With severe features">With severe features</option><option value="Without severe features">Without severe features</option><option value="Eclampsia / SAE">Eclampsia / SAE</option></select></div>
+                <div className="chair-form-group"><label>Final certainty</label><select className="chair-input" value={finalizeDraft.final_certainty} onChange={e => setFinalizeDraft({ ...finalizeDraft, final_certainty: e.target.value })}><option value="Definite">Definite</option><option value="Probable">Probable</option><option value="Possible">Possible</option><option value="Not PE">Not PE</option></select></div>
+              </div>
+              <div className="chair-form-group"><label>Meeting title</label><input className="chair-input" value={finalizeDraft.meeting_title} onChange={e => setFinalizeDraft({ ...finalizeDraft, meeting_title: e.target.value })} required /></div>
+              <div className="chair-form-group"><label>Attendees</label><input className="chair-input" value={finalizeDraft.attendees} onChange={e => setFinalizeDraft({ ...finalizeDraft, attendees: e.target.value })} required /></div>
+              <div className="chair-form-group"><label>Minutes</label><textarea className="chair-textarea" rows="4" value={finalizeDraft.minutes} onChange={e => setFinalizeDraft({ ...finalizeDraft, minutes: e.target.value })} placeholder="Record the case discussion and meeting outcome." minLength="10" required /></div>
+              <div className="chair-form-group"><label>Chair rationale</label><textarea className="chair-textarea" rows="4" value={finalizeDraft.chair_rationale} onChange={e => setFinalizeDraft({ ...finalizeDraft, chair_rationale: e.target.value })} placeholder="Explain why this final determination was adopted." minLength="5" required /></div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px' }}><button type="button" className="chair-btn chair-btn-secondary" onClick={() => setFinalizeItem(null)}>Cancel</button><button type="submit" className="chair-btn chair-btn-primary" disabled={isFinalizing}><ShieldCheck size={14} /> {isFinalizing ? 'Finalizing...' : 'Finalize and lock case'}</button></div>
+            </form>
+          </div>
         )}
 
         {/* TAB 2: Meeting Agenda Pack Generator */}
@@ -595,11 +739,78 @@ export default function ChairpersonPortal({ user, onLogout }) {
 
         {/* TAB 4: Meeting Archive */}
         {activeTab === 'archive' && (
-          <div className="chair-table-card">
-            <div className="chair-table-header">
+          <div className="chair-table-card" style={{ padding: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '20px' }}>
+              <div>
+                <div className="chair-table-header" style={{ marginBottom: '12px' }}>
+                  <h2>Committee Meeting Scheduling</h2>
+                </div>
+                <form onSubmit={createMeeting} style={{ display: 'grid', gap: '12px' }}>
+                  <div className="chair-form-group">
+                    <label>Meeting Title</label>
+                    <input className="chair-input" value={newMeetingTitle} onChange={(e) => setNewMeetingTitle(e.target.value)} required />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="chair-form-group">
+                      <label>Scheduled Date &amp; Time</label>
+                      <input className="chair-input" type="datetime-local" value={newMeetingDateTime} onChange={(e) => setNewMeetingDateTime(e.target.value)} required />
+                    </div>
+                    <div className="chair-form-group">
+                      <label>Batch</label>
+                      <input className="chair-input" value={newMeetingBatchId} onChange={(e) => setNewMeetingBatchId(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="chair-form-group">
+                    <label>Attendees</label>
+                    <input className="chair-input" value={newMeetingAttendees} onChange={(e) => setNewMeetingAttendees(e.target.value)} />
+                  </div>
+                  <div className="chair-form-group">
+                    <label>Agenda / Meeting Notes</label>
+                    <textarea className="chair-textarea" rows="4" value={newMeetingAgenda} onChange={(e) => setNewMeetingAgenda(e.target.value)} />
+                  </div>
+                  <button type="submit" className="chair-btn chair-btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
+                    <Calendar size={14} /> Save Meeting
+                  </button>
+                </form>
+              </div>
+
+              <div>
+                <div className="chair-table-header" style={{ marginBottom: '12px' }}>
+                  <h2>Scheduled Meetings</h2>
+                </div>
+                <div style={{ display: 'grid', gap: '10px' }}>
+                  {meetings.length === 0 ? (
+                    <div style={{ padding: '20px', background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '8px', color: '#64748b' }}>No meetings scheduled yet.</div>
+                  ) : (
+                    meetings.map(m => (
+                      <div key={m.id} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start' }}>
+                          <div>
+                            <div style={{ fontWeight: 700 }}>{m.title}</div>
+                            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                              {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : 'No date'} · {m.status}
+                            </div>
+                          </div>
+                          {m.status !== 'CANCELLED' && (
+                            <button onClick={() => cancelMeeting(m.id)} className="chair-btn chair-btn-secondary" style={{ fontSize: '11px', padding: '6px 10px' }}>
+                              <X size={12} /> Cancel
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#475569', marginTop: '8px' }}>
+                          Batch: {m.batch_id || '—'} · Cases: {m.case_count || 0}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="chair-table-header" style={{ marginTop: '24px' }}>
               <h2>Archived Committee Meetings &amp; Signed Minutes</h2>
             </div>
-            <table className="chair-table">
+            <table className="chair-table" style={{ marginTop: '12px' }}>
               <thead>
                 <tr>
                   <th>Session Title</th>

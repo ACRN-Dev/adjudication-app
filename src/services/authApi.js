@@ -12,11 +12,22 @@ async function request(path, options = {}) {
     throw new Error('The backend API is unavailable. Start it on port 8000 and try again.');
   }
   if (!res.ok) {
-    let detail = 'Request failed';
+    let detail = `Request failed (${res.status}) at ${BASE}${path}`;
     try {
       const body = await res.json();
-      detail = typeof body.detail === 'string' ? body.detail : body.detail?.message || detail;
-    } catch {}
+      if (typeof body.detail === 'string') {
+        detail = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        detail = body.detail.map((item) => item.msg || item.message || item.detail).filter(Boolean).join(' ') || detail;
+      } else {
+        detail = body.detail?.message || body.message || detail;
+      }
+    } catch {
+      try {
+        const text = await res.text();
+        if (text) detail = `${detail}: ${text.slice(0, 180)}`;
+      } catch {}
+    }
     throw new Error(detail);
   }
   return res.json();

@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { SSO_LOGIN_URL, getAuthConfig, login } from '../services/authApi';
 
+const DEMO_ACCOUNTS = [
+  { label: 'Admin', email: 'admin@acrnhealth.com' },
+  { label: 'Monitor', email: 'monitor1@acrnhealth.com' },
+  { label: 'Chair', email: 'chairperson@acrnhealth.com' },
+  { label: 'Adjudicator A', email: 'adjudicatora@acrnhealth.com' },
+  { label: 'Adjudicator B', email: 'adjudicatorb@acrnhealth.com' },
+  { label: 'Reviewer C', email: 'adjudicatorc@acrnhealth.com' },
+];
+
 export default function LoginPage({ onLoginSuccess }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -36,7 +45,13 @@ export default function LoginPage({ onLoginSuccess }) {
         }
       })
       .catch(() => {
-        if (active) setDemoEnabled(true);
+        if (active) {
+          setDemoEnabled(true);
+          if (!email) {
+            setEmail('admin@acrnhealth.com');
+            setPassword('ACRN@2026');
+          }
+        }
       });
 
     return () => { active = false; };
@@ -69,6 +84,26 @@ export default function LoginPage({ onLoginSuccess }) {
     color: '#0f172a',
     outline: 'none',
     boxSizing: 'border-box',
+  };
+
+  const loadDemoCredentials = (account = DEMO_ACCOUNTS[0]) => {
+    setEmail(account.email);
+    setPassword('ACRN@2026');
+    setErrorMsg('');
+  };
+
+  const signInDemo = async (account) => {
+    setBusy(true);
+    setErrorMsg('');
+    try {
+      setEmail(account.email);
+      setPassword('ACRN@2026');
+      onLoginSuccess(await login(account.email, 'ACRN@2026'));
+    } catch (err) {
+      setErrorMsg(err.message || 'Demo sign-in failed.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -173,8 +208,30 @@ export default function LoginPage({ onLoginSuccess }) {
           )}
 
           {demoEnabled && (
-            <div style={{ marginTop: '20px', padding: '10px 12px', backgroundColor: '#f8fafc', borderRadius: '6px', border: '1px dashed #cbd5e1', fontSize: '11px', color: '#64748b', textAlign: 'center' }}>
-              <strong>Demo Environment Active:</strong> Default demo accounts seeded for testing.
+            <div style={{ marginTop: '20px', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '6px', border: '1px dashed #cbd5e1', fontSize: '11px', color: '#64748b' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                <strong>Demo Environment Active</strong>
+                <button
+                  type="button"
+                  onClick={() => loadDemoCredentials()}
+                  style={{ border: '1px solid #cbd5e1', background: '#ffffff', borderRadius: '5px', padding: '5px 8px', fontSize: '11px', fontWeight: 700, color: '#334155', cursor: 'pointer' }}
+                >
+                  Load Demo Credentials
+                </button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: '6px' }}>
+                {DEMO_ACCOUNTS.map((account) => (
+                  <button
+                    key={account.email}
+                    type="button"
+                    onClick={() => signInDemo(account)}
+                    disabled={busy}
+                    style={{ border: '1px solid #e2e8f0', background: '#ffffff', borderRadius: '5px', padding: '6px 8px', fontSize: '11px', color: '#334155', cursor: 'pointer', textAlign: 'center' }}
+                  >
+                    {account.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>

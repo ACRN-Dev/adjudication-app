@@ -109,6 +109,7 @@ export default function AdjudicatorWorkbench({
   const [fetalProvenance, setFetalProvenance] = useState({});
   const [visit5MappingLoading, setVisit5MappingLoading] = useState(false);
   const [visit5ValidationWarning, setVisit5ValidationWarning] = useState('');
+  const [caseProgress, setCaseProgress] = useState(null);
   const isSigned = activeCase?.status?.includes('Finalized');
   const isReviewerC = activeCase?.reviewerRole === 'REVIEWER_C';
   const finalDiagnosis = selectedDiagnosis;
@@ -120,6 +121,22 @@ export default function AdjudicatorWorkbench({
   const firstUnsignedVisitIndex = pages.findIndex((visit) => !isReviewerVisitSigned(visit));
   const allReviewerVisitsSigned = pages.length > 0 && firstUnsignedVisitIndex === -1;
   const allVisitsFinalized = pages.length > 0 && pages.every(isVisitComplete);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [currentStep, selectedVisitIndex, advanceToVisitIndex]);
+
+  useEffect(() => {
+    if (currentStep !== 1) return;
+    let cancelled = false;
+    fetch('/api/realtime/progress', { credentials: 'include' })
+      .then(response => response.ok ? response.json() : null)
+      .then(payload => {
+        if (!cancelled && payload) setCaseProgress(payload);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [currentStep, user?.email]);
 
   const decisionSnapshot = () => ({
     selectedDiagnosis,
@@ -365,12 +382,28 @@ export default function AdjudicatorWorkbench({
     }, 450);
   };
 
-  // STEP 1: ASSIGNED, QC-APPROVED PATIENT DATABASE
+  // Assigned, QC-approved patient database
   if (currentStep === 1) {
     return (
       <div>
         {/* RealTime Roster Container */}
         <div className="rt-roster-card">
+          <div className="a-panel" style={{ margin: '0 0 16px', padding: '16px' }}>
+            <strong>My adjudication progress</strong>
+            <div className="monitor-metrics" style={{ marginTop: '12px' }}>
+              <div><b>{caseProgress?.summary?.unique_cases ?? 0}</b><span>Assigned unique cases</span></div>
+              <div><b>{caseProgress?.by_case_status?.PENDING ?? 0}</b><span>Pending</span></div>
+              <div><b>{caseProgress?.by_case_status?.IN_PROGRESS ?? 0}</b><span>In progress</span></div>
+              <div><b>{caseProgress?.summary?.completed_cases ?? 0}</b><span>Completed cases</span></div>
+              <div><b>{caseProgress?.summary?.adjudicated_visits ?? 0}</b><span>Adjudicated visits</span></div>
+              <div><b>{caseProgress?.summary?.completion_pct ?? 0}%</b><span>Completion rate</span></div>
+            </div>
+            {(caseProgress?.summary?.duplicate_source_records ?? 0) > 0 && (
+              <div style={{ marginTop: '10px', color: '#92400e', fontSize: '12px' }}>
+                Duplicate source uploads detected and consolidated into unique case progress.
+              </div>
+            )}
+          </div>
           <div className="rt-roster-header">
             <div className="rt-roster-title">
               {cases.length} Assigned Subjects — Adjudication Queue
@@ -495,12 +528,12 @@ export default function AdjudicatorWorkbench({
           )}
         </div>
 
-        <div className="wizard-footer"><div></div><button className="btn-large btn-next" onClick={() => setCurrentStep(2)} disabled={!activeCase}>Next: Review Patient Evidence <ArrowRight size={16}/></button></div>
+        <div className="wizard-footer"><div></div><button className="btn-large btn-next" onClick={() => setCurrentStep(2)} disabled={!activeCase}>Review Patient Evidence <ArrowRight size={16}/></button></div>
       </div>
     );
   }
 
-  // STEP 2: REVIEW EVIDENCE & SYSTEM DERIVATION — NEUTRAL CORPORATE STYLE
+  // Review evidence and system derivation
   if (currentStep === 2) {
     return (
       <div>
@@ -508,7 +541,7 @@ export default function AdjudicatorWorkbench({
           {/* Header Actions */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
             <div>
-              <h2 className="wizard-title">Step 2: Review Findings for Participant {activeCase.id}</h2>
+              <h2 className="wizard-title">Review Findings for Participant {activeCase.id}</h2>
               <p className="wizard-subtitle">
                 {activeCase.qcStatus || "FORM-ADJ-01 QC Check Passed"} • SOP-ADJ-002 Blinding Active
               </p>
@@ -852,10 +885,10 @@ export default function AdjudicatorWorkbench({
 
           <div className="wizard-footer">
             <button className="btn-large btn-back" onClick={() => setCurrentStep(1)}>
-              <ArrowLeft size={16} /> Back to Step 1
+              <ArrowLeft size={16} /> Back to Queue
             </button>
             <button className="btn-large btn-next" onClick={() => setCurrentStep(3)}>
-              Next: Approve Summary &amp; Sign <ArrowRight size={16} />
+              Approve Summary &amp; Sign <ArrowRight size={16} />
             </button>
           </div>
         </div>
@@ -863,7 +896,7 @@ export default function AdjudicatorWorkbench({
     );
   }
 
-  // STEP 4: COMPLETED & SIGNED RECORD VIEW
+  // Completed and signed record view
   if (currentStep === 4 || (currentStep === 3 && isSigned)) {
     const isConsensusFinal = isSigned || allVisitsFinalized;
     const sig = activeCase.signature || {
@@ -961,11 +994,11 @@ export default function AdjudicatorWorkbench({
     );
   }
 
-  // STEP 3: APPROVE CLINICAL SUMMARY & SIGN
+  // Approve clinical summary and sign
   return (
     <div>
       <div className="wizard-card">
-        <h2 className="wizard-title">Step 3: Approve Summary &amp; Sign Record ({activeCase.id})</h2>
+        <h2 className="wizard-title">Approve Summary &amp; Sign Record ({activeCase.id})</h2>
         <p className="wizard-subtitle">Review the selected visit summary, confirm the closed-ended diagnosis, and sign the separate visit adjudication.</p>
 
         {pages.length > 0 && <><VisitRibbon visits={pages} selectedIndex={selectedVisitIndex} onSelectVisit={handleVisitSelect}/><div className="visit-signing-context"><div><strong>{selectedVisitIndex===pages.length?'Overall adjudication summary':`Adjudicating ${selectedVisit?.name||selectedVisit?.visit_code||`Visit ${selectedVisitIndex+1}`}`}</strong><span>{selectedVisitIndex===pages.length?'Read-only roll-up of completed visit decisions.':'Only this visit and its dated evidence will be signed.'}</span></div></div></>}
@@ -1375,7 +1408,7 @@ export default function AdjudicatorWorkbench({
 
         <div className="wizard-footer">
           <button className="btn-large btn-back" onClick={() => setCurrentStep(2)}>
-            <ArrowLeft size={15} /> Back to Step 2
+            <ArrowLeft size={15} /> Back to Evidence
           </button>
 
           {selectedVisitIndex<pages.length && <button className="btn-large btn-next" onClick={() => {
@@ -1411,7 +1444,7 @@ export default function AdjudicatorWorkbench({
 
           {selectedVisitIndex===pages.length && allReviewerVisitsSigned && (
             <button className="btn-large btn-next" onClick={() => setCurrentStep(4)}>
-              Proceed to Step 4 <ArrowRight size={16} />
+              View Locked Record <ArrowRight size={16} />
             </button>
           )}
 

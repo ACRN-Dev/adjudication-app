@@ -319,3 +319,68 @@ def test_chairperson_sign_off_meeting_and_close_cases():
     meetings = r_list.json()
     assert len(meetings["items"]) >= 1
     assert any(m["title"] == "PROTECT-Africa Adjudication Batch 1 Meeting" for m in meetings["items"])
+
+
+def test_chairperson_can_schedule_and_cancel_meeting():
+    user = _chairperson_user_with_assignment()
+    previous = app.dependency_overrides.get(current_user)
+    app.dependency_overrides[current_user] = lambda: user
+    try:
+        payload = {
+            "meeting_title": "Committee review meeting scheduling test",
+            "scheduled_at": "2026-09-15T14:00:00",
+            "attendees": ["chairperson@acrnhealth.com", "adjudicatora@acrnhealth.com"],
+            "batch_id": "BATCH-TEST-SCHED",
+            "case_ids": [],
+            "agenda": "Discordant cases will be reviewed and finalized during committee meeting.",
+            "chair_name": "Assigned Chairperson",
+        }
+        create_response = client.post("/api/chairperson/meetings", json=payload)
+        assert create_response.status_code == 200
+        meeting_id = create_response.json()["id"]
+
+        cancel_response = client.post(f"/api/chairperson/meetings/{meeting_id}/cancel", json={"reason": "Rescheduled to next week."})
+        assert cancel_response.status_code == 200
+        assert cancel_response.json()["status"] == "cancelled"
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(current_user, None)
+        else:
+            app.dependency_overrides[current_user] = previous
+
+
+def test_chairperson_can_finalize_one_discordant_case():
+    subject_id = _seed_completed_case(concordant=False)
+    user = _chairperson_user_with_assignment()
+    previous = app.dependency_overrides.get(current_user)
+    app.dependency_overrides[current_user] = lambda: user
+    try:
+        response = client.post(f"/api/chairperson/cases/{subject_id}/finalize", json={
+            "meeting_title": "Single-case arbitration",
+            "minutes": "Committee reviewed the disagreement and confirmed the final outcome.",
+            "chair_rationale": "The committee adopted the evidence-supported final determination.",
+            "final_diagnosis": "PE",
+            "final_onset_class": "EOPE",
+            "final_severity": "With severe features",
+            "final_certainty": "Definite",
+            "attendees": ["adjudicatora@acrnhealth.com", "adjudicatorb@acrnhealth.com"],
+            "quorum_met": True,
+            "members_present": 3,
+            "visit_number": 1,
+        })
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(current_user, None)
+        else:
+            app.dependency_overrides[current_user] = previous
+
+    assert response.status_code == 200, response.text
+    assert response.json()["participant_status"] == "CLOSED"
+    db = TestingSession()
+    participant = db.query(Participant).filter_by(subject_id=subject_id).one()
+    visit = db.query(AdjudicationVisit).filter_by(participant_id=participant.id, visit_number=1).one()
+    decision = db.query(CommitteeDecision).filter_by(visit_id=visit.id).one()
+    assert visit.status == "CLOSED"
+    assert decision.locked is True
+    assert decision.closed is True
+    db.close()
