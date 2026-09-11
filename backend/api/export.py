@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import io, csv
+from datetime import datetime
 
 from database import get_db, DB_OFFLINE
 from models.canonical import Participant, AdjudicationStatus
@@ -295,16 +296,170 @@ def study_analysis_export(
     )
 
 
-from services.auth_service import current_user
+from services.auth_service import current_user, has_active_committee_assignment
 from models.auth import PortalUser
 from models.canonical import AuditEvent
-from datetime import datetime
 
 
 import os
 
 ENABLE_UNBLINDED_EXPORT = os.getenv("ENABLE_UNBLINDED_EXPORT", "false").lower() == "true"
 UNBLINDED_PERMITTED_ROLES = {"ADMIN"}  # Pending formal confirmation from Nqobani Ncube
+
+
+def _require_final_release_access(user: PortalUser, study: str, db: Session):
+    """Allow only delegated monitors and actively assigned chairpersons to unblind final outputs."""
+    role = (user.portal_role or user.role or "").upper()
+    if user.role == "CHAIRPERSON":
+        if not has_active_committee_assignment(user, db):
+            raise HTTPException(403, "Access denied: no active committee assignment for chairperson role")
+    elif user.role == "MONITOR":
+        studies = {item.strip() for item in (user.study_scope or "*").split(",") if item.strip()}
+        if "*" not in studies and study not in studies:
+            raise HTTPException(403, "Study outside delegated scope")
+    else:
+        raise HTTPException(403, f"Access denied: role '{role}' is not authorized for final study release")
+
+
+def _final_release_rows(study: str, db: Session):
+    from models.canonical import AdjudicationRecord, CommitteeDecision, ReviewerRole
+
+    final_statuses = {"FINALIZED", "CLOSED"}
+    participants = [
+        p for p in db.query(Participant).filter(Participant.study == study).all()
+        if p.status and p.status.value in final_statuses
+    ]
+    rows = []
+    for participant in participants:
+        for visit in sorted(participant.visits, key=lambda row: row.visit_number):
+            committee_decision = db.query(CommitteeDecision).filter_by(
+                participant_id=participant.id, visit_id=visit.id, locked=True
+            ).first()
+            reviewer_record = db.query(AdjudicationRecord).filter_by(
+                visit_id=visit.id, reviewer_role=ReviewerRole.REVIEWER_A, signed=True
+            ).first()
+            if committee_decision:
+                source_record = db.get(AdjudicationRecord, visit.final_record_id) if visit.final_record_id else reviewer_record
+                outcome = committee_decision.final_diagnosis
+                onset = committee_decision.final_onset_class
+                severity = committee_decision.final_severity
+                certainty = committee_decision.final_certainty
+                diagnosis_date = committee_decision.date_of_diagnosis
+                source = "CHAIR_LOCKED"
+            elif reviewer_record:
+                source_record = reviewer_record
+                outcome = reviewer_record.diagnosis
+                onset = reviewer_record.onset_class
+                severity = reviewer_record.severity
+                certainty = reviewer_record.certainty
+                diagnosis_date = reviewer_record.date_of_diagnosis
+                source = "CONCORDANT"
+            else:
+                continue
+
+            rows.append({
+                "original_subject_id": participant.subject_id,
+                "blinded_subject_id": participant.case_number or "",
+                "case_number": participant.case_number or "",
+                "study": participant.study.value if participant.study else study,
+                "site_code": participant.site_code or "",
+                "visit_number": visit.visit_number,
+                "outcome": outcome.value if outcome else "",
+                "onset_class": onset.value if onset else "",
+                "severity": severity.value if severity else "",
+                "certainty": certainty.value if certainty else "",
+                "date_of_diagnosis": diagnosis_date.isoformat() if diagnosis_date else "",
+                "concordance_source": source,
+                "comment": source_record.comment if source_record else "",
+            })
+    return rows
+
+
+def _audit_final_release(db: Session, user: PortalUser, study: str, fmt: str, row_count: int):
+    db.add(AuditEvent(
+        event_type="FINAL_STUDY_RELEASE_EXPORTED",
+        actor_upn=user.email,
+        actor_role=user.portal_role or user.role,
+        description=f"Final study release {fmt.upper()} exported for '{study}'.",
+        event_metadata={"study": study, "format": fmt, "row_count": row_count},
+        timestamp=datetime.utcnow(),
+    ))
+    db.commit()
+
+
+def _final_release_csv(rows):
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=[
+        "original_subject_id", "blinded_subject_id", "case_number", "study", "site_code",
+        "visit_number", "outcome", "onset_class", "severity", "certainty",
+        "date_of_diagnosis", "concordance_source", "comment",
+    ])
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8")
+
+
+@router.get("/final-study.csv")
+def final_study_csv_export(
+    study: str = "PROTECT-Africa",
+    db: Session = Depends(get_db),
+    user: PortalUser = Depends(current_user),
+):
+    _require_final_release_access(user, study, db)
+    rows = _final_release_rows(study, db)
+    _audit_final_release(db, user, study, "csv", len(rows))
+    return StreamingResponse(
+        io.BytesIO(_final_release_csv(rows)),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=ACRN_Final_Study_Release_{study}.csv"},
+    )
+
+
+@router.get("/final-study.pdf")
+def final_study_pdf_export(
+    study: str = "PROTECT-Africa",
+    db: Session = Depends(get_db),
+    user: PortalUser = Depends(current_user),
+):
+    _require_final_release_access(user, study, db)
+    rows = _final_release_rows(study, db)
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+
+    buffer = io.BytesIO()
+    document = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=10 * mm, rightMargin=10 * mm, topMargin=10 * mm, bottomMargin=10 * mm)
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph(f"ACRN Final Study Adjudication Release: {study}", styles["Title"]),
+        Paragraph(f"Generated {datetime.utcnow().isoformat()} UTC. Includes finalised/closed adjudications and the original subject number for authorised study finalisation.", styles["Normal"]),
+        Spacer(1, 6 * mm),
+    ]
+    headers = ["Original subject", "Blinded case", "Visit", "Site", "Outcome", "Onset", "Severity", "Certainty", "Decision source", "Diagnosis date"]
+    data = [headers] + [[
+        row["original_subject_id"], row["blinded_subject_id"], row["visit_number"], row["site_code"],
+        row["outcome"], row["onset_class"], row["severity"], row["certainty"],
+        row["concordance_source"], row["date_of_diagnosis"],
+    ] for row in rows]
+    table = Table(data, repeatRows=1, colWidths=[30 * mm, 30 * mm, 14 * mm, 24 * mm, 27 * mm, 27 * mm, 32 * mm, 24 * mm, 29 * mm, 32 * mm])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#172033")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+    ]))
+    story.append(table)
+    document.build(story)
+    _audit_final_release(db, user, study, "pdf", len(rows))
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=ACRN_Final_Study_Release_{study}.pdf"},
+    )
 
 
 @router.get("/unblinded-analysis")

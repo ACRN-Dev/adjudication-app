@@ -90,6 +90,32 @@ function OperationalDashboard({ user, onOpen }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filters, setFilters] = useState({ study: '', site: '', adjudicator: '', status: '', visit: '', date_from: '', date_to: '' });
+  const [releaseStudy, setReleaseStudy] = useState('PROTECT-Africa');
+  const [releaseFormat, setReleaseFormat] = useState('');
+
+  const downloadFinalRelease = async (format) => {
+    setReleaseFormat(format);
+    try {
+      const response = await fetch(`/api/export/final-study.${format}?study=${encodeURIComponent(releaseStudy)}`, { credentials: 'include' });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail.detail || `Final study ${format.toUpperCase()} export failed (${response.status}).`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ACRN_Final_Study_Release_${releaseStudy}.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      alert(downloadError.message || 'Final study release export failed.');
+    } finally {
+      setReleaseFormat('');
+    }
+  };
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -165,6 +191,21 @@ function OperationalDashboard({ user, onOpen }) {
         <div className="a-notice a-notice-error">{error}</div>
       ) : (
         <>
+          <div className="monitor-toolbar" style={{ marginBottom: '16px' }}>
+            <div>
+              <strong style={{ display: 'block', fontSize: '13px' }}>Final study release</strong>
+              <span style={{ color: '#64748b', fontSize: '11px' }}>Authorised finalised adjudications with original subject numbers.</span>
+            </div>
+            <select className="chair-input" value={releaseStudy} onChange={(e) => setReleaseStudy(e.target.value)} aria-label="Final release study">
+              {(data?.filters?.studies || ['PROTECT-Africa', 'LOPE-Nigeria']).map((study) => <option key={study} value={study}>{study}</option>)}
+            </select>
+            <button className="a-primary" onClick={() => downloadFinalRelease('csv')} disabled={Boolean(releaseFormat)}>
+              <I.Download size={14} /> {releaseFormat === 'csv' ? 'Preparing…' : 'Final CSV'}
+            </button>
+            <button className="a-secondary" onClick={() => downloadFinalRelease('pdf')} disabled={Boolean(releaseFormat)}>
+              <I.FileText size={14} /> {releaseFormat === 'pdf' ? 'Preparing…' : 'Final PDF'}
+            </button>
+          </div>
           <details className="a-panel dashboard-disclosure" style={{ marginBottom: '16px' }} open>
             <summary className="dashboard-disclosure-summary">
               <span><span className="dashboard-kicker">View controls</span><strong>Filter dashboard</strong></span>

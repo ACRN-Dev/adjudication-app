@@ -28,6 +28,8 @@ export default function ChairpersonPortal({ user, onLogout }) {
   const [inspectionItem, setInspectionItem] = useState(null);
   const [finalizeItem, setFinalizeItem] = useState(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [releaseStudy, setReleaseStudy] = useState('PROTECT-Africa');
+  const [releaseFormat, setReleaseFormat] = useState('');
   const [finalizeDraft, setFinalizeDraft] = useState({
     meeting_title: 'Single-case committee arbitration',
     minutes: '',
@@ -112,6 +114,30 @@ export default function ChairpersonPortal({ user, onLogout }) {
       }
     } catch (e) {
       console.error('Failed to fetch meetings:', e);
+    }
+  };
+
+  const downloadFinalRelease = async (format) => {
+    setReleaseFormat(format);
+    try {
+      const response = await fetch(`/api/export/final-study.${format}?study=${encodeURIComponent(releaseStudy)}`, { credentials: 'include' });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail.detail || `Final study ${format.toUpperCase()} export failed (${response.status}).`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ACRN_Final_Study_Release_${releaseStudy}.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert(error.message || 'Final study release export failed.');
+    } finally {
+      setReleaseFormat('');
     }
   };
 
@@ -386,9 +412,21 @@ export default function ChairpersonPortal({ user, onLogout }) {
                   Live batch monitoring of primary (A) and secondary (B) reviewer submissions and Reviewer C escalations.
                 </div>
               </div>
-              <button onClick={fetchAdjudications} className="chair-btn chair-btn-secondary" style={{ fontSize: '12px' }}>
-                <RefreshCw size={13} className={loading ? 'spin' : ''} /> Refresh
-              </button>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <select className="chair-input" value={releaseStudy} onChange={(e) => setReleaseStudy(e.target.value)} aria-label="Final release study">
+                  <option value="PROTECT-Africa">PROTECT-Africa</option>
+                  <option value="LOPE-Nigeria">LOPE-Nigeria</option>
+                </select>
+                <button onClick={() => downloadFinalRelease('csv')} className="chair-btn chair-btn-primary" style={{ fontSize: '12px' }} disabled={Boolean(releaseFormat)}>
+                  <Download size={13} /> {releaseFormat === 'csv' ? 'Preparing…' : 'Final CSV'}
+                </button>
+                <button onClick={() => downloadFinalRelease('pdf')} className="chair-btn chair-btn-secondary" style={{ fontSize: '12px' }} disabled={Boolean(releaseFormat)}>
+                  <FileText size={13} /> {releaseFormat === 'pdf' ? 'Preparing…' : 'Final PDF'}
+                </button>
+                <button onClick={fetchAdjudications} className="chair-btn chair-btn-secondary" style={{ fontSize: '12px' }}>
+                  <RefreshCw size={13} className={loading ? 'spin' : ''} /> Refresh
+                </button>
+              </div>
             </div>
 
             <div className="chair-table-wrap">
