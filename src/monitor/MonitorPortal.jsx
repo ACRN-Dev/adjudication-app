@@ -145,6 +145,14 @@ function OperationalDashboard({ user, onOpen }) {
     ['Discordant', summary.discordant_visits ?? 0],
     ['Escalated', summary.escalated_visits ?? 0],
   ];
+  const statusTone = (status) => {
+    if (['FINALIZED', 'CONCORDANT', 'RESOLVED_BY_MAJORITY'].includes(status)) return 'success';
+    if (['DISCORDANT', 'AWAITING_REVIEWER_C'].includes(status)) return 'warning';
+    return 'info';
+  };
+  const statusTotal = Math.max(summary.available_visits || 0, 1);
+  const completionPct = Number(summary.overall_completion_pct || 0);
+  const caseCompletionPct = Number(caseProgress?.summary?.completion_pct || 0);
 
   return (
     <Page
@@ -157,7 +165,12 @@ function OperationalDashboard({ user, onOpen }) {
         <div className="a-notice a-notice-error">{error}</div>
       ) : (
         <>
-          <div className="a-panel" style={{ marginBottom: '16px' }}>
+          <details className="a-panel dashboard-disclosure" style={{ marginBottom: '16px' }} open>
+            <summary className="dashboard-disclosure-summary">
+              <span><span className="dashboard-kicker">View controls</span><strong>Filter dashboard</strong></span>
+              <I.ChevronDown size={18} aria-hidden="true" />
+            </summary>
+            <div className="dashboard-disclosure-content">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
               <label style={{ display: 'grid', gap: '6px' }}>
                 <span>Study</span>
@@ -208,64 +221,101 @@ function OperationalDashboard({ user, onOpen }) {
                 <input className="chair-input" type="date" value={filters.date_to} onChange={(e) => setFilters((prev) => ({ ...prev, date_to: e.target.value }))} />
               </label>
             </div>
-          </div>
+            </div>
+          </details>
 
-          <div className="monitor-metrics" style={{ marginTop: '0' }}>
+          <div className="monitor-metrics monitor-metrics-primary" style={{ marginTop: '0' }}>
             {summaryCards.map(([label, value]) => (
-              <div key={label}>
+              <div className="metric-card" key={label}>
                 <b>{value}</b>
                 <span>{label}</span>
               </div>
             ))}
           </div>
 
-          <div className="a-panel" style={{ marginTop: '16px', padding: '16px' }}>
-            <strong>Unique case progress</strong>
-            <div className="monitor-metrics" style={{ marginTop: '12px' }}>
-              <div><b>{caseProgress?.summary?.unique_cases ?? 0}</b><span>Unique cases</span></div>
-              <div><b>{caseProgress?.by_case_status?.PENDING ?? 0}</b><span>Pending cases</span></div>
-              <div><b>{caseProgress?.by_case_status?.IN_PROGRESS ?? 0}</b><span>In progress</span></div>
-              <div><b>{caseProgress?.summary?.completed_cases ?? 0}</b><span>Completed cases</span></div>
-              <div><b>{caseProgress?.summary?.adjudicated_visits ?? 0}</b><span>Adjudicated visits</span></div>
-              <div><b>{caseProgress?.summary?.duplicate_source_records ?? 0}</b><span>Duplicate source records</span></div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', margin: '14px 0 5px' }}>
-              <span>Adjudicated / closed completion rate</span>
-              <strong>{caseProgress?.summary?.completion_pct ?? 0}%</strong>
-            </div>
-            <ProgressBar pct={caseProgress?.summary?.completion_pct ?? 0} tone="success" />
+          <div className="dashboard-overview" style={{ marginTop: '16px' }}>
+            <details className="a-panel dashboard-completion-panel dashboard-disclosure" open>
+              <summary className="dashboard-panel-heading dashboard-disclosure-summary">
+                <div>
+                  <span className="dashboard-kicker">Live workflow</span>
+                  <h3>Overall completion</h3>
+                </div>
+                <strong className="dashboard-percent">{completionPct}%</strong>
+                <I.ChevronDown size={18} aria-hidden="true" />
+              </summary>
+              <div className="dashboard-disclosure-content">
+              <div className="dashboard-progress-track">
+                <div className="dashboard-progress-fill" style={{ width: `${Math.min(100, completionPct)}%` }} />
+              </div>
+              <div className="dashboard-progress-meta">
+                <span>{summary.completed_visits ?? 0} completed of {summary.available_visits ?? 0} visits</span>
+                <span>Target {summary.target_progress_pct ?? 0}%</span>
+              </div>
+              <div className="dashboard-alert-grid">
+                <div><span>Awaiting Reviewer C</span><strong>{summary.awaiting_reviewer_c ?? 0}</strong></div>
+                <div><span>Committee review</span><strong>{summary.awaiting_committee_review ?? 0}</strong></div>
+                <div><span>Escalated</span><strong>{summary.escalated_visits ?? 0}</strong></div>
+              </div>
+              </div>
+            </details>
+
+            <details className="a-panel dashboard-case-panel dashboard-disclosure" open>
+              <summary className="dashboard-panel-heading dashboard-disclosure-summary">
+                <div>
+                  <span className="dashboard-kicker">Deduplicated view</span>
+                  <h3>Unique case progress</h3>
+                </div>
+                <strong className="dashboard-percent">{caseCompletionPct}%</strong>
+                <I.ChevronDown size={18} aria-hidden="true" />
+              </summary>
+              <div className="dashboard-disclosure-content">
+              <div className="dashboard-case-track">
+                <div className="dashboard-case-fill" style={{ width: `${Math.min(100, caseCompletionPct)}%` }} />
+              </div>
+              <div className="dashboard-case-summary">
+                <div><b>{caseProgress?.summary?.unique_cases ?? 0}</b><span>Unique cases</span></div>
+                <div><b>{caseProgress?.by_case_status?.PENDING ?? 0}</b><span>Pending</span></div>
+                <div><b>{caseProgress?.summary?.completed_cases ?? 0}</b><span>Closed</span></div>
+              </div>
+              <div className="dashboard-case-footnote">
+                <span>{caseProgress?.summary?.adjudicated_visits ?? 0} adjudicated visits</span>
+                <span>{caseProgress?.summary?.duplicate_source_records ?? 0} duplicate source records</span>
+              </div>
+              </div>
+            </details>
           </div>
 
-          <div className="a-panel" style={{ marginTop: '16px', padding: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <strong>Overall completion</strong>
-              <span>{summary.overall_completion_pct ?? 0}%</span>
-            </div>
-            <ProgressBar pct={summary.overall_completion_pct ?? 0} tone="success" />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginTop: '16px' }}>
-              <div className="a-stat-card"><span>Awaiting Reviewer C</span><strong>{summary.awaiting_reviewer_c ?? 0}</strong></div>
-              <div className="a-stat-card"><span>Awaiting committee review</span><strong>{summary.awaiting_committee_review ?? 0}</strong></div>
-              <div className="a-stat-card"><span>Target progress</span><strong>{summary.target_progress_pct ?? 0}%</strong></div>
-              <div className="a-stat-card"><span>Escalated</span><strong>{summary.escalated_visits ?? 0}</strong></div>
-            </div>
-          </div>
-
-          <div className="a-panel" style={{ marginTop: '16px', padding: '16px' }}>
-            <h3 style={{ margin: '0 0 12px' }}>Progress by status</h3>
-            <div style={{ display: 'grid', gap: '12px' }}>
+          <details className="a-panel dashboard-status-panel dashboard-disclosure" style={{ marginTop: '16px' }} open>
+            <summary className="dashboard-panel-heading dashboard-disclosure-summary">
+              <div>
+                <span className="dashboard-kicker">Visit-level workflow</span>
+                <h3>Progress by status</h3>
+              </div>
+              <span className="dashboard-total-label">{summary.available_visits ?? 0} visits</span>
+              <I.ChevronDown size={18} aria-hidden="true" />
+            </summary>
+            <div className="dashboard-disclosure-content">
+            <div className="dashboard-status-list">
               {Object.entries(data?.by_status || {}).map(([key, value]) => (
-                <div key={key}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
-                    <span>{key}</span>
-                    <strong>{value}</strong>
+                <div className="dashboard-status-row" key={key}>
+                  <div className="dashboard-status-label">
+                    <span className={`dashboard-status-dot ${statusTone(key)}`} />
+                    <span>{key.replaceAll('_', ' ')}</span>
                   </div>
-                  <ProgressBar pct={Math.min(100, (value / Math.max(summary.available_visits || 1, 1)) * 100)} tone={key === 'PENDING' ? 'info' : key === 'DISCORDANT' ? 'error' : 'success'} />
+                  <div className="dashboard-status-bar"><div className={`dashboard-status-fill ${statusTone(key)}`} style={{ width: `${Math.min(100, (value / statusTotal) * 100)}%` }} /></div>
+                  <strong>{value}</strong>
                 </div>
               ))}
             </div>
-          </div>
+            </div>
+          </details>
 
-          <div className="a-panel" style={{ marginTop: '16px' }}>
+          <details className="a-panel dashboard-disclosure" style={{ marginTop: '16px' }} open>
+            <summary className="dashboard-disclosure-summary">
+              <span><span className="dashboard-kicker">Queue detail</span><strong>Visit-level work</strong></span>
+              <I.ChevronDown size={18} aria-hidden="true" />
+            </summary>
+            <div className="dashboard-disclosure-content dashboard-table-content">
             <div className="a-table-wrap">
               <table className="a-table">
                 <thead>
@@ -294,7 +344,7 @@ function OperationalDashboard({ user, onOpen }) {
                         <td>{item.site_code}</td>
                         <td>{item.subject_id}</td>
                         <td>{item.visit_code}</td>
-                        <td>{item.status}</td>
+                        <td><span className={`dashboard-status-chip ${statusTone(item.status)}`}>{item.status.replaceAll('_', ' ')}</span></td>
                         <td>{(item.adjudicators || []).join(', ') || 'Unassigned'}</td>
                         <td>{item.is_overdue ? 'Yes' : 'No'}</td>
                         <td>
@@ -306,7 +356,8 @@ function OperationalDashboard({ user, onOpen }) {
                 </tbody>
               </table>
             </div>
-          </div>
+            </div>
+          </details>
         </>
       )}
     </Page>
@@ -608,9 +659,10 @@ function Assignments({ user, onOpen }) {
   const [roster, setRoster] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [assignmentTab, setAssignmentTab] = useState('active');
 
   const load = () =>
-    Promise.all([listPatients(user, { page_size: 100 }), listAdjudicators(user)])
+    Promise.all([listPatients(user, { page_size: 100, view: assignmentTab }), listAdjudicators(user)])
       .then(([patients, adjudicators]) => {
         setData(patients);
         setRoster(adjudicators);
@@ -618,7 +670,7 @@ function Assignments({ user, onOpen }) {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [assignmentTab]);
 
   const doAssign = async (patientId, email, role) => {
     try {
@@ -655,9 +707,19 @@ function Assignments({ user, onOpen }) {
       desc="Assign independent blinded adjudicator accounts (Reviewer A & Reviewer B) to QC-approved participant packages."
     >
       <div className="monitor-toolbar" style={{ marginBottom: '16px' }}>
-        <button className="a-primary" onClick={autoAssignAll} disabled={busy}>
-          <I.Users size={14} /> {busy ? 'Assigning…' : 'Auto-Assign Demo Adjudicators (A & B to All)'}
-        </button>
+        <div className="assignment-tabs" role="tablist" aria-label="Assignment status">
+          <button className={assignmentTab === 'active' ? 'a-primary' : ''} onClick={() => setAssignmentTab('active')} role="tab" aria-selected={assignmentTab === 'active'}>
+            <I.Users size={14} /> Active assignments
+          </button>
+          <button className={assignmentTab === 'completed' ? 'a-primary' : ''} onClick={() => setAssignmentTab('completed')} role="tab" aria-selected={assignmentTab === 'completed'}>
+            <I.CheckCircle2 size={14} /> Completed cases
+          </button>
+        </div>
+        {assignmentTab === 'active' && (
+          <button className="a-primary" onClick={autoAssignAll} disabled={busy}>
+            <I.Users size={14} /> {busy ? 'Assigning…' : 'Auto-Assign Demo Adjudicators (A & B to All)'}
+          </button>
+        )}
       </div>
 
       {msg && (
@@ -679,33 +741,41 @@ function Assignments({ user, onOpen }) {
               <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{p.subject_id}</span>,
               `${p.visit_count} visits`,
               p.onset_classification,
-              <span className={`badge-qc ${p.qc_status === 'ASSIGNED' ? 'assigned' : 'approved'}`}>
-                {p.qc_status}
+              <span className={`badge-qc ${p.is_completed || p.qc_status === 'ASSIGNED' ? 'assigned' : 'approved'}`}>
+                {p.is_completed ? 'COMPLETED' : p.qc_status}
               </span>,
-              <select
-                value={revA}
-                onChange={(e) => doAssign(p.id, e.target.value, 'REVIEWER_A')}
-                style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}
-              >
-                <option value="">-- Assign Reviewer A --</option>
-                {roster.map((a) => (
-                  <option key={a.email} value={a.email} disabled={a.email === revB}>
-                    {a.display_name} ({a.email})
-                  </option>
-                ))}
-              </select>,
-              <select
-                value={revB}
-                onChange={(e) => doAssign(p.id, e.target.value, 'REVIEWER_B')}
-                style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}
-              >
-                <option value="">-- Assign Reviewer B --</option>
-                {roster.map((a) => (
-                  <option key={a.email} value={a.email} disabled={a.email === revA}>
-                    {a.display_name} ({a.email})
-                  </option>
-                ))}
-              </select>,
+              assignmentTab === 'completed' ? (
+                <span className="assignment-completed-reviewer">{revA || 'Reviewer A not recorded'}</span>
+              ) : (
+                <select
+                  value={revA}
+                  onChange={(e) => doAssign(p.id, e.target.value, 'REVIEWER_A')}
+                  style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}
+                >
+                  <option value="">-- Assign Reviewer A --</option>
+                  {roster.map((a) => (
+                    <option key={a.email} value={a.email} disabled={a.email === revB}>
+                      {a.display_name} ({a.email})
+                    </option>
+                  ))}
+                </select>
+              ),
+              assignmentTab === 'completed' ? (
+                <span className="assignment-completed-reviewer">{revB || 'Reviewer B not recorded'}</span>
+              ) : (
+                <select
+                  value={revB}
+                  onChange={(e) => doAssign(p.id, e.target.value, 'REVIEWER_B')}
+                  style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}
+                >
+                  <option value="">-- Assign Reviewer B --</option>
+                  {roster.map((a) => (
+                    <option key={a.email} value={a.email} disabled={a.email === revA}>
+                      {a.display_name} ({a.email})
+                    </option>
+                  ))}
+                </select>
+              ),
               <button className="a-link" onClick={() => onOpen(p)}>
                 View Package
               </button>

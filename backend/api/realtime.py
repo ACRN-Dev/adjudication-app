@@ -16,6 +16,7 @@ from models.admin import AdjudicatorStudyContract
 from models.canonical import AdjudicationRecord, AdjudicationVisit, Participant
 router = APIRouter()
 MONITOR = {"ADJUDICATION_COORDINATOR", "MONITOR_QC_REVIEWER", "QA_REVIEWER", "RELEASE_OPERATOR", "MONITOR", "ADMIN"}
+COMPLETED_VISIT_STATUSES = {"COMPLETED", "FINALIZED", "LOCKED", "CLOSED", "CONCORDANT", "DISCORDANT", "THREE_WAY_DIVERGENT", "RESOLVED_BY_MAJORITY"}
 
 
 def _demo_contract_bypass_enabled() -> bool:
@@ -189,13 +190,29 @@ def reprocess_batch_endpoint(batch_id:uuid.UUID,background:BackgroundTasks,i=Dep
     db.commit()
     background.add_task(process_batch,b.id,True)
     return {"status":"QUEUED","batch":bjson(b)}
-def pjson(p):
+def completion_state(db, p):
+    """Project canonical adjudication completion onto every RealTime snapshot row."""
+    canonical = db.query(Participant).filter(
+        (Participant.subject_id == p.blinded_subject_id)
+        | (Participant.case_number == p.blinded_subject_id)
+    ).first()
+    if not canonical:
+        return False, 0
+    visits = db.query(AdjudicationVisit).filter_by(participant_id=canonical.id).all()
+    completed = bool(visits) and all(
+        (visit.status or "").upper() in COMPLETED_VISIT_STATUSES for visit in visits
+    )
+    return completed, len(visits)
+
+
+def pjson(p, db=None):
     assignments = []
     try:
         if hasattr(p, "reviewer_assignments") and p.reviewer_assignments:
             assignments = [{"reviewer_upn": a.reviewer_upn, "reviewer_role": a.reviewer_role} for a in p.reviewer_assignments]
     except Exception:
         assignments = []
+    is_completed, canonical_visit_count = completion_state(db, p) if db else (False, 0)
     return {
         "id":str(p.id),
         "subject_id":p.blinded_subject_id,
@@ -212,18 +229,46 @@ def pjson(p):
         "open_issues":p.open_data_issues or 0,
         "qc_status":p.workflow_status,
         "source_batch_id":str(p.source_batch_id) if p.source_batch_id else None,
-        "assignments": assignments
+        "assignments": assignments,
+        "is_completed": is_completed,
+        "case_status": "COMPLETED" if is_completed else p.workflow_status,
+        "canonical_visit_count": canonical_visit_count,
     }
 @router.get("/patients")
-def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",i=Depends(authenticated),db:Session=Depends(get_db)):
+def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",view:str="all",i=Depends(authenticated),db:Session=Depends(get_db)):
     page_val = int(page.default if hasattr(page, 'default') else page)
     size_val = int(page_size.default if hasattr(page_size, 'default') else page_size)
     q=db.query(LongitudinalParticipant)
     if search:q=q.filter(LongitudinalParticipant.blinded_subject_id.ilike(f"%{search}%"))
     if qc_status:q=q.filter_by(workflow_status=qc_status)
-    total=q.count()
-    items=q.order_by(LongitudinalParticipant.blinded_subject_id).offset((page_val-1)*size_val).limit(size_val).all()
-    return {"page":page_val,"page_size":size_val,"total":total,"items":[{**pjson(p),"lab_issues":evaluate_participant_labs(db,p)} for p in items]}
+    all_rows=q.order_by(LongitudinalParticipant.blinded_subject_id, LongitudinalParticipant.created_at.desc()).all()
+    # A new source snapshot creates a new audit row, but it must not create a second
+    # assignment target. Keep the newest snapshot for each blinded subject.
+    latest_by_subject={}
+    history_by_subject={}
+    for row in all_rows:
+        latest_by_subject.setdefault(row.blinded_subject_id, row)
+        history_by_subject.setdefault(row.blinded_subject_id, []).append(row)
+    projected=[]
+    for row in latest_by_subject.values():
+        payload=pjson(row, db)
+        historical_assignments=[]
+        seen_assignments=set()
+        for snapshot in history_by_subject.get(row.blinded_subject_id, []):
+            for assignment in snapshot.reviewer_assignments or []:
+                key=(assignment.reviewer_upn, assignment.reviewer_role)
+                if key not in seen_assignments:
+                    seen_assignments.add(key)
+                    historical_assignments.append({"reviewer_upn": assignment.reviewer_upn, "reviewer_role": assignment.reviewer_role})
+        if historical_assignments:
+            payload["assignments"] = historical_assignments
+        if view.lower() == "completed" and not payload["is_completed"]: continue
+        if view.lower() == "active" and payload["is_completed"]: continue
+        projected.append((row, payload))
+    projected.sort(key=lambda pair: pair[1]["subject_id"])
+    total=len(projected)
+    items=projected[(page_val-1)*size_val:page_val*size_val]
+    return {"page":page_val,"page_size":size_val,"total":total,"view":view,"items":[{**payload,"lab_issues":evaluate_participant_labs(db,row)} for row,payload in items]}
 def loaded(db,pid): return db.query(LongitudinalParticipant).options(selectinload(LongitudinalParticipant.visits).selectinload(VisitInstance.observations),selectinload(LongitudinalParticipant.reviewer_assignments)).filter_by(id=pid).first()
 def history_item(f):
     return {
@@ -324,7 +369,7 @@ def timeline(p,db, reviewer_upn=None):
             history["conditions"].append(item)
     rs = db.query(PatientRiskSummary).filter_by(participant_id=p.id).first()
     risk_summary = {"chips": rs.chips if rs else [], "parity_summary": rs.parity_summary if rs else "", "gravidity": rs.gravidity if rs else 0, "parity": rs.parity if rs else 0, "miscarriages": rs.miscarriages if rs else 0, "stillbirths": rs.stillbirths if rs else 0, "vaginal_deliveries": rs.vaginal_deliveries if rs else 0, "c_sections": rs.c_sections if rs else 0, "chronic_htn": rs.chronic_htn if rs else False, "pregestational_diabetes": rs.pregestational_diabetes if rs else False}
-    return {**pjson(p),"visits":visits,"longitudinal":long,"history":history,"risk_summary":risk_summary}
+    return {**pjson(p, db),"visits":visits,"longitudinal":long,"history":history,"risk_summary":risk_summary}
 @router.get("/patients/{participant_id}")
 def patient(participant_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends(get_db)):
     p=loaded(db,participant_id)
@@ -344,6 +389,7 @@ def approve(participant_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_d
 def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends(monitor),db:Session=Depends(get_db)):
     p=db.get(LongitudinalParticipant,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
+    if completion_state(db, p)[0]: raise HTTPException(409,"This case is already completed and cannot be assigned")
     if p.workflow_status=="MONITOR_QC_REQUIRED": p.workflow_status="QC_APPROVED"
     if reviewer_role not in {"REVIEWER_A","REVIEWER_B"}: raise HTTPException(422,"Invalid reviewer role")
     reviewer_upn=reviewer_upn.strip().lower()
@@ -368,7 +414,7 @@ def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends
 def assigned(i=Depends(actor),db:Session=Depends(get_db)):
     if i[1] not in {"ADJUDICATOR","REVIEWER_A","REVIEWER_B"}: raise HTTPException(403,"Adjudicator role required")
     rows=db.query(ReviewerAssignment,LongitudinalParticipant).join(LongitudinalParticipant,ReviewerAssignment.participant_id==LongitudinalParticipant.id).filter(ReviewerAssignment.reviewer_upn==i[0],LongitudinalParticipant.workflow_status=="ASSIGNED").all()
-    return [pjson(p) for _,p in rows]
+    return [pjson(p, db) for _,p in rows if not completion_state(db, p)[0]]
 
 @router.get("/progress")
 def progress(i=Depends(actor), db:Session=Depends(get_db)):
@@ -467,7 +513,7 @@ def adjudicators(i=Depends(monitor), db:Session=Depends(get_db)):
 def assigned_patient(participant_id:uuid.UUID,i=Depends(actor),db:Session=Depends(get_db)):
     if not db.query(ReviewerAssignment).filter_by(participant_id=participant_id,reviewer_upn=i[0]).first(): raise HTTPException(403,"Participant is not assigned to this reviewer")
     p=loaded(db,participant_id)
-    if not p or p.workflow_status!="ASSIGNED": raise HTTPException(404,"Assigned participant unavailable")
+    if not p or p.workflow_status!="ASSIGNED" or completion_state(db, p)[0]: raise HTTPException(404,"Assigned participant unavailable")
     audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"ADJUDICATOR"}); db.commit(); return timeline(p,db,i[0])
 
 
