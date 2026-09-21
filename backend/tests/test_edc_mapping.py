@@ -6,7 +6,7 @@ def test_edc_wide_schema_normalizes_into_canonical_long_rows():
     headers=["SUBJID","EVENT","EVENT_DT","GA_EVENT","SBP","DBP","PLT"]
     assert is_edc_schema(headers)
     rows=list(normalize_edc_rows([{"SUBJID":"P-001","EVENT":"Visit 2","EVENT_DT":"2026-08-01","GA_EVENT":"33","SBP":"160","DBP":"110","PLT":"92"}]))
-    assert {map_variable(r) for r in rows} >= {"VISIT_DATE","GA_WEEKS","SBP","DBP","PLATELETS"}
+    assert {map_variable(r) for r in rows} >= {"visit_date","ega_weeks","bp_systolic","bp_diastolic","platelets"}
     assert all(r["MRN"] == "P-001" and r["Form Title"] == "Visit 2" for r in rows)
 
 
@@ -113,36 +113,36 @@ def test_clinical_one_rows_normalization_and_lab_collation():
     assert creat is not None
     assert creat["Data Value"] == "76"
     assert "mmol/L" in creat["Data Input"]
-    assert map_variable(creat) == "CREATININE"
+    assert map_variable(creat) == "creatinine"
 
     # Check vital signs
     sbp = next((r for r in normalized if r["Field Label"] == "Systolic"), None)
     assert sbp is not None
     assert sbp["Data Value"] == "145"
-    assert map_variable(sbp) == "SBP"
+    assert map_variable(sbp) == "bp_systolic"
 
     dbp = next((r for r in normalized if r["Field Label"] == "Diastolic"), None)
     assert dbp is not None
     assert dbp["Data Value"] == "92"
-    assert map_variable(dbp) == "DBP"
+    assert map_variable(dbp) == "bp_diastolic"
 
     # Check combined GA at delivery
     ga_del = next((r for r in normalized if r["Field Label"] == "Gestational age at delivery"), None)
     assert ga_del is not None
     assert ga_del["Data Value"] == "38.4"
-    assert map_variable(ga_del) == "GA_AT_DELIVERY"
+    assert map_variable(ga_del) == "ega_delivery"
 
     # Check pregnancy outcome
     preg_out = next((r for r in normalized if r["Field Label"] == "Pregnancy Outcome"), None)
     assert preg_out is not None
     assert preg_out["Data Value"] == "Normal baby"
-    assert map_variable(preg_out) == "PREGNANCY_OUTCOME"
+    assert map_variable(preg_out) == "pregnancy_outcome"
 
     # Check confirmed IUGR
     iugr = next((r for r in normalized if r["Field Label"] == "Confirmed IUGR?"), None)
     assert iugr is not None
     assert iugr["Data Value"] == "No"
-    assert map_variable(iugr) == "CONFIRMED_IUGR"
+    assert map_variable(iugr) == "confirmed_iugr"
 
 
 def test_clinical_one_antenatal_ga_and_physical_exam_collation():
@@ -225,12 +225,12 @@ def test_clinical_one_antenatal_ga_and_physical_exam_collation():
     ga_row = next((r for r in normalized if r["Export Variable Name"] == "ga_weeks"), None)
     assert ga_row is not None
     assert ga_row["Data Value"] == "32.6"
-    assert map_variable(ga_row) == "GA_WEEKS"
+    assert map_variable(ga_row) == "ega_weeks"
 
     # Verify EFW
     efw_row = next((r for r in normalized if r["Field Label"] == "Fetal Weight"), None)
     assert efw_row is not None
-    assert map_variable(efw_row) == "EFW"
+    assert map_variable(efw_row) == "efw"
 
     # Verify physical exam collation and findings
     pe_sys = next((r for r in normalized if r["Field Label"] == "General Health Status"), None)
@@ -240,7 +240,7 @@ def test_clinical_one_antenatal_ga_and_physical_exam_collation():
     pe_find = next((r for r in normalized if "headache" in r["Field Label"].lower()), None)
     assert pe_find is not None
     assert "headache" in pe_find["Data Value"].lower()
-    assert map_variable(pe_find) == "HEADACHE"
+    assert map_variable(pe_find) == "headache"
 
     # Verify PE Status restricted classification
     pe_status = next((r for r in normalized if r["Field Label"] == "PE Status"), None)

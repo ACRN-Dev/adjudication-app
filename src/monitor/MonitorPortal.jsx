@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as I from 'lucide-react';
 import '../admin/admin.css';
 import './monitor.css';
@@ -8,7 +8,9 @@ import {
   getPatient,
   uploadRealtime,
   uploadRealtimeBulk,
-  approvePatient,
+  retryBatch,
+  deleteBatch,
+  resetRealtimeImports,
   assignPatient,
   listAdjudicators,
   listReferenceRanges,
@@ -17,16 +19,13 @@ import {
 } from '../services/realtimeApi';
 
 const nav = [
-  ['/monitor', 'Dashboard', 'LayoutDashboard'],
-  ['/monitor/imports', 'RealTime Imports', 'Upload'],
+  ['/monitor', 'Monitor Overview', 'LayoutDashboard'],
+  ['/monitor/imports', 'Import Data', 'Upload'],
   ['/monitor/patients', 'Patient Database', 'Database'],
-  ['/monitor/reconstruction', 'Visit Reconstruction QC', 'GitCompare'],
-  ['/monitor/longitudinal', 'Longitudinal Review', 'Activity'],
-  ['/monitor/assignments', 'Assignments', 'UsersRound'],
-  ['/monitor/reference-ranges', 'Lab Reference Ranges', 'SlidersHorizontal'],
-  ['/monitor/queries', 'Queries', 'MessagesSquare'],
-  ['/monitor/audit', 'Audit History', 'ScrollText']
+  ['/monitor/assignments', 'Assignments', 'UsersRound']
 ];
+
+const ADJUDICATOR_CAPACITY_LIMIT = 6;
 
 const date = (x) => (x ? new Date(x).toLocaleDateString() : '—');
 
@@ -423,10 +422,26 @@ function Imports({ user, onNavigate }) {
   const [dragging, setDragging] = useState(false);
   // Per-file upload progress, keyed by a synthetic id, for single + bulk uploads.
   const [uploads, setUploads] = useState([]);
+  const [errorDetail, setErrorDetail] = useState(null);
+  const [reportDetail, setReportDetail] = useState(null);
+  const [actionBusyId, setActionBusyId] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
+  // Tracks which batch IDs we've already reported as FAILED in the status banner,
+  // so the "accepted / pipeline active" message doesn't linger after a batch fails.
+  const knownStatuses = useRef({});
 
   const load = () =>
     listBatches(user)
-      .then(setBatches)
+      .then((next) => {
+        const previous = knownStatuses.current;
+        const newlyFailed = next.find((b) => b.status === 'FAILED' && previous[b.id] !== 'FAILED');
+        if (newlyFailed) {
+          setMsg(`Batch '${newlyFailed.filename}' failed: ${newlyFailed.error_summary || 'No error detail captured.'}`);
+          setMsgType('error');
+        }
+        knownStatuses.current = Object.fromEntries(next.map((b) => [b.id, b.status]));
+        setBatches(next);
+      })
       .catch((e) => {
         setMsg(e.message);
         setMsgType('error');
@@ -437,12 +452,60 @@ function Imports({ user, onNavigate }) {
   }, []);
 
   useEffect(() => {
-    if (!batches.some((b) => !['MONITOR_QC_REQUIRED', 'FAILED', 'CANCELLED'].includes(b.status))) return;
+    if (!batches.some((b) => !['AUTO_QC_COMPLETE', 'MONITOR_QC_REQUIRED', 'FAILED', 'CANCELLED'].includes(b.status))) return;
     const t = setInterval(() => {
       load();
     }, 1000);
     return () => clearInterval(t);
   }, [batches]);
+
+  const doRetry = async (b) => {
+    setActionBusyId(b.id);
+    try {
+      await retryBatch(b.id, user);
+      setMsg(`Retrying '${b.filename}'…`);
+      setMsgType('info');
+      load();
+    } catch (e) {
+      setMsg(e.message || 'Retry failed.');
+      setMsgType('error');
+    } finally {
+      setActionBusyId('');
+    }
+  };
+
+  const doDelete = async (b) => {
+    if (!confirm(`Delete batch '${b.filename}'? This removes its staged data so a corrected file can be re-uploaded. Demo environments only.`)) return;
+    setActionBusyId(b.id);
+    try {
+      await deleteBatch(b.id, user);
+      setMsg(`Batch '${b.filename}' deleted.`);
+      setMsgType('success');
+      load();
+    } catch (e) {
+      setMsg(e.message || 'Delete failed.');
+      setMsgType('error');
+    } finally {
+      setActionBusyId('');
+    }
+  };
+
+  const doResetAll = async () => {
+    if (!confirm('Reset ALL RealTime imports? This permanently deletes every batch, participant, and visit imported so far, so you can start completely fresh. This only works in demo/offline environments.')) return;
+    setResetBusy(true);
+    try {
+      const result = await resetRealtimeImports(user);
+      setMsg(`RealTime imports reset. ${Object.values(result.deleted || {}).reduce((a, b) => a + b, 0)} row(s) removed.`);
+      setMsgType('success');
+      knownStatuses.current = {};
+      load();
+    } catch (e) {
+      setMsg(e.message || 'Reset failed.');
+      setMsgType('error');
+    } finally {
+      setResetBusy(false);
+    }
+  };
 
   const handleFiles = async (fileList) => {
     const files = Array.from(fileList || []);
@@ -511,6 +574,11 @@ function Imports({ user, onNavigate }) {
       title="RealTime Batch Imports"
       desc="Immutable, checksummed source snapshots. Files are streamed and parsed into pseudonymized visit blocks."
     >
+      <div className="monitor-toolbar" style={{ marginBottom: '16px', justifyContent: 'flex-end' }}>
+        <button className="a-secondary" onClick={doResetAll} disabled={resetBusy}>
+          <I.RotateCcw size={14} /> {resetBusy ? 'Resetting…' : 'Reset RealTime Imports (Demo only)'}
+        </button>
+      </div>
       <div
         className={`rt-upload ${dragging ? 'dragging' : ''}`}
         onDragOver={(e) => {
@@ -573,7 +641,7 @@ function Imports({ user, onNavigate }) {
       )}
 
       <Table
-        cols={['Batch ID', 'Filename', 'Stage', 'Progress', 'Rows Processed', 'Participants', 'Visits', 'Excluded Blinded', 'Errors']}
+        cols={['Batch ID', 'Filename', 'Stage', 'Progress', 'Rows Processed', 'Participants', 'Visits', 'Accepted', 'Rejected', 'Excluded Blinded', 'Errors', 'Action']}
         rows={(batches || []).map((b) => ({
           id: b.id,
           cells: [
@@ -582,23 +650,77 @@ function Imports({ user, onNavigate }) {
             <span
               style={{
                 fontWeight: 700,
-                color: b.status === 'MONITOR_QC_REQUIRED' ? '#16a34a' : b.status === 'FAILED' ? '#dc2626' : '#ea580c'
+                color: ['AUTO_QC_COMPLETE', 'MONITOR_QC_REQUIRED'].includes(b.status) ? '#16a34a' : b.status === 'FAILED' ? '#dc2626' : '#ea580c'
               }}
             >
               {b.status || '—'}
             </span>,
             <div style={{ minWidth: '90px' }}>
-              <ProgressBar pct={b.progress_pct ?? 0} tone={b.status === 'FAILED' ? 'error' : b.status === 'MONITOR_QC_REQUIRED' ? 'success' : 'info'} />
+              <ProgressBar pct={b.progress_pct ?? 0} tone={b.status === 'FAILED' ? 'error' : ['AUTO_QC_COMPLETE', 'MONITOR_QC_REQUIRED'].includes(b.status) ? 'success' : 'info'} />
               <span style={{ fontSize: '10px', color: '#64748b' }}>{b.progress_pct ?? 0}%</span>
             </div>,
             (b.rows_processed || 0).toLocaleString(),
             b.participants ?? 0,
             b.visits ?? 0,
+            <button className="a-link" onClick={() => setReportDetail(b)}>{b.import_report?.accepted ?? '—'}</button>,
+            <button className="a-link" style={{ color: b.import_report?.rejected ? '#dc2626' : undefined }} onClick={() => setReportDetail(b)}>{b.import_report?.rejected ?? '—'}</button>,
             b.prohibited_excluded ?? 0,
-            b.errors ?? 0
+            b.errors ? (
+              <button className="a-link" style={{ color: '#dc2626', fontWeight: 700 }} onClick={() => setErrorDetail(b)}>
+                {b.errors} <I.Info size={12} style={{ verticalAlign: 'middle' }} />
+              </button>
+            ) : (
+              0
+            ),
+            b.status === 'FAILED' || b.status === 'CANCELLED' ? (
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button className="a-link" disabled={actionBusyId === b.id} onClick={() => doRetry(b)}>Retry</button>
+                <button className="a-link" style={{ color: '#dc2626' }} disabled={actionBusyId === b.id} onClick={() => doDelete(b)}>Delete</button>
+              </div>
+            ) : (
+              '—'
+            )
           ]
         }))}
       />
+
+      {errorDetail && (
+        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(15, 23, 42, 0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }} onClick={() => setErrorDetail(null)}>
+          <div className="a-panel" style={{ width: 'min(560px, 100%)', padding: '20px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '12px', marginBottom: '10px' }}>
+              <h3 style={{ margin: 0 }}>Import failure detail</h3>
+              <button className="a-link" onClick={() => setErrorDetail(null)} aria-label="Close"><I.X size={18} /></button>
+            </div>
+            <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>{errorDetail.filename}</div>
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '12px', fontSize: '13px', color: '#991b1b', whiteSpace: 'pre-wrap' }}>
+              {errorDetail.error_summary || 'No error detail was captured for this batch.'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reportDetail && (
+        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(15, 23, 42, 0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }} onClick={() => setReportDetail(null)}>
+          <div className="a-panel" style={{ width: 'min(760px, 100%)', maxHeight: '80vh', overflow: 'auto', padding: '20px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px' }}>
+              <div><h3 style={{ margin: 0 }}>Import report</h3><div style={{ fontSize: '12px', color: '#64748b' }}>{reportDetail.filename}</div></div>
+              <button className="a-link" onClick={() => setReportDetail(null)} aria-label="Close"><I.X size={18} /></button>
+            </div>
+            <div className="monitor-metrics" style={{ marginBottom: '14px' }}>
+              <div><b>{reportDetail.import_report?.accepted ?? 0}</b><span>Accepted</span></div>
+              <div><b>{reportDetail.import_report?.rejected ?? 0}</b><span>Rejected</span></div>
+              <div><b>{reportDetail.mapping_version || '—'}</b><span>Mapping version</span></div>
+            </div>
+            <Table
+              cols={['Subject', 'Result', 'Present visits', 'Accepted visits', 'Rejected visits', 'Reason']}
+              rows={(reportDetail.import_report?.participants || []).map((item) => ({
+                id: item.subject_id,
+                cells: [item.subject_id, <span className={`badge-qc ${item.accepted ? 'approved' : 'pending'}`}>{item.status}</span>, item.present_visits, item.accepted_visits, item.rejected_visits, item.reasons?.join(' ') || 'Missing visits are accepted.']
+              }))}
+            />
+          </div>
+        </div>
+      )}
     </Page>
   );
 }
@@ -727,11 +849,21 @@ function Assignments({ user, onOpen }) {
     setBusy(true);
     setMsg('Assigning demo adjudicators A & B to all subjects…');
     try {
-      if (roster.length < 2) { setMsg('At least two active adjudicators are required.'); return; }
+      const available = [...roster].map((a) => ({ ...a, active_workload: a.active_workload || 0 }));
+      const eligible = available.filter((a) => a.active_workload < ADJUDICATOR_CAPACITY_LIMIT);
+      if (eligible.length < 2) { setMsg(`At least two adjudicators below the ${ADJUDICATOR_CAPACITY_LIMIT}-case capacity are required.`); return; }
       for (const p of data.items) {
-        const ordered=[...roster].sort((a,b)=>(a.active_workload||0)-(b.active_workload||0)||a.email.localeCompare(b.email));
-        await assignPatient(p.id, ordered[0].email, 'REVIEWER_A', user);
-        await assignPatient(p.id, ordered[1].email, 'REVIEWER_B', user);
+        const ordered = [...eligible].sort((a,b)=>(a.active_workload||0)-(b.active_workload||0)||a.email.localeCompare(b.email));
+        const reviewerA = ordered[0];
+        const reviewerB = ordered[1];
+        if (!reviewerA || !reviewerB) {
+          setMsg(`Unable to assign ${p.subject_id}: no eligible reviewers remain under the capacity cap.`);
+          return;
+        }
+        await assignPatient(p.id, reviewerA.email, 'REVIEWER_A', user);
+        await assignPatient(p.id, reviewerB.email, 'REVIEWER_B', user);
+        reviewerA.active_workload += 1;
+        reviewerB.active_workload += 1;
       }
       setMsg('Auto-assigned Adjudicator A & Adjudicator B to all participants!');
       load();
@@ -775,6 +907,10 @@ function Assignments({ user, onOpen }) {
         rows={data.items.map((p) => {
           const revA = (p.assignments || []).find((a) => a.reviewer_role === 'REVIEWER_A')?.reviewer_upn || '';
           const revB = (p.assignments || []).find((a) => a.reviewer_role === 'REVIEWER_B')?.reviewer_upn || '';
+          const rosterOptions = roster.map((a) => ({
+            ...a,
+            atCapacity: (a.active_workload || 0) >= ADJUDICATOR_CAPACITY_LIMIT,
+          }));
           return {
             id: p.id,
             data: p,
@@ -794,9 +930,9 @@ function Assignments({ user, onOpen }) {
                   style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}
                 >
                   <option value="">-- Assign Reviewer A --</option>
-                  {roster.map((a) => (
-                    <option key={a.email} value={a.email} disabled={a.email === revB}>
-                      {a.display_name} ({a.email})
+                  {rosterOptions.map((a) => (
+                    <option key={a.email} value={a.email} disabled={a.email === revB || a.atCapacity}>
+                      {a.display_name} ({a.email}){a.atCapacity ? ' · cap reached' : ` · ${a.active_workload || 0}/${ADJUDICATOR_CAPACITY_LIMIT}`}
                     </option>
                   ))}
                 </select>
@@ -810,9 +946,9 @@ function Assignments({ user, onOpen }) {
                   style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}
                 >
                   <option value="">-- Assign Reviewer B --</option>
-                  {roster.map((a) => (
-                    <option key={a.email} value={a.email} disabled={a.email === revA}>
-                      {a.display_name} ({a.email})
+                  {rosterOptions.map((a) => (
+                    <option key={a.email} value={a.email} disabled={a.email === revA || a.atCapacity}>
+                      {a.display_name} ({a.email}){a.atCapacity ? ' · cap reached' : ` · ${a.active_workload || 0}/${ADJUDICATOR_CAPACITY_LIMIT}`}
                     </option>
                   ))}
                 </select>
@@ -876,20 +1012,18 @@ function Patients({ user, onOpen }) {
 
 function Timeline({ patient, user, onClose }) {
   if (!patient) return null;
+  const visits = (patient.visits || [])
+    .filter((visit) => /^V0[1-6]$/i.test(String(visit.name || visit.visit_code || '')))
+    .sort((a, b) => Number(String(a.name || '').replace(/\D/g, '')) - Number(String(b.name || '').replace(/\D/g, '')));
+  const visitMap = Array.from({ length: 6 }, (_, index) => {
+    const code = `V0${index + 1}`;
+    return visits.find((visit) => String(visit.name || visit.visit_code || '').toUpperCase() === code) || { name: code, missing: true };
+  });
   const [assignRole, setAssignRole] = useState('REVIEWER_A');
   const [roster, setRoster] = useState([]);
   const [selectedAdjudicator, setSelectedAdjudicator] = useState('');
   const [msg, setMsg] = useState('');
   useEffect(() => { listAdjudicators(user).then(setRoster).catch(e => setMsg(e.message)); }, [user]);
-
-  const approve = async () => {
-    try {
-      await approvePatient(patient.id, user);
-      setMsg('Participant package QC approved.');
-    } catch (e) {
-      setMsg(e.message);
-    }
-  };
 
   const assign = async () => {
     try {
@@ -905,9 +1039,6 @@ function Timeline({ patient, user, onClose }) {
       <div className="monitor-toolbar" style={{ alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <button onClick={onClose}>
           <I.ArrowLeft size={14} /> Back
-        </button>
-        <button className="a-primary" onClick={approve}>
-          Approve Package QC
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', padding: '4px 8px', borderRadius: '6px' }}>
           <select value={assignRole} onChange={(e) => setAssignRole(e.target.value)} style={{ fontSize: '11px', padding: '4px' }}>
@@ -945,8 +1076,26 @@ function Timeline({ patient, user, onClose }) {
         </div>
       )}
 
+      <div className="a-panel" style={{ marginBottom: '14px', padding: '12px 14px' }}>
+        <strong style={{ display: 'block', marginBottom: '10px' }}>Six-visit data map</strong>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(90px, 1fr))', gap: '8px' }}>
+          {visitMap.map((visit) => {
+            const evidenceCount = Object.values(visit.evidence || {}).reduce((count, rows) => count + rows.length, 0);
+            const qcStatus = visit.missing ? 'NOT IMPORTED' : visit.reconstruction?.qc_status || 'PENDING';
+            return (
+              <div key={visit.name} style={{ border: '1px solid #cbd5e1', borderRadius: '5px', padding: '8px', background: visit.missing ? '#f8fafc' : '#ffffff' }}>
+                <strong>{visit.name}</strong>
+                <div style={{ fontSize: '11px', color: '#475569', marginTop: '4px' }}>{visit.missing ? 'No visit block' : date(visit.date)}</div>
+                <div style={{ fontSize: '10px', color: visit.missing ? '#94a3b8' : '#0369a1', marginTop: '4px' }}>{visit.missing ? '—' : `${evidenceCount} mapped fields`}</div>
+                <span className={`badge-qc ${String(qcStatus).toLowerCase() === 'qc_approved' ? 'approved' : 'pending'}`} style={{ marginTop: '6px', display: 'inline-block', fontSize: '9px' }}>{qcStatus}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="rt-timeline">
-        {patient.visits.map((v) => (
+        {visits.map((v) => (
           <details key={v.id}>
             <summary>
               <b>
@@ -965,7 +1114,7 @@ function Timeline({ patient, user, onClose }) {
             <Table
               cols={['Variable', 'Value', 'Observed', 'Date Confidence', 'Provenance', 'Source']}
               rows={Object.entries(v.evidence).flatMap(([k, a]) =>
-                a.map((x, i) => ({
+                a.filter((x, index, rows) => rows.findIndex((candidate) => String(candidate.value ?? '') === String(x.value ?? '')) === index).map((x, i) => ({
                   id: k + i,
                   cells: [
                     <span style={{ fontWeight: 600 }}>{k}</span>,
@@ -1110,14 +1259,26 @@ function ReferenceRanges({ user }) {
   );
 }
 
-export default function MonitorPortal({ user, onLogout }) {
+export default function MonitorPortal({ user, onLogout, isEmbedded }) {
   const [path, setPath] = useState(location.pathname);
   const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    let pop = () => setPath(location.pathname);
+    let navEvent = (e) => setPath(e.detail);
+    addEventListener('popstate', pop);
+    addEventListener('app-nav', navEvent);
+    return () => {
+      removeEventListener('popstate', pop);
+      removeEventListener('app-nav', navEvent);
+    };
+  }, []);
 
   const go = (p) => {
     history.pushState({}, '', p);
     setPath(p);
     setSelected(null);
+    dispatchEvent(new CustomEvent('app-nav', { detail: p }));
   };
 
   const open = async (r) => setSelected(await getPatient(r.id, user));
@@ -1126,17 +1287,15 @@ export default function MonitorPortal({ user, onLogout }) {
     <Timeline patient={selected} user={user} onClose={() => setSelected(null)} />
   ) : path === '/monitor/imports' ? (
     <Imports user={user} onNavigate={go} />
-  ) : path === '/monitor/reconstruction' ? (
-    <ReconstructionQC user={user} onOpen={open} />
   ) : path === '/monitor/assignments' ? (
     <Assignments user={user} onOpen={open} />
-  ) : path === '/monitor/patients' || path === '/monitor/longitudinal' ? (
+  ) : path === '/monitor/patients' ? (
     <Patients user={user} onOpen={open} />
-  ) : path === '/monitor/reference-ranges' ? (
-    <ReferenceRanges user={user} />
   ) : (
     <OperationalDashboard user={user} onOpen={go} />
   );
+
+  if (isEmbedded) return <ErrorBoundary>{content}</ErrorBoundary>;
 
   return (
     <div className="admin-app">
@@ -1166,7 +1325,7 @@ export default function MonitorPortal({ user, onLogout }) {
       <div className="a-body">
         <aside className="a-nav">
           <section>
-            <h2>LONGITUDINAL OPERATIONS</h2>
+            <h2>CORE MONITOR</h2>
             {nav.map(([p, l, n]) => {
               const Icon = I[n] || I.Circle;
               return (

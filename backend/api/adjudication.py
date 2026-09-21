@@ -66,6 +66,12 @@ def _audit(db: Session, event_type: str, participant_id, actor_upn: str,
     ))
 
 
+class VisitOnset(BaseModel):
+    visit_number: int
+    meets_criteria: bool
+    diagnosis: Optional[DiagnosisCode] = None
+    onset_class: Optional[OnsetClass] = None
+
 class ReviewerSubmission(BaseModel):
     reviewer_role: ReviewerRole
     reviewer_upn: str = Field(min_length=3)
@@ -75,6 +81,10 @@ class ReviewerSubmission(BaseModel):
         description="Reviewer's actual password for 21 CFR Part 11 re-authentication"
     )
     mfa_code: Optional[str] = None
+    
+    is_overall_first: bool = False
+    per_visit_onset: List[VisitOnset] = Field(default_factory=list)
+
     visit_number: int = Field(default=1, ge=1, le=10)
     meets_criteria: bool
     diagnosis: DiagnosisCode
@@ -101,16 +111,7 @@ class ReviewerSubmission(BaseModel):
     fetal_neonatal_provenance: Optional[dict] = None
 
 
-@router.post("/{subject_id}/submit")
-def submit_adjudication(
-    subject_id: str,
-    sub: ReviewerSubmission,
-    db: Session = Depends(get_db),
-):
-    """
-    Submit a blinded adjudication determination for a specific visit.
-    subject_id is the BLINDED case reference (e.g. ADJ-E2E-001).
-    """
+def _process_single_submission(subject_id: str, sub: ReviewerSubmission, db: Session):
     sub.visit_date = _naive_utc(sub.visit_date)
     sub.date_of_diagnosis = _naive_utc(sub.date_of_diagnosis)
     sub.first_pe_date = _naive_utc(sub.first_pe_date)
@@ -637,8 +638,6 @@ def submit_adjudication(
     visit_status, determination, resolution = apply_visit_resolution(participant, visit, visit_records)
     artifact = finalize_case_pdf(db, participant, visit, determination) if determination else None
 
-    db.commit()
-
     return {
         "status": "success",
         "case_reference": subject_id,
@@ -654,6 +653,46 @@ def submit_adjudication(
         "pdf_sha256": artifact.pdf_sha256 if artifact else None,
     }
 
+
+
+@router.post("/{subject_id}/submit")
+def submit_adjudication(
+    subject_id: str,
+    sub: ReviewerSubmission,
+    db: Session = Depends(get_db),
+):
+    if not sub.differential_diagnosis or not sub.differential_diagnosis.strip():
+        raise HTTPException(status_code=422, detail="Differential diagnosis is required.")
+
+    if sub.is_overall_first:
+        results = []
+        for onset in sub.per_visit_onset:
+            single_sub = sub.model_copy(deep=True) if hasattr(sub, "model_copy") else sub.copy(deep=True)
+            single_sub.is_overall_first = False
+            single_sub.visit_number = onset.visit_number
+            single_sub.meets_criteria = onset.meets_criteria
+            if onset.meets_criteria:
+                single_sub.diagnosis = onset.diagnosis or sub.diagnosis
+                single_sub.onset_class = onset.onset_class or sub.onset_class
+            else:
+                single_sub.diagnosis = DiagnosisCode.NOT_PE
+                single_sub.onset_class = OnsetClass.NOT_YET_CLASSIFIABLE
+            if single_sub.visit_number != 5:
+                single_sub.fetal_neonatal_assessments = []
+                single_sub.gestational_age_at_delivery = None
+                single_sub.pregnancy_outcome = None
+                single_sub.fetal_assessment_status = None
+                single_sub.fetal_neonatal_provenance = None
+
+                
+            res = _process_single_submission(subject_id, single_sub, db)
+            results.append(res)
+        db.commit()
+        return {"status": "success", "results": results}
+    else:
+        res = _process_single_submission(subject_id, sub, db)
+        db.commit()
+        return res
 
 @router.get("/{subject_id}")
 def get_adjudication_status(

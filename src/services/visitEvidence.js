@@ -1,11 +1,11 @@
 const BLINDED_PATTERN = /sflt|sf1t|plgf|placental growth factor|poc biomarker|biomarker ratio/i;
 
 const LAB_ALIASES = {
-  PLATELETS: ['PLATELETS', 'PLATELET', 'PLATELET_COUNT', 'Platelet Count'],
-  CREATININE: ['CREATININE', 'Creatinine'],
-  AST: ['AST', 'SGOT'],
-  ALT: ['ALT', 'SGPT'],
-  LDH: ['LDH'],
+  PLATELETS: ['PLATELETS', 'platelets', 'PLATELET', 'PLATELET_COUNT', 'Platelet Count'],
+  CREATININE: ['CREATININE', 'creatinine', 'Creatinine'],
+  AST: ['AST', 'ast', 'SGOT'],
+  ALT: ['ALT', 'alt', 'SGPT'],
+  LDH: ['LDH', 'ldh'],
 };
 
 const COMPARISON_ROWS = [
@@ -127,10 +127,10 @@ function makeBpReading(visit, prefix, index, s, d, kind) {
 }
 
 function normalizeBp(visit, legacyRows = []) {
-  const sbp = fromEvidence(visit, ['SBP', 'SYSTOLIC_BP']).filter(likelyMeasurement);
-  const dbp = fromEvidence(visit, ['DBP', 'DIASTOLIC_BP']).filter(likelyMeasurement);
-  const sbpRecheck = fromEvidence(visit, ['SBP_RECHECK', 'SYSTOLIC_BP_RECHECK']).filter(likelyMeasurement);
-  const dbpRecheck = fromEvidence(visit, ['DBP_RECHECK', 'DIASTOLIC_BP_RECHECK']).filter(likelyMeasurement);
+  const sbp = fromEvidence(visit, ['SBP', 'bp_systolic', 'SYSTOLIC_BP']).filter(likelyMeasurement);
+  const dbp = fromEvidence(visit, ['DBP', 'bp_diastolic', 'DIASTOLIC_BP']).filter(likelyMeasurement);
+  const sbpRecheck = fromEvidence(visit, ['SBP_RECHECK', 'bp_systolic_recheck', 'SYSTOLIC_BP_RECHECK']).filter(likelyMeasurement);
+  const dbpRecheck = fromEvidence(visit, ['DBP_RECHECK', 'bp_diastolic_recheck', 'DIASTOLIC_BP_RECHECK']).filter(likelyMeasurement);
   const rows = [];
   sbp.forEach((s, index) => {
     const reading = makeBpReading(visit, 'bp', index, s, dbp[index], 'initial');
@@ -196,7 +196,7 @@ function normalizeLabs(visit, legacyRows = []) {
 
 function normalizeProteinuria(visit, legacyRows = []) {
   return [
-    ...fromEvidence(visit, ['UPCR', 'DIPSTICK_PROTEIN', 'PROTEINURIA', 'PROT_24H']).map((row) => ({
+    ...fromEvidence(visit, ['UPCR', 'upcr', 'DIPSTICK_PROTEIN', 'ua_protein', 'PROTEINURIA', 'PROT_24H']).map((row) => ({
       id: row.id,
       method: row.canonical,
       value: row.value,

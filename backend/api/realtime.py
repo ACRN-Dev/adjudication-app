@@ -6,11 +6,12 @@ from fastapi import APIRouter,UploadFile,File,BackgroundTasks,Depends,HTTPExcept
 from pydantic import BaseModel
 from sqlalchemy.orm import Session,selectinload
 from database import get_db
-from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInstance,ImportIssue,ReviewerAssignment,LongitudinalCaseDerivation,LabReferenceRange
-from models.history import PatientHistoryField, PatientRiskSummary
+from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInstance,ImportIssue,ReviewerAssignment,LongitudinalCaseDerivation,LabReferenceRange,CanonicalObservation,RestrictedIdentityCrosswalk
+from models.history import PatientHistoryField, PatientRiskSummary, PatientHistory
 from services.realtime_pipeline import checksum_file,process_batch,audit
 from services.auth_service import current_user, audit_auth
 from services.lab_reference import evaluate_participant_labs, LAB_ANALYTES
+from services.import_readiness import participant_import_readiness
 from models.auth import PortalUser
 from models.admin import AdjudicatorStudyContract
 from models.canonical import AdjudicationRecord, AdjudicationVisit, Participant
@@ -28,11 +29,7 @@ def _demo_contract_bypass_enabled() -> bool:
 
 def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role: str | None = Header(None), db: Session = Depends(get_db)):
     token = request.cookies.get("acrn_demo_session")
-    demo_header_auth = (
-        os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true"
-        and x_demo_user and x_demo_role
-    )
-    if token and not demo_header_auth:
+    if token:
         from services.auth_service import _hash_token
         from models.auth import AuthSession
         from services.monitor_security import ROLES as MONITOR_PORTAL_ROLES
@@ -111,9 +108,11 @@ def monitor(i = Depends(actor)):
 
 
 # Coarse, monotonically increasing progress estimate for the async batch pipeline.
+# FAILED/CANCELLED map to 0, not 100 — a failed batch never actually completed, and
+# showing a full bar next to a FAILED badge previously read as a false success signal.
 _STAGE_PCT = {
     "UPLOADED": 5, "CHECKSUM_CALCULATED": 10, "STRUCTURE_VALIDATION": 20, "ROWS_STAGED": 30,
-    "VISITS_RECONSTRUCTED": 85, "MONITOR_QC_REQUIRED": 100, "FAILED": 100, "CANCELLED": 100,
+    "VISITS_RECONSTRUCTED": 85, "AUTO_QC_COMPLETE": 100, "MONITOR_QC_REQUIRED": 100, "FAILED": 0, "CANCELLED": 0,
 }
 
 
@@ -126,7 +125,15 @@ def _progress_pct(b):
     return base
 
 
-def bjson(b): return {"id":str(b.id),"filename":b.filename,"checksum":b.checksum,"file_size":b.file_size,"uploaded_at":b.uploaded_at,"rows":b.row_count,"rows_processed":b.rows_processed,"participants":b.participant_count,"visits":b.visit_count,"mapping_version":b.mapping_version,"status":b.status,"progress_pct":_progress_pct(b),"validation_result":b.validation_result,"blinding_result":b.blinding_result,"errors":b.error_count,"warnings":b.warning_count,"prohibited_excluded":b.prohibited_count,"finished_at":b.processing_finished_at}
+def bjson(b, db=None):
+    report = {"accepted": 0, "rejected": 0, "participants": []}
+    if db and b.status in {"AUTO_QC_COMPLETE", "MONITOR_QC_REQUIRED"}:
+        participants = db.query(LongitudinalParticipant).filter_by(source_batch_id=b.id).all()
+        for participant in participants:
+            readiness = participant_import_readiness(participant)
+            report["accepted" if readiness["accepted"] else "rejected"] += 1
+            report["participants"].append({"subject_id": participant.blinded_subject_id, **readiness})
+    return {"id":str(b.id),"filename":b.filename,"checksum":b.checksum,"file_size":b.file_size,"uploaded_at":b.uploaded_at,"rows":b.row_count,"rows_processed":b.rows_processed,"participants":b.participant_count,"visits":b.visit_count,"mapping_version":b.mapping_version,"status":b.status,"progress_pct":_progress_pct(b),"validation_result":b.validation_result,"blinding_result":b.blinding_result,"errors":b.error_count,"warnings":b.warning_count,"prohibited_excluded":b.prohibited_count,"finished_at":b.processing_finished_at,"error_summary":b.error_summary,"import_report":report}
 @router.post("/batches",status_code=202)
 async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(authenticated),db:Session=Depends(get_db)):
     if not (file.filename or "").lower().endswith(".csv"): raise HTTPException(415,"RealTime import requires CSV")
@@ -137,7 +144,7 @@ async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(
     checksum=checksum_file(path); existing=db.query(RTImportBatch).filter_by(checksum=checksum).first()
     if existing: os.remove(path); raise HTTPException(409,{"message":"Exact duplicate file","batch_id":str(existing.id)})
     b=RTImportBatch(filename=os.path.basename(file.filename),checksum=checksum,file_size=size,uploaded_by=i[0],source_path=path,status="CHECKSUM_CALCULATED")
-    db.add(b); db.flush(); audit(db,i[0],i[1],"BATCH_UPLOADED","IMPORT_BATCH",b.id,{"filename":b.filename,"size":size,"checksum":checksum}); db.commit(); background.add_task(process_batch,b.id); return bjson(b)
+    db.add(b); db.flush(); audit(db,i[0],i[1],"BATCH_UPLOADED","IMPORT_BATCH",b.id,{"filename":b.filename,"size":size,"checksum":checksum}); db.commit(); background.add_task(process_batch,b.id); return bjson(b, db)
 @router.post("/batches/bulk",status_code=202)
 async def upload_bulk(background:BackgroundTasks,files:list[UploadFile]=File(...),i=Depends(monitor),db:Session=Depends(get_db)):
     """Accept multiple RealTime CSV snapshots in one request; each is queued and processed independently
@@ -158,17 +165,17 @@ async def upload_bulk(background:BackgroundTasks,files:list[UploadFile]=File(...
             b=RTImportBatch(filename=os.path.basename(file.filename),checksum=checksum,file_size=size,uploaded_by=i[0],source_path=path,status="CHECKSUM_CALCULATED")
             db.add(b); db.flush(); audit(db,i[0],i[1],"BATCH_UPLOADED","IMPORT_BATCH",b.id,{"filename":b.filename,"size":size,"checksum":checksum,"bulk":True}); db.commit()
             background.add_task(process_batch,b.id)
-            entry.update(status="QUEUED",batch=bjson(b)); results.append(entry)
+            entry.update(status="QUEUED",batch=bjson(b, db)); results.append(entry)
         except Exception as exc:
             db.rollback(); entry.update(status="ERROR",error=str(exc)); results.append(entry)
     return {"total":len(files),"accepted":sum(1 for r in results if r["status"]=="QUEUED"),"items":results}
 @router.get("/batches")
-def batches(i=Depends(authenticated),db:Session=Depends(get_db)): return [bjson(x) for x in db.query(RTImportBatch).order_by(RTImportBatch.uploaded_at.desc()).all()]
+def batches(i=Depends(authenticated),db:Session=Depends(get_db)): return [bjson(x, db) for x in db.query(RTImportBatch).order_by(RTImportBatch.uploaded_at.desc()).all()]
 @router.get("/batches/{batch_id}")
 def batch(batch_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends(get_db)):
     b=db.get(RTImportBatch,batch_id)
     if not b: raise HTTPException(404,"Batch not found")
-    return bjson(b)
+    return bjson(b, db)
 @router.post("/batches/{batch_id}/cancel")
 def cancel(batch_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends(get_db)):
     b=db.get(RTImportBatch,batch_id)
@@ -190,6 +197,46 @@ def reprocess_batch_endpoint(batch_id:uuid.UUID,background:BackgroundTasks,i=Dep
     db.commit()
     background.add_task(process_batch,b.id,True)
     return {"status":"QUEUED","batch":bjson(b)}
+@router.delete("/batches/{batch_id}")
+def delete_batch(batch_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
+    """Demo-only: remove one batch and everything it staged, so a corrected file can be
+    re-uploaded cleanly. Gated to demo/offline environments — production import history
+    must never be silently deleted."""
+    from services.demo_reset_service import is_demo_environment
+    if not is_demo_environment():
+        raise HTTPException(409,"Deleting import batches is disabled outside demo/offline environments.")
+    b=db.get(RTImportBatch,batch_id)
+    if not b: raise HTTPException(404,"Batch not found")
+    db.query(CanonicalObservation).filter_by(source_batch_id=b.id).delete()
+    db.query(VisitInstance).filter_by(source_batch_id=b.id).delete()
+    db.query(PatientHistoryField).filter_by(source_batch_id=b.id).delete()
+    p_ids=[p[0] for p in db.query(LongitudinalParticipant.id).filter_by(source_batch_id=b.id).all()]
+    if p_ids:
+        db.query(RestrictedIdentityCrosswalk).filter(RestrictedIdentityCrosswalk.participant_id.in_(p_ids)).delete(synchronize_session=False)
+        db.query(PatientRiskSummary).filter(PatientRiskSummary.participant_id.in_(p_ids)).delete(synchronize_session=False)
+        db.query(PatientHistory).filter(PatientHistory.participant_id.in_(p_ids)).delete(synchronize_session=False)
+        db.query(LongitudinalCaseDerivation).filter(LongitudinalCaseDerivation.participant_id.in_(p_ids)).delete(synchronize_session=False)
+        db.query(LongitudinalParticipant).filter(LongitudinalParticipant.id.in_(p_ids)).delete(synchronize_session=False)
+    db.query(ImportIssue).filter_by(batch_id=b.id).delete()
+    staging_path=b.source_path
+    audit(db,i[0],i[1],"IMPORT_BATCH_DELETED","IMPORT_BATCH",b.id,{"filename":b.filename,"status":b.status})
+    db.delete(b); db.commit()
+    if staging_path and os.path.exists(staging_path):
+        try: os.remove(staging_path)
+        except OSError: pass
+    return {"status":"DELETED"}
+@router.post("/batches/reset-demo")
+def reset_realtime_batches(i=Depends(monitor),db:Session=Depends(get_db)):
+    """Demo-only: wipe every RealTime batch and its derived longitudinal data so the
+    Imports page can start completely fresh. Never touches canonical adjudication
+    records, users, or admin fixtures."""
+    from services.demo_reset_service import is_demo_environment, purge_realtime_batches
+    if not is_demo_environment():
+        raise HTTPException(409,"Resetting RealTime imports is disabled outside demo/offline environments.")
+    counts=purge_realtime_batches(db)
+    audit(db,i[0],i[1],"REALTIME_IMPORTS_RESET","IMPORT_BATCH","ALL",{"deleted":counts})
+    db.commit()
+    return {"status":"RESET_COMPLETE","deleted":counts}
 def completion_state(db, p):
     """Project canonical adjudication completion onto every RealTime snapshot row."""
     canonical = db.query(Participant).filter(
@@ -213,6 +260,7 @@ def pjson(p, db=None):
     except Exception:
         assignments = []
     is_completed, canonical_visit_count = completion_state(db, p) if db else (False, 0)
+    readiness = participant_import_readiness(p) if db else None
     return {
         "id":str(p.id),
         "subject_id":p.blinded_subject_id,
@@ -233,9 +281,10 @@ def pjson(p, db=None):
         "is_completed": is_completed,
         "case_status": "COMPLETED" if is_completed else p.workflow_status,
         "canonical_visit_count": canonical_visit_count,
+        "import_readiness": readiness,
     }
 @router.get("/patients")
-def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",view:str="all",i=Depends(authenticated),db:Session=Depends(get_db)):
+def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",view:str="all",include_rejected:bool=False,i=Depends(authenticated),db:Session=Depends(get_db)):
     page_val = int(page.default if hasattr(page, 'default') else page)
     size_val = int(page_size.default if hasattr(page_size, 'default') else page_size)
     q=db.query(LongitudinalParticipant)
@@ -252,6 +301,8 @@ def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",view:st
     projected=[]
     for row in latest_by_subject.values():
         payload=pjson(row, db)
+        if not include_rejected and not payload["import_readiness"]["accepted"]:
+            continue
         historical_assignments=[]
         seen_assignments=set()
         for snapshot in history_by_subject.get(row.blinded_subject_id, []):
@@ -316,7 +367,10 @@ def timeline(p,db, reviewer_upn=None):
                 ).all()
             }
     visits=[]
-    ordered_visits = sorted(p.visits,key=lambda x:(x.visit_datetime is None,x.visit_datetime or datetime.max,x.visit_sequence))
+    ordered_visits = sorted(
+        [visit for visit in p.visits if re.fullmatch(r"V0[1-6]", str(visit.scheduled_visit_code or ""), re.IGNORECASE)],
+        key=lambda x:(x.visit_sequence or 99, x.visit_datetime is None, x.visit_datetime or datetime.max),
+    )
     for visit_index, v in enumerate(ordered_visits, start=1):
         visit_number = _timeline_visit_number(v, visit_index)
         evidence={}
@@ -337,7 +391,7 @@ def timeline(p,db, reviewer_upn=None):
         canonical_visit = canonical_visits.get(visit_number)
         reviewer_record = reviewer_records.get(visit_number)
         visits.append({
-            "id":str(v.id),"name":v.scheduled_visit_code,"occurrence":v.visit_occurrence,
+            "id":str(v.id),"name":v.scheduled_visit_code,"visit_number":visit_number,"occurrence":v.visit_occurrence,
             "date":v.visit_datetime,"ga_days":v.gestational_age_days,"form":v.form_title,
             "form_version":v.form_version,
             "reconstruction":{"method":v.reconstruction_method,"confidence":v.reconstruction_confidence,"qc_status":v.qc_status},
@@ -381,10 +435,13 @@ def patient(participant_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends
 def approve(participant_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
     p=db.get(LongitudinalParticipant,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
+    readiness = participant_import_readiness(p)
+    if not readiness["accepted"]:
+        raise HTTPException(409, {"message": "Algorithmic completeness check failed.", "readiness": readiness})
     if db.query(ImportIssue).filter_by(participant_id=p.id,resolution_status="OPEN").count(): raise HTTPException(409,"Unresolved import issues block approval")
-    if db.query(VisitInstance).filter_by(participant_id=p.id,qc_status="DATE_CONFLICT").count():
+    if db.query(VisitInstance).filter_by(participant_id=p.id).filter(VisitInstance.qc_status.in_(["MONITOR_QC_REQUIRED", "DATE_CONFLICT"])).count():
         raise HTTPException(409,"Conflicting source visit dates require Monitor/QC review before approval")
-    p.workflow_status="QC_APPROVED"; audit(db,i[0],i[1],"PARTICIPANT_QC_APPROVED","PARTICIPANT",p.id); db.commit(); return {"status":p.workflow_status}
+    p.workflow_status="QC_APPROVED"; audit(db,i[0],i[1],"PARTICIPANT_AUTO_QC_APPROVED","PARTICIPANT",p.id,{"readiness": readiness}); db.commit(); return {"status":p.workflow_status,"readiness":readiness}
 @router.post("/patients/{participant_id}/assign")
 def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends(monitor),db:Session=Depends(get_db)):
     p=db.get(LongitudinalParticipant,participant_id)
@@ -395,6 +452,16 @@ def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends
     reviewer_upn=reviewer_upn.strip().lower()
     reviewer=db.query(PortalUser).filter_by(email=reviewer_upn,role="ADJUDICATOR",status="ACTIVE").first()
     if not reviewer: raise HTTPException(422,f"Reviewer '{reviewer_upn}' must be an active adjudicator account")
+
+    max_cases = 6
+    active_cases = (
+        db.query(ReviewerAssignment)
+        .filter_by(reviewer_upn=reviewer_upn, status="ASSIGNED")
+        .count()
+    )
+    if active_cases >= max_cases:
+        raise HTTPException(409, f"Reviewer capacity reached: {reviewer_upn} already has {active_cases}/{max_cases} active assignments. Rebalance the roster before assigning another case.")
+
     demo_contract_bypass = _demo_contract_bypass_enabled()
     if not demo_contract_bypass:
         now=datetime.utcnow()

@@ -9,6 +9,7 @@ from models.longitudinal import RTImportBatch,LongitudinalParticipant,Restricted
 from services.realtime_mapping import classify,map_variable,source_value,parse_datetime,parse_numeric,parse_coded,visit_code,MAPPING_VERSION
 from services.longitudinal_derivation import derive_participant
 from services.history_parser import is_history_form, process_history_row, finalize_history
+from services.import_readiness import participant_import_readiness
 from services.edc_mapping import is_edc_schema, is_clinical_one_schema, normalize_edc_rows, normalize_clinical_one_rows
 REQUIRED_HEADERS={"MRN","Screening #","Randomization #","Form Title","Form Version","Page Title","Field type","Field Label","Data Input","Data Value","Audit Trails","Export Variable Name"}
 PSEUDO_SECRET=os.getenv("RT_PSEUDONYM_SECRET","acrn-demo-only-change-in-production").encode()
@@ -39,7 +40,7 @@ def process_batch(batch_id, reset=False):
         db.close()
         return
     try:
-        if batch.status in {"MONITOR_QC_REQUIRED","PUBLISHED","SUPERSEDED"}:
+        if batch.status in {"AUTO_QC_COMPLETE","MONITOR_QC_REQUIRED","PUBLISHED","SUPERSEDED"}:
             return
         if reset or batch.status == "FAILED":
             db.query(CanonicalObservation).filter_by(source_batch_id=batch.id).delete()
@@ -59,6 +60,7 @@ def process_batch(batch_id, reset=False):
             batch.error_summary = None
             db.commit()
         batch.status="STRUCTURE_VALIDATION"; batch.processing_started_at=datetime.utcnow(); db.commit()
+        batch.mapping_version=MAPPING_VERSION
         with open(batch.source_path,encoding="utf-8-sig",errors="replace",newline="") as f:
             pos=0
             line=f.readline()
@@ -80,7 +82,14 @@ def process_batch(batch_id, reset=False):
                     pass
                 pos=f.tell()
                 line=f.readline()
-            f.seek(header_pos if found else 0)
+            if not found:
+                raise ValueError(
+                    f"No RealTime or EDC header row found in '{batch.filename}'. This usually means the "
+                    "file was split from a larger export and only the first chunk kept the header row — "
+                    "re-export the full file, or repeat the header row at the top of every split file, "
+                    "then re-upload."
+                )
+            f.seek(header_pos)
             reader=csv.DictReader(f)
             fieldnames_clean={x.strip() for x in (reader.fieldnames or [])}
             is_c1 = is_clinical_one_schema(reader.fieldnames)
@@ -129,17 +138,25 @@ def process_batch(batch_id, reset=False):
                 if row.get("_EDC_MISSING_VISIT_KEY"):
                     visit.qc_status="EXCLUDED_MISSING_KEY_FIELDS"
                 if category=="PROHIBITED_BLINDED": batch.prohibited_count+=1; prohibited_labels.add(hashlib.sha256((row.get("Field Label") or "").encode()).hexdigest()[:12]); continue
+                if category=="DIRECT_IDENTIFIER":
+                    batch.warning_count += 1
+                    continue
                 canonical=map_variable(row)
                 if is_history_form(form): process_history_row(db, batch, p, row, row_no, history_fields=history_fields, patient_histories=patient_histories)
                 if not canonical: continue
                 value=source_value(row); fp=hashlib.sha256(f"{key}|{form}|{occ}|{canonical}|{value}|{row.get('Page Title')}|{row.get('Field Label')}".encode()).hexdigest()
                 if fp in seen_fingerprints: continue
-                seen_fingerprints.add(fp); dt=parse_datetime(value) if canonical.endswith("DATE") or "DATETIME" in canonical else None
-                if canonical=="VISIT_DATE" and dt:
+                canonical_lower = str(canonical or "").lower()
+                seen_fingerprints.add(fp); dt=parse_datetime(value) if canonical_lower.endswith("date") or canonical_lower.endswith("datetime") else None
+                if canonical in {"VISIT_DATE", "visit_date"} and dt:
                     if visit.visit_datetime is None:
                         visit.visit_datetime=dt
                     elif visit.visit_datetime != dt:
-                        visit.qc_status="DATE_CONFLICT"
+                        visit.qc_status="MONITOR_QC_REQUIRED"
+                if canonical in {"ega_weeks", "GA_WEEKS"} and parse_numeric(value) is not None:
+                    visit.gestational_age_days = round(parse_numeric(value) * 7)
+                elif canonical in {"ega_days", "GA_DAYS"} and parse_numeric(value) is not None:
+                    visit.gestational_age_days = round(parse_numeric(value))
                 obs=CanonicalObservation(participant_id=p.id,visit_id=visit.id,source_batch_id=batch.id,canonical_variable=canonical,raw_source_value=value,parsed_text_value=value or None,numeric_value=parse_numeric(value),datetime_value=dt,coded_value=parse_coded(value),observation_datetime=dt or visit.visit_datetime,date_confidence="EXACT" if dt else ("INFERRED" if visit.visit_datetime else "MISSING"),source_form=form,source_page=row.get("Page Title"),source_field_label=row.get("Field Label"),source_row_number=row_no,mapping_version=MAPPING_VERSION,quality_status="VALID" if value else "MISSING",provenance_type="SOURCE_RECORDED",prohibited_flag=False,source_fingerprint=fp)
                 db.add(obs); batch.rows_processed=row_no-1
                 if row_no%5000==0: db.commit()
@@ -154,11 +171,14 @@ def process_batch(batch_id, reset=False):
             p.available_visit_count=len(pvis); p.first_visit_date=min(dated) if dated else None; p.latest_visit_date=max(dated) if dated else None
             derive_participant(db,p,pvis); db.flush()
             finalize_history(db, p); db.flush()
+            readiness = participant_import_readiness(p)
+            p.workflow_status = "QC_APPROVED" if readiness["accepted"] else "MONITOR_QC_REQUIRED"
+            audit(db, batch.uploaded_by, "MONITOR_QC_REVIEWER", "PARTICIPANT_AUTO_QC_APPROVED" if readiness["accepted"] else "PARTICIPANT_AUTO_QC_REJECTED", "PARTICIPANT", p.id, {"readiness": readiness})
             if participant_index % 50 == 0:
                 db.commit()
         batch.row_count=total_rows; batch.rows_processed=total_rows; batch.participant_count=len(all_participants); batch.visit_count=db.query(VisitInstance).filter_by(source_batch_id=batch.id).count()
         batch.blinding_result={"passed":True,"excluded_rows":batch.prohibited_count,"safe_field_fingerprints":sorted(prohibited_labels)}
-        batch.status="MONITOR_QC_REQUIRED"; batch.error_count=0; batch.error_summary=None; batch.processing_finished_at=datetime.utcnow(); audit(db,batch.uploaded_by,"MONITOR_QC_REVIEWER","BATCH_PROCESSED","IMPORT_BATCH",batch.id,{"rows":batch.row_count,"participants":batch.participant_count,"visits":batch.visit_count,"prohibited_excluded":batch.prohibited_count}); db.commit()
+        batch.status="AUTO_QC_COMPLETE"; batch.error_count=0; batch.error_summary=None; batch.processing_finished_at=datetime.utcnow(); audit(db,batch.uploaded_by,"MONITOR_QC_REVIEWER","BATCH_AUTO_QC_COMPLETE","IMPORT_BATCH",batch.id,{"rows":batch.row_count,"participants":batch.participant_count,"visits":batch.visit_count,"prohibited_excluded":batch.prohibited_count}); db.commit()
     except Exception as exc:
         db.rollback(); batch=db.get(RTImportBatch,batch_id)
         if batch:

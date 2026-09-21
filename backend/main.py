@@ -62,6 +62,7 @@ try:
                 "reviewer_c_upn": "VARCHAR(255)",
                 "reviewer_c_name": "VARCHAR(255)",
                 "reviewer_c_diagnosis": "VARCHAR(100)",
+                "reviewer_c_diagnosis": "VARCHAR(100)",
                 "reviewer_c_rationale": "TEXT",
                 "concordance_status": "VARCHAR(50) DEFAULT 'DISCORDANT'",
                 "meeting_id": "VARCHAR(100)",
@@ -70,6 +71,10 @@ try:
             },
             "longitudinal_participants": {
                 "history_completeness": "FLOAT DEFAULT 0.0",
+            },
+            "portal_users": {
+                "contract_valid": "BOOLEAN NOT NULL DEFAULT 1",
+                "contract_period": "VARCHAR(100) DEFAULT '1 Year (Active)'",
             },
         }
         with engine.begin() as connection:

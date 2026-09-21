@@ -27,6 +27,9 @@ async function request(path,user,options={}){
 }
 export const listBatches=(user)=>request('/batches',user);
 export const getBatch=(id,user)=>request(`/batches/${id}`,user);
+export const retryBatch=(id,user)=>request(`/batches/${id}/retry`,user,{method:'POST'});
+export const deleteBatch=(id,user)=>request(`/batches/${id}`,user,{method:'DELETE'});
+export const resetRealtimeImports=(user)=>request('/batches/reset-demo',user,{method:'POST'});
 export const listPatients=(user,params={})=>request(`/patients?${new URLSearchParams(params)}`,user);
 export const getPatient=(id,user)=>request(`/patients/${id}`,user);
 export const approvePatient=(id,user)=>request(`/patients/${id}/approve`,user,{method:'POST'});
@@ -71,7 +74,7 @@ export const deactivateReferenceRange=(id,user)=>request(`/reference-ranges/${id
 export function asWorkbenchCase(data, user){
  const values=(name)=>data.visits?.flatMap(v=>(v.evidence?.[name]||[]).map(x=>({...x,visit:v.name})))||[];
  const first=n=>values(n)[0]?.value;
- const bps=values('SBP').map((x,i)=>({sbp:Number(x.value),dbp:Number(values('DBP')[i]?.value)||null,datetime:x.observed_at,visit:x.visit}));
+ const bps=values('SBP').concat(values('bp_systolic')).map((x,i)=>({sbp:Number(x.value),dbp:Number((values('DBP').concat(values('bp_diastolic')))[i]?.value)||null,datetime:x.observed_at,visit:x.visit}));
  const userUpn=(user?.email||'').trim().toLowerCase();
  // Never fall back to another assignment entry: that would mislabel this user as a
  // different reviewer (e.g. Reviewer B silently submitting as Reviewer A) and collide
@@ -80,5 +83,5 @@ export function asWorkbenchCase(data, user){
  const assignment=(data.assignments||[]).find(a=>(a.reviewer_upn||'').trim().toLowerCase()===userUpn);
  const visits=data.visits||[];
  const signature=[...visits].reverse().find(visit=>visit.signature)?.signature||null;
- return {id:data.subject_id,databaseId:data.id,caseNo:`ADJ-${data.subject_id.slice(-6)}`,site:'Blinded site',status:data.qc_status||'Assigned',study:data.study,pktScore:data.packet_completeness||0,historyScore:data.history_completeness||0,gaAtEvent:data.longitudinal?.onset_classification||'Unclassifiable',derivedSubtype:data.longitudinal?.onset_classification||'UNCLASSIFIABLE',derivedSeverity:data.longitudinal?.maximum_severity||'NOT_ASSESSABLE',trigger:data.longitudinal?.trigger_status||'DV-30 pending',reviewerRole:assignment?.reviewer_role || 'REVIEWER_A',bp_readings:bps,upcr:first('UPCR'),dipstick_raw:first('DIPSTICK_PROTEIN'),platelet_count:first('PLATELETS'),creatinine:first('CREATININE'),ast:first('AST'),alt:first('ALT'),ldh:first('LDH'),delivery_date:first('DELIVERY_DATE'),visits,signature,longitudinal:data.longitudinal,history:data.history||{},risk_summary:data.risk_summary||{},provenance:'SOURCE_RECORDED'};
+ return {id:data.subject_id,databaseId:data.id,caseNo:`ADJ-${data.subject_id.slice(-6)}`,site:'Blinded site',status:data.qc_status||'Assigned',study:data.study,pktScore:data.packet_completeness||0,historyScore:data.history_completeness||0,gaAtEvent:data.longitudinal?.onset_classification||'Unclassifiable',derivedSubtype:data.longitudinal?.onset_classification||'UNCLASSIFIABLE',derivedSeverity:data.longitudinal?.maximum_severity||'NOT_ASSESSABLE',trigger:data.longitudinal?.trigger_status||'DV-30 pending',reviewerRole:assignment?.reviewer_role || 'REVIEWER_A',bp_readings:bps,upcr:first('UPCR')||first('upcr'),dipstick_raw:first('DIPSTICK_PROTEIN')||first('ua_protein'),platelet_count:first('PLATELETS')||first('platelets'),creatinine:first('CREATININE')||first('creatinine'),ast:first('AST')||first('ast'),alt:first('ALT')||first('alt'),ldh:first('LDH')||first('ldh'),delivery_date:first('DELIVERY_DATE')||first('delivery_date'),visits,signature,longitudinal:data.longitudinal,history:data.history||{},risk_summary:data.risk_summary||{},provenance:'SOURCE_RECORDED'};
 }

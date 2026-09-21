@@ -106,6 +106,15 @@ def _migrate_sqlite_schema(eng):
                 ):
                     if col_name not in cols:
                         conn.execute(text(f"ALTER TABLE committee_decisions ADD COLUMN {col_name} {col_type}"))
+
+            # Check portal_users
+            res = conn.execute(text("PRAGMA table_info(portal_users)"))
+            cols = {row[1] for row in res.fetchall()}
+            if cols:
+                if "contract_valid" not in cols:
+                    conn.execute(text("ALTER TABLE portal_users ADD COLUMN contract_valid BOOLEAN NOT NULL DEFAULT 1"))
+                if "contract_period" not in cols:
+                    conn.execute(text("ALTER TABLE portal_users ADD COLUMN contract_period VARCHAR(100) DEFAULT '1 Year (Active)'"))
             conn.commit()
     except Exception as exc:
         logger.debug(f"Schema migration note: {exc}")

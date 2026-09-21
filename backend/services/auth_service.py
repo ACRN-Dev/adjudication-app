@@ -17,7 +17,10 @@ ROLE_ADMIN = "ADMIN"
 ROLE_MONITOR = "MONITOR"
 ROLE_ADJUDICATOR = "ADJUDICATOR"
 ROLE_CHAIRPERSON = "CHAIRPERSON"
-ROLES = {ROLE_ADMIN, ROLE_MONITOR, ROLE_ADJUDICATOR, ROLE_CHAIRPERSON}
+ROLE_OWNER = "OWNER"
+ROLE_MEDICAL_OFFICER = "MEDICAL_OFFICER"
+ROLE_MEDICAL_MONITOR = "MEDICAL_MONITOR"
+ROLES = {ROLE_ADMIN, ROLE_MONITOR, ROLE_ADJUDICATOR, ROLE_CHAIRPERSON, ROLE_OWNER, ROLE_MEDICAL_OFFICER, ROLE_MEDICAL_MONITOR}
 ACTIVE = "ACTIVE"
 INACTIVE = "INACTIVE"
 AUTH_COOKIE = "acrn_demo_session"
@@ -34,10 +37,14 @@ PASSWORD_CHANGE_EXEMPT_PATHS = {"/api/auth/me", "/api/auth/logout", "/api/auth/c
 SENSITIVE_KEYS = {"password", "reviewer_password", "current_password", "new_password", "password_hash", "reviewer_signature", "signature"}
 
 DEMO_ACCOUNTS = [
+    ("tariro@acrnhealth.com", "Tariro Makadzange", ROLE_OWNER, "OWNER"),
+    ("it@acrnhealth.com", "IT Systems Admin", ROLE_ADMIN, "ADMIN"),
     ("admin@acrnhealth.com", "ACRN Demo Administrator", ROLE_ADMIN, "ADMIN"),
     ("chairperson@acrnhealth.com", "ACRN Demo Chairperson", ROLE_CHAIRPERSON, None),
     ("monitor1@acrnhealth.com", "ACRN Demo Monitor 1", ROLE_MONITOR, "MONITOR_QC_REVIEWER"),
     ("monitor2@acrnhealth.com", "ACRN Demo Monitor 2", ROLE_MONITOR, "QA_REVIEWER"),
+    ("medical.officer@acrnhealth.com", "ACRN Demo Medical Officer", ROLE_MEDICAL_OFFICER, "MEDICAL_OFFICER"),
+    ("medical.monitor@acrnhealth.com", "ACRN Demo Medical Monitor", ROLE_MEDICAL_MONITOR, "MEDICAL_MONITOR"),
     ("adjudicatora@acrnhealth.com", "ACRN Demo Adjudicator A", ROLE_ADJUDICATOR, None),
     ("adjudicatorb@acrnhealth.com", "ACRN Demo Adjudicator B", ROLE_ADJUDICATOR, None),
     ("adjudicatorc@acrnhealth.com", "ACRN Demo Adjudicator C", ROLE_ADJUDICATOR, None),
@@ -55,7 +62,7 @@ class AuthIdentity:
 
     @property
     def portal(self) -> str:
-        return {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson"}.get(self.role, "adjudicator")
+        return {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson", "OWNER": "owner", "MEDICAL_OFFICER": "monitor", "MEDICAL_MONITOR": "monitor"}.get(self.role, "adjudicator")
 
 
 
@@ -200,7 +207,7 @@ def _public_user(user: PortalUser) -> dict:
         "name": user.display_name,
         "role": user.role.title(),
         "roleCode": user.role,
-        "portal": {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson"}.get(user.role, "adjudicator"),
+        "portal": {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson", "OWNER": "owner", "MEDICAL_OFFICER": "monitor", "MEDICAL_MONITOR": "monitor"}.get(user.role, "adjudicator"),
         "status": user.status,
         "is_demo_account": user.is_demo_account,
         "demo": user.is_demo_account,

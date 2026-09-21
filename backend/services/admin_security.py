@@ -11,6 +11,7 @@ from models.admin import AdminAuditEvent
 from models.auth import PortalUser
 
 ROLE_PERMISSIONS = {
+    "OWNER": {"admin.read", "users.read", "users.manage", "roles.read", "studies.manage", "studies.read", "sites.manage", "rules.manage", "rules.read", "rules.approve", "mappings.manage", "mappings.approve", "forms.manage", "forms.approve", "workflows.manage", "integrations.manage", "audit.read", "reports.read", "access.approve", "access.review", "finance.read", "finance.manage"},
     "ADMIN": {"admin.read", "users.read", "users.manage", "roles.read", "studies.manage", "sites.manage", "rules.manage", "mappings.manage", "forms.manage", "workflows.manage", "integrations.manage", "audit.read", "reports.read", "access.approve", "access.review"},
     "TECHNICAL_ADMIN": {"admin.read", "users.read", "users.manage", "roles.read", "integrations.manage", "audit.read", "reports.read"},
     "CLINICAL_OPS_ADMIN": {"admin.read", "users.read", "studies.manage", "sites.manage", "rules.manage", "mappings.manage", "forms.manage", "workflows.manage", "audit.read", "reports.read", "access.approve"},
@@ -45,7 +46,7 @@ def get_identity(request: Request, acrn_demo_session: Optional[str] = Cookie(Non
         if session and session.expires_at > datetime.utcnow():
             user = db.get(PortalUser, session.user_id)
             if user and user.status == "ACTIVE":
-                if user.role != "ADMIN" or user.portal_role not in ADMIN_ROLES:
+                if user.role not in ("ADMIN", "OWNER") or user.portal_role not in ADMIN_ROLES:
                     raise HTTPException(403, "Admin Portal access denied for this role.")
                 studies = tuple(filter(None, (user.study_scope or "*").split(",")))
                 return Identity(user.email, user.portal_role, studies, auth_source="SSO" if user.password_hash is None else "SESSION")

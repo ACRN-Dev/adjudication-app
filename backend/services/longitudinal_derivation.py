@@ -3,11 +3,20 @@ from datetime import timedelta
 from models.longitudinal import VisitDerivation, LongitudinalCaseDerivation
 from services.dv_engine import run_dv_engine
 
+CANONICAL_ALIASES = {
+    "visit_date": "VISIT_DATE", "ega_weeks": "GA_WEEKS", "ega_days": "GA_DAYS",
+    "dating_anchor_date": "DATING_ANCHOR_DATE", "dating_anchor_ga": "DATING_ANCHOR_GA",
+    "bp_systolic": "SBP", "bp_diastolic": "DBP", "bp_systolic_recheck": "SBP_RECHECK", "bp_diastolic_recheck": "DBP_RECHECK",
+    "platelets": "PLATELETS", "creatinine": "CREATININE", "ast": "AST", "alt": "ALT", "ldh": "LDH",
+    "upcr": "UPCR", "ua_protein": "DIPSTICK_PROTEIN", "efw": "EFW_CENTILE", "delivery_date": "DELIVERY_DATE",
+}
+
 def _case_from_observations(observations):
     data={"bp_readings":[],"proteinuriaLog":[],"labLog":[]}
     by={}
     for o in observations:
-        by.setdefault(o.canonical_variable,[]).append(o)
+        canonical = CANONICAL_ALIASES.get(o.canonical_variable, o.canonical_variable)
+        by.setdefault(canonical,[]).append(o)
         v=o.numeric_value if o.numeric_value is not None else o.coded_value or o.parsed_text_value
         if o.canonical_variable in {"SBP","SBP_RECHECK","DBP","DBP_RECHECK"}: continue
         key={"PLATELETS":"platelet_count","CREATININE":"creatinine","AST":"ast","ALT":"alt","LDH":"ldh","UPCR":"upcr","DIPSTICK_PROTEIN":"dipstick_raw","EFW_CENTILE":"efw_centile","DELIVERY_DATE":"delivery_date"}.get(o.canonical_variable)

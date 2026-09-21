@@ -14,6 +14,7 @@ import ForceChangePassword from './components/ForceChangePassword';
 import AdminPortal from './admin/AdminPortal';
 import MonitorPortal from './monitor/MonitorPortal';
 import ChairpersonPortal from './chairperson/ChairpersonPortal';
+import OwnerPortal from './owner/OwnerPortal';
 
 import { listAssigned, getAssigned, asWorkbenchCase } from './services/realtimeApi';
 import { me, logout as logoutApi } from './services/authApi';
@@ -55,7 +56,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated || user?.must_change_password || user?.portal !== 'adjudicator') return;
+    if (!isAuthenticated || user?.must_change_password || user?.portal !== 'adjudicator' && user?.portal !== 'owner') return;
     let cancelled = false;
     listAssigned(user).then(items => Promise.all(items.map(x => getAssigned(x.id, user))))
       .then(items => { if (!cancelled) setCases(items.map(item => asWorkbenchCase(item, user))); })
@@ -65,10 +66,11 @@ export default function App() {
 
   const handleLoginSuccess = (userData) => {
     let target = '/';
-    if (userData.portal === 'admin') target = '/admin';
+    if (userData.portal === 'owner') target = '/owner';
+    else if (userData.portal === 'admin') target = '/admin';
     else if (userData.portal === 'monitor') target = '/monitor';
     else if (userData.portal === 'chairperson') target = '/chairperson';
-    else if (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/monitor') || window.location.pathname.startsWith('/chairperson')) target = '/';
+    else if (window.location.pathname.startsWith('/owner') || window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/monitor') || window.location.pathname.startsWith('/chairperson')) target = '/';
     else target = window.location.pathname;
 
     window.history.replaceState({}, '', target);
@@ -157,7 +159,13 @@ export default function App() {
     );
   }
 
-  if (currentPath.startsWith('/admin')) {
+      if (user?.roleCode === 'OWNER') {
+        return <OwnerPortal user={user} onLogout={handleLogout} />;
+      }
+      if (currentPath.startsWith('/owner')) {
+        return <OwnerPortal user={user} onLogout={handleLogout} />;
+      }
+      if (currentPath.startsWith('/admin')) {
     const adminRoles = ['ADMIN', 'TECHNICAL_ADMIN', 'CLINICAL_OPS_ADMIN', 'QA_AUDITOR', 'GOVERNANCE_REVIEWER', 'ACCESS_REVIEWER'];
     if (!adminRoles.includes(user?.roleCode)) {
       return <div role="alert" style={{ padding: 40, fontFamily: 'Poppins, sans-serif' }}><h1>Access denied</h1><p>Your current role is not permitted to access the Admin Portal.</p><button className="btn-primary" onClick={handleLogout}>Return to sign in</button></div>;
@@ -165,11 +173,11 @@ export default function App() {
     return <AdminPortal user={user} onLogout={handleLogout} />;
   }
   if (currentPath.startsWith('/monitor')) {
-    const monitorRoles=['MONITOR','ADMIN','CHAIRPERSON','ADJUDICATION_COORDINATOR','MONITOR_QC_REVIEWER','QA_REVIEWER','RELEASE_OPERATOR'];
+    const monitorRoles=['MONITOR','MEDICAL_OFFICER','MEDICAL_MONITOR','ADMIN','CHAIRPERSON','ADJUDICATION_COORDINATOR','MONITOR_QC_REVIEWER','QA_REVIEWER','RELEASE_OPERATOR','OWNER'];
     if(!monitorRoles.includes(user?.roleCode)) return <div role="alert" style={{padding:40}}><h1>Access denied</h1><p>Your role cannot access Monitor/QC operational case data.</p><button onClick={handleLogout}>Return to sign in</button></div>;
     return <MonitorPortal user={user} onLogout={handleLogout}/>;
   }
-  if (currentPath.startsWith('/chairperson') || user?.roleCode === 'CHAIRPERSON' || user?.portal === 'chairperson') {
+  if (currentPath.startsWith('/chairperson') || user?.roleCode === 'CHAIRPERSON' || user?.portal === 'chairperson' || user?.roleCode === 'OWNER') {
     return <ChairpersonPortal user={user} onLogout={handleLogout} />;
   }
 

@@ -56,7 +56,7 @@ def test_all_demo_accounts_can_login_and_route_to_expected_portal():
     db = reset_auth_tables()
     seed_demo_accounts(db)
     db.close()
-    expected = {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson"}
+    expected = {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson", "OWNER": "owner", "MEDICAL_OFFICER": "monitor", "MEDICAL_MONITOR": "monitor"}
     for email, _, role, _ in DEMO_ACCOUNTS:
         r = client.post("/api/auth/login", json={"email": email.upper(), "password": default_password()})
         assert r.status_code == 200
@@ -65,6 +65,22 @@ def test_all_demo_accounts_can_login_and_route_to_expected_portal():
         assert body["roleCode"] == role
         assert body["portal"] == expected[role]
         assert default_password() not in str(body)
+
+
+def test_medical_roles_are_seeded_and_login_with_expected_portal_routes():
+    db = reset_auth_tables()
+    seed_demo_accounts(db)
+    db.close()
+
+    medical_officer = client.post("/api/auth/login", json={"email": "medical.officer@acrnhealth.com", "password": default_password()})
+    assert medical_officer.status_code == 200
+    assert medical_officer.json()["roleCode"] == "MEDICAL_OFFICER"
+    assert medical_officer.json()["portal"] == "monitor"
+
+    medical_monitor = client.post("/api/auth/login", json={"email": "medical.monitor@acrnhealth.com", "password": default_password()})
+    assert medical_monitor.status_code == 200
+    assert medical_monitor.json()["roleCode"] == "MEDICAL_MONITOR"
+    assert medical_monitor.json()["portal"] == "monitor"
 
 
 def test_invalid_login_is_generic_and_locks_account():

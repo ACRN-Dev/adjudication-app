@@ -3,7 +3,10 @@ import { SSO_LOGIN_URL, getAuthConfig, login } from '../services/authApi';
 
 const DEMO_ACCOUNTS = [
   { label: 'Admin', email: 'admin@acrnhealth.com' },
+  { label: 'Owner', email: 'tariro@acrnhealth.com' },
   { label: 'Monitor', email: 'monitor1@acrnhealth.com' },
+  { label: 'Medical Officer', email: 'medical.officer@acrnhealth.com' },
+  { label: 'Medical Monitor', email: 'medical.monitor@acrnhealth.com' },
   { label: 'Chair', email: 'chairperson@acrnhealth.com' },
   { label: 'Adjudicator A', email: 'adjudicatora@acrnhealth.com' },
   { label: 'Adjudicator B', email: 'adjudicatorb@acrnhealth.com' },

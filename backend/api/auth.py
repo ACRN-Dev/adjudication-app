@@ -182,7 +182,7 @@ def public_user(user: PortalUser) -> dict:
         "roleCode": user.role,
         "portal_role": user.portal_role,
         "study_scope": user.study_scope,
-        "portal": {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson"}.get(user.role, "adjudicator"),
+        "portal": {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson", "OWNER": "owner", "MEDICAL_OFFICER": "monitor", "MEDICAL_MONITOR": "monitor"}.get(user.role, "adjudicator"),
         "status": user.status,
         "is_demo_account": user.is_demo_account,
         "demo": user.is_demo_account,
@@ -381,7 +381,7 @@ def set_role(user_id: str, req: RoleRequest, request: Request, admin: PortalUser
              db: Session = Depends(get_db)):
     _require_admin_permission(admin, "users.manage")
     role = req.role.upper()
-    if role not in {"ADMIN", "MONITOR", "ADJUDICATOR", "CHAIRPERSON"}:
+    if role not in {"ADMIN", "MONITOR", "ADJUDICATOR", "CHAIRPERSON", "MEDICAL_OFFICER", "MEDICAL_MONITOR"}:
         raise HTTPException(422, "Unsupported role")
     row = db.get(PortalUser, user_id)
     if not row:
@@ -395,6 +395,10 @@ def set_role(user_id: str, req: RoleRequest, request: Request, admin: PortalUser
         row.portal_role = "MONITOR_QC_REVIEWER"
     elif role == "ADMIN":
         row.portal_role = "ADMIN"
+    elif role == "MEDICAL_MONITOR":
+        row.portal_role = "MEDICAL_MONITOR"
+    elif role == "MEDICAL_OFFICER":
+        row.portal_role = "MEDICAL_OFFICER"
     else:
         row.portal_role = None
     audit_auth(db, "ROLE_CHANGE", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
@@ -406,8 +410,8 @@ def set_role(user_id: str, req: RoleRequest, request: Request, admin: PortalUser
 def _validate_portal_role(role: str, portal_role: Optional[str]):
     if role == "ADMIN" and portal_role not in ADMIN_ROLES:
         raise HTTPException(422, f"portal_role must be one of: {', '.join(sorted(ADMIN_ROLES))}")
-    if role == "MONITOR" and portal_role not in MONITOR_ROLES:
-        raise HTTPException(422, f"portal_role must be one of: {', '.join(sorted(MONITOR_ROLES))}")
+    if role in {"MONITOR", "MEDICAL_MONITOR", "MEDICAL_OFFICER"} and portal_role not in MONITOR_ROLES.union({"MEDICAL_MONITOR", "MEDICAL_OFFICER"}):
+        raise HTTPException(422, f"portal_role must be one of: {', '.join(sorted(MONITOR_ROLES.union({'MEDICAL_MONITOR', 'MEDICAL_OFFICER'})))}")
 
 
 def _normalize_study_scope(value: str) -> str:
@@ -425,7 +429,7 @@ def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = De
                  db: Session = Depends(get_db)):
     acting_identity = _require_admin_permission(admin, "users.manage")
     role = req.role.upper()
-    if role not in {"ADMIN", "MONITOR", "ADJUDICATOR", "CHAIRPERSON"}:
+    if role not in {"ADMIN", "MONITOR", "ADJUDICATOR", "CHAIRPERSON", "MEDICAL_OFFICER", "MEDICAL_MONITOR"}:
         raise HTTPException(422, "Unsupported role")
     normalized = normalize_email(req.email)
     if db.query(PortalUser).filter_by(email=normalized).first():
@@ -436,6 +440,10 @@ def create_user(req: CreateUserRequest, request: Request, admin: PortalUser = De
             portal_role = "MONITOR_QC_REVIEWER"
         elif role == "ADMIN":
             portal_role = "ADMIN"
+        elif role == "MEDICAL_MONITOR":
+            portal_role = "MEDICAL_MONITOR"
+        elif role == "MEDICAL_OFFICER":
+            portal_role = "MEDICAL_OFFICER"
     _validate_portal_role(role, portal_role)
     if role == "ADMIN":
         validate_delegation(acting_identity, ROLE_PERMISSIONS.get(portal_role, set()))

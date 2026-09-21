@@ -39,11 +39,14 @@ export function VisitRibbon({ visits = [], selectedIndex = 0, onSelectVisit, sho
         {expectedVisits.map((visit, index) => {
           const completeVisit = isVisitComplete(visit);
           const reviewerSigned = isReviewerVisitSigned(visit);
+          const isPostDelivery = visit.visit_number >= 5 || parseInt((visit.visit_code || '').replace('V', '') || '0') >= 5;
+          const bgStyle = isPostDelivery ? { borderBottom: '3px solid #8b5cf6', background: selectedIndex === index ? '#f5f3ff' : undefined } : {};
           return (
             <button
               key={visit.id || `${visitLabel(visit, index)}-${index}`}
               type="button"
               className={`visit-ribbon-tab ${selectedIndex === index ? 'active' : ''} ${completeVisit ? 'complete' : reviewerSigned ? 'signed' : ''}`}
+              style={bgStyle}
               aria-current={selectedIndex === index ? 'step' : undefined}
               onClick={() => onSelectVisit?.(index)}
             >
@@ -149,11 +152,16 @@ function latestByMeasure(rows) {
 }
 
 const DEFAULT_LAB_RANGES = {
-  PLATELETS: { low: 150, high: 400, unit: 'x10^3 cells/uL' },
-  CREATININE: { low: 48, high: 131, unit: 'umol/L' },
-  AST: { low: 10, high: 30, unit: 'U/L' },
-  ALT: { low: 5, high: 44, unit: 'U/L' },
-  LDH: { low: 180, high: 325, unit: 'U/L' },
+  PLATELETS: { low: 150, high: 450, unit: 'x10^3/uL' },
+  CREATININE: { low: 0.5, high: 1.1, unit: 'mg/dL' },
+  AST: { low: 5, high: 40, unit: 'U/L' },
+  ALT: { low: 7, high: 56, unit: 'U/L' },
+  LDH: { low: 140, high: 280, unit: 'U/L' },
+  HEMOGLOBIN: { low: 12.0, high: 15.5, unit: 'g/dL' },
+  HEMATOCRIT: { low: 37.0, high: 48.0, unit: '%' },
+  WBC: { low: 4.5, high: 11.0, unit: 'x10^3/uL' },
+  BUN: { low: 7.0, high: 20.0, unit: 'mg/dL' },
+  BILIRUBIN: { low: 0.1, high: 1.2, unit: 'mg/dL' },
 };
 
 function rangeLabel(row) {
@@ -246,12 +254,32 @@ export function BloodPressureGroup({ visit }) {
 }
 
 export function LaboratoryResultsGroup({ visit }) {
-  const keyLabs = latestByMeasure(visit.labs.filter((row) => ['PLATELETS', 'CREATININE', 'AST', 'ALT', 'LDH'].includes(row.key)));
-  const renderLabRow = (row) => {
+  const allLabs = visit.labs || [];
+  const latestByMeasure = (list) => {
+    const map = new Map();
+    list.forEach(row => {
+      const existing = map.get(row.key);
+      if (!existing || new Date(row.observed_at) > new Date(existing.observed_at)) {
+        map.set(row.key, row);
+      }
+    });
+    return Array.from(map.values());
+  };
+  const keyLabs = latestByMeasure(allLabs);
+
+  const getLabRow = (key) => keyLabs.find(r => r.key === key);
+
+  const renderLabRow = (row, labelOverride = null) => {
+    if (!row) return (
+      <div className="evidence-row" style={{ opacity: 0.7 }} key={`missing-${labelOverride}`}>
+        <div><strong>{labelOverride}</strong></div>
+        <div><span style={{ fontStyle: 'italic', color: '#64748b' }}>Unavailable</span></div>
+      </div>
+    );
     const interpretation = labRangeStatus(row);
     return (
       <div className="evidence-row" key={row.id}>
-        <div><strong>{row.label}</strong></div>
+        <div><strong>{labelOverride || row.label}</strong></div>
         <div>
           <span>{labValueLabel(row)}</span>
           <small>{rangeLabel(row)}</small>
@@ -261,39 +289,67 @@ export function LaboratoryResultsGroup({ visit }) {
       </div>
     );
   };
-  return (
-    <section className="clinical-block lab-results-block">
-      <h5><I.Database size={14} />Biochemistry and haematology</h5>
-      {keyLabs.length ? <div className="evidence-list clinical-lab-list">{keyLabs.map(renderLabRow)}</div> : <div className="evidence-empty"><EvidenceStatusBadge state="not_available" />No permitted platelet, renal or liver laboratory result is available for this visit.</div>}
-      {false && <EvidenceList
-        rows={keyLabs}
-        empty="No permitted platelet, renal or liver laboratory result is available for this visit."
-        render={(row) => (
-          <div className="evidence-row" key={row.id}>
-            <div><strong>{row.label}</strong><small>{formatVisitDateTime(row.observed_at)} Â· {row.source_label}</small></div>
-            <div><span>{row.raw ?? row.value} {row.unit || ''}</span><EvidenceStatusBadge state={row.evidence_state} /></div>
-          </div>
-        )}
-      />}
-    </section>
-  );
-}
 
-function ProteinuriaGroup({ visit }) {
+  const renderProteinuriaRow = (row) => {
+    return (
+      <div className="evidence-row" key={row.id || row.method}>
+        <div><strong>{row.method || 'Proteinuria'}</strong></div>
+        <div><span>{row.value} {row.unit || ''}</span></div>
+      </div>
+    );
+  };
+
+  const hematologyKeys = ['HEMOGLOBIN', 'HEMATOCRIT', 'PLATELETS', 'WBC'];
+  const renalKeys = ['CREATININE', 'BUN'];
+  const lftKeys = ['ALT', 'AST', 'BILIRUBIN'];
+  const otherKeys = ['LDH'];
+
   return (
-    <section className="clinical-block">
-      <h5><I.FlaskConical size={14} />Proteinuria</h5>
-      <EvidenceList
-        rows={visit.proteinuria}
-        empty="No proteinuria observation is available for this visit."
-        render={(row) => (
-          <div className="evidence-row" key={row.id}>
-            <div><strong>{row.method}</strong></div>
-            <div><span>{row.value} {row.unit || ''}</span></div>
+    <>
+      <section className="clinical-block lab-results-block">
+        <h5><I.Database size={14} />Hematology</h5>
+        <div className="evidence-list clinical-lab-list">
+          {hematologyKeys.map(k => renderLabRow(getLabRow(k), k === 'PLATELETS' ? 'Platelets' : k.charAt(0) + k.slice(1).toLowerCase()))}
+        </div>
+      </section>
+      
+      <section className="clinical-block lab-results-block">
+        <h5><I.Database size={14} />Renal Function</h5>
+        <div className="evidence-list clinical-lab-list">
+          {renalKeys.map(k => renderLabRow(getLabRow(k), k === 'CREATININE' ? 'Creatinine' : k))}
+        </div>
+      </section>
+
+      <section className="clinical-block">
+        <h5><I.FlaskConical size={14} />Urinalysis</h5>
+        {(!visit.proteinuria || visit.proteinuria.length === 0) ? (
+          <div className="evidence-list clinical-lab-list">
+            <div className="evidence-row" style={{ opacity: 0.7 }}>
+              <div><strong>Protein (1+/2+/3+) / UPCr</strong></div>
+              <div><span style={{ fontStyle: 'italic', color: '#64748b' }}>Unavailable</span></div>
+            </div>
+          </div>
+        ) : (
+          <div className="evidence-list clinical-lab-list">
+            {visit.proteinuria.map(renderProteinuriaRow)}
           </div>
         )}
-      />
-    </section>
+      </section>
+      
+      <section className="clinical-block lab-results-block">
+        <h5><I.Database size={14} />LFTs</h5>
+        <div className="evidence-list clinical-lab-list">
+          {lftKeys.map(k => renderLabRow(getLabRow(k), k === 'BILIRUBIN' ? 'Bilirubin' : k))}
+        </div>
+      </section>
+
+      <section className="clinical-block lab-results-block">
+        <h5><I.Database size={14} />Other</h5>
+        <div className="evidence-list clinical-lab-list">
+          {otherKeys.map(k => renderLabRow(getLabRow(k), k))}
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -389,7 +445,6 @@ export function VisitEvidencePanel({ visit, selectedIndex, visitCount, onSelectV
       </div>
       <BloodPressureGroup visit={visit} />
       <LaboratoryResultsGroup visit={visit} />
-      <ProteinuriaGroup visit={visit} />
       <OtherEvidenceGroup visit={visit} />
       {Number(visit.visit_number) === 5 && <VisitFiveOutcomeGroup visit={visit} />}
       <VisitInterpretationCard visit={visit} />

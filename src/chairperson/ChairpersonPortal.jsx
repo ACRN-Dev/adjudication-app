@@ -6,7 +6,7 @@ import {
 import EvidenceInspectorModal from './EvidenceInspectorModal';
 import './chairperson.css';
 
-export default function ChairpersonPortal({ user, onLogout }) {
+export default function ChairpersonPortal({ user, onLogout, isEmbedded }) {
   const [activeTab, setActiveTab] = useState('concordance');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -288,8 +288,9 @@ export default function ChairpersonPortal({ user, onLogout }) {
   };
 
   return (
-    <div className="chair-container">
+    <div className="chair-container" style={isEmbedded ? { padding: 0, height: '100%' } : {}}>
       {/* Chairperson Header */}
+      {!isEmbedded && (
       <header className="chair-header">
         <div className="chair-header-title">
           <img src="/acrn-logo.png" alt="ACRN" style={{ height: '32px', width: 'auto', objectFit: 'contain' }} />
@@ -315,6 +316,7 @@ export default function ChairpersonPortal({ user, onLogout }) {
           </button>
         </div>
       </header>
+      )}
 
       {/* Navigation Tabs */}
       <nav className="chair-nav">

@@ -13,6 +13,8 @@ ROLES = {
     "QA_REVIEWER",
     "RELEASE_OPERATOR",
     "MONITOR",
+    "MEDICAL_OFFICER",
+    "MEDICAL_MONITOR",
     "ADMIN",
     "CHAIRPERSON",
     "COORDINATOR",
@@ -34,9 +36,9 @@ def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get
         if session and session.expires_at>datetime.utcnow():
             user=db.get(PortalUser,session.user_id)
             if user and user.status=="ACTIVE":
-                if user.role=="MONITOR":
-                    pr = user.portal_role
-                    if not pr or pr not in ROLES:
+                if user.role in {"MONITOR", "MEDICAL_OFFICER", "MEDICAL_MONITOR"}:
+                    pr = user.portal_role or user.role
+                    if pr not in ROLES:
                         # Provisioning gap, not a permission denial — see backend/api/realtime.py actor().
                         raise HTTPException(403,"Monitor Portal access denied")
                     studies=tuple(filter(None,(user.study_scope or "*").split(",")))

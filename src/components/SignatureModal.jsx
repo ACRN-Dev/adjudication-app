@@ -31,6 +31,8 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({
+        is_overall_first: submission?.is_overall_first || false,
+        per_visit_onset: submission?.per_visit_onset || [],
         reviewer_role: submission?.reviewerRole || 'REVIEWER_A',
         reviewer_upn: user?.email,
         reviewer_name: submission?.reviewerName || user?.display_name || user?.email,

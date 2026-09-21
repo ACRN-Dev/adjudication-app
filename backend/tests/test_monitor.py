@@ -143,3 +143,37 @@ def test_monitor_progress_collapses_duplicate_source_batches(monkeypatch):
     assert item["total_visits"] == 1
     assert item["duplicate_source_count"] == 1
 
+
+def test_conflicting_dates_block_qc_approval_without_date_label(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "true")
+    db = TestingSession()
+    participant = LongitudinalParticipant(
+        blinded_subject_id=f"DATE-CONFLICT-{uuid.uuid4().hex[:8].upper()}",
+        study="PROTECT-Africa",
+        source_batch_id=uuid.uuid4(),
+        workflow_status="MONITOR_QC_REQUIRED",
+    )
+    db.add(participant)
+    db.flush()
+    db.add(VisitInstance(
+        participant_id=participant.id,
+        source_batch_id=participant.source_batch_id,
+        form_title="Visit 1",
+        scheduled_visit_code="V01",
+        visit_sequence=1,
+        visit_occurrence=1,
+        reconstruction_method="TEST",
+        reconstruction_confidence="HIGH",
+        qc_status="MONITOR_QC_REQUIRED",
+    ))
+    db.commit()
+    participant_id = str(participant.id)
+    db.close()
+
+    response = client.post(
+        f"/api/realtime/patients/{participant_id}/approve",
+        headers={"X-Demo-User": "monitor1@acrnhealth.com", "X-Demo-Role": "MONITOR_QC_REVIEWER"},
+    )
+    assert response.status_code == 409, response.text
+    assert "Monitor/QC review" in response.json()["detail"]
+

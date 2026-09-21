@@ -7,9 +7,12 @@ def row(label,page="Vital Signs / Weight Height",form="Visit 3",value="",field_t
     return {"MRN":"TEST-MRN","Screening #":"ZWE999-0001","Randomization #":"R-TEST","Form Title":form,"Form Version":"1.0","Page Title":page,"Field type":field_type,"Field Label":label,"Data Input":value,"Data Value":value,"Audit Trails":"Synthetic User - 01/Jan/2026","Export Variable Name":export}
 
 def test_composite_mapping_without_export_variable_name():
-    assert map_variable(row("Systolic blood pressure"))=="SBP"
-    assert map_variable(row("Diastolic blood pressure recheck"))=="DBP_RECHECK"
-    assert map_variable(row("Creatinine",page="Biochemistry Results"))=="CREATININE"
+    assert map_variable(row("Systolic blood pressure"))=="bp_systolic"
+    assert map_variable(row("Diastolic blood pressure recheck"))=="bp_diastolic_recheck"
+    assert map_variable(row("Creatinine",page="Biochemistry Results"))=="creatinine"
+
+def test_rt_map_20_excludes_direct_identifiers():
+    assert classify(row("Date of Birth", page="Demographics")) == "DIRECT_IDENTIFIER"
 
 def test_biomarkers_are_rejected_before_canonical_ingestion():
     for label in ("Tigsun PlGF/sFLT-1","Biomarker result","sEng normal range","POC result"):

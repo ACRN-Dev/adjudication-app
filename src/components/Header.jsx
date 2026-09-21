@@ -106,7 +106,7 @@ export default function Header({ activeCase, cases = [], onSelectCase, user, onL
             >
               <span className="rt-recent-label">Recent Subjects:</span>
               <strong className="rt-recent-val">
-                {activeCase ? `${activeCase.id} (${activeCase.gaAtEvent || 'N/A'})` : 'Select Subject...'}
+                {activeCase ? activeCase.id : 'Select Subject...'}
               </strong>
               <ChevronDown size={14} />
             </button>
@@ -128,7 +128,7 @@ export default function Header({ activeCase, cases = [], onSelectCase, user, onL
                         <span style={{ fontSize: '11px', color: '#64748b' }}>{c.caseNo}</span>
                       </div>
                       <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                        GA {c.gaAtEvent || 'N/A'} • {c.derivedSubtype || 'EOPE'} • {c.status}
+                        {c.status}
                       </div>
                     </div>
                   ))

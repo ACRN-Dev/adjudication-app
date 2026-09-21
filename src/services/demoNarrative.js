@@ -78,67 +78,57 @@ export function generateNarrative(caseData, formCodeOverride = null) {
   const delGa = _safe(caseData.ga_at_delivery);
 
   const sections = {
-    sec1: `SECTION 1 — CASE METADATA AND IDENTIFIER
+    sec1: `SECTION 1 — PATIENT DEMOGRAPHICS & OBSTETRIC HISTORY
 Participant ID: ${id}
 Form: ${formCode} (Blinded Clinical Narrative)
 Site / Provider: [Blinded per SOP-ADJ-002]
-Protocol Scope: PROTECT-Africa / LOPE-Nigeria`,
-
-    sec2: `SECTION 2 — ENDPOINT / PREDICTION WINDOW
-Estimated Delivery Date (EDD): ${edd}
-Gestational Age at Event Presentation: ${gaEvent}
-Triggering Event: ${trigger}`,
-
-    sec3: `SECTION 3 — PREGNANCY DATING
-Dating Anchor: 1st-Trimester Ultrasound Anchor
+Gravidity: ${_safe(caseData.gravidity)} | Parity: ${_safe(caseData.parity)}
+Dating Anchor: 1st-Trimester Ultrasound
 First USS Date: ${ussDate}
 GA at First USS: ${ussGa}
-LMP Date: ${lnmp}`,
+LMP Date: ${lnmp}
+Estimated Delivery Date (EDD): ${edd}`,
 
-    sec4: `SECTION 4 — CLINICAL PRESENTATION SUMMARY
-GA at Presentation: ${gaEvent}
-Gravidity: ${_safe(caseData.gravidity)} | Parity: ${_safe(caseData.parity)}
-Derived Phenotype Subtype: ${_safe(caseData.derivedSubtype)}
-Derived Severity: ${_safe(caseData.derivedSeverity)}`,
+    sec2: `SECTION 2 — CLINICAL CONTEXT
+Triggering Event: ${trigger}
+  Protocol Scope: PROTECT-Africa / LOPE-Nigeria
+  The adjudicator must determine the diagnosis from the source evidence below; automated classifications are not presented as clinical conclusions.`,
 
-    sec5: `SECTION 5 — BLOOD PRESSURE COURSE
-Serial BP Readings: ${bpSummary}
+    sec3: `SECTION 3 — CLINICAL COURSE (VISIT-BY-VISIT SUMMARY)
+Blood Pressure Trajectory:
+${bpSummary}
 Peak BP Measurement: ${maxSbp != null ? maxSbp + '/' + maxDbp + ' mmHg' : '[Not documented — not assessable]'}
-Severe Range BP (≥160/110): ${severeBpDoc}`,
+Severe Range BP (≥160/110): ${severeBpDoc}
 
-    sec6: `SECTION 6 — PROTEINURIA EVIDENCE
+Proteinuria & Renal Function:
 UPCR Quantitation: ${upcrVal}
 Dipstick Result: ${dipVal}
-Assessment Summary: ${protSummary}`,
+Assessment Summary: ${protSummary}
 
-    sec7: `SECTION 7 — LABORATORY COURSE (HAEMATOLOGY AND BIOCHEMISTRY)
+Haematology and Biochemistry:
 Platelet Count: ${plt}
 Creatinine: ${cr}
 Transaminases: AST ${ast} | ALT ${alt}
 LDH: ${ldh}
-[Biomarker data (sFlt-1/PlGF/sEng/POC) strictly withheld per SOP-ADJ-002.]`,
+[Biomarker data strictly withheld per SOP-ADJ-002.]
 
-    sec8: `SECTION 8 — MATERNAL CLINICAL COURSE
+Maternal Clinical Course:
 Medication Log: ${caseData.medicationLog && caseData.medicationLog.length > 0 ? caseData.medicationLog.map(m => m.name + ' (' + m.dose + ')').join(', ') : '[Not documented — not assessable]'}
-Weight Log: ${caseData.weightLog && caseData.weightLog.length > 0 ? caseData.weightLog.map(w => w.weight_kg + 'kg at GA ' + w.ga).join(' → ') : '[Not documented — not assessable]'}`,
+Weight Log: ${caseData.weightLog && caseData.weightLog.length > 0 ? caseData.weightLog.map(w => w.weight_kg + 'kg at GA ' + w.ga).join(' → ') : '[Not documented — not assessable]'}
 
-    sec9: `SECTION 9 — FETAL ASSESSMENT (GROWTH AND DOPPLER)
+Fetal Assessment (Growth and Doppler):
 Ultrasound & Doppler Findings: ${ussDoc}
 EFW Centile: ${caseData.efw_centile != null ? caseData.efw_centile + 'th centile' : '[Not documented — not assessable]'}
 Umbilical Artery AEDF: ${caseData.ua_aedf ? 'Yes (AEDF documented)' : 'No / Not documented'}`,
 
-    sec10: `SECTION 10 — DELIVERY RECORD
+    sec4: `SECTION 4 — DELIVERY SUMMARY & OUTCOMES
 Delivery Date: ${delDate}
 GA at Delivery: ${delGa}
-Delivery Record: ${delDoc}`,
-
-    sec11: `SECTION 11 — MATERNAL OUTCOME
-Maternal SAEs / Complications: ${delDoc.includes('Caesarean') ? 'Emergency Caesarean section indicated.' : '[Not documented — not assessable]'}`,
-
-    sec12: `SECTION 12 — NEONATAL OUTCOME
+Delivery Record: ${delDoc}
+Maternal SAEs / Complications: ${delDoc.includes('Caesarean') ? 'Emergency Caesarean section indicated.' : '[Not documented — not assessable]'}
 Neonatal Outcome: ${delDoc.includes('Liveborn') ? 'Liveborn neonate documented.' : '[Not documented — not assessable]'}`,
 
-    sec13: `SECTION 13 — MISSING DATA, DISCREPANCIES AND OUTSTANDING QUERIES
+    sec5: `SECTION 5 — ADJUDICATION QUESTION
 Evidence Completeness Score: ${caseData.pktScore != null ? Math.round(caseData.pktScore * 100) + '%' : '[Pending derivation]'}
 ${REVIEWER_PLACEHOLDER}`,
   };
@@ -158,20 +148,18 @@ export function generateSummary(caseData, dvResults) {
   if (!caseData) return 'No active case selected for summary.';
 
   const id = caseData.id || 'N/A';
-  const ga = caseData.gaAtEvent || 'N/A';
   const score = dvResults?.evidenceScore != null ? Math.round(dvResults.evidenceScore * 100) : (caseData.pktScore != null ? Math.round(caseData.pktScore * 100) : 0);
   const gateOpen = dvResults?.certaintyGate?.inputs?.gate_open ?? (score === 100);
-  const maxCertainty = dvResults?.certaintyGate?.inputs?.max_certainty || (score === 100 ? 'Definite' : 'Probable');
 
   const bpList = caseData.bpLog || caseData.bp_readings || [];
   const maxSbp = bpList.length > 0 ? Math.max(...bpList.map(b => b.sbp)) : null;
   const maxDbp = bpList.length > 0 ? Math.max(...bpList.map(b => b.dbp)) : null;
 
-  return `CLINICAL EVIDENCE SYNTHESIS — Participant ${id} (GA ${ga}):
+  return `CLINICAL EVIDENCE SYNTHESIS — Participant ${id}:
 • BP Evidence: ${bpList.length} reading(s) documented. Peak BP: ${maxSbp != null ? maxSbp + '/' + maxDbp + ' mmHg' : 'Not documented'}.
 • Proteinuria: ${caseData.upcr != null ? 'UPCR ' + caseData.upcr + ' g/g' : (caseData.dipstick_raw ? 'Dipstick ' + caseData.dipstick_raw : 'Not documented')}.
 • Organ Dysfunction: Platelets ${caseData.platelet_count || 'N/A'}, Creatinine ${caseData.creatinine || 'N/A'}, AST ${caseData.ast || 'N/A'}, ALT ${caseData.alt || 'N/A'}.
-• Evidence Completeness: DV-26 score = ${score}% (6 classes evaluated).
-• Certainty Gate (DV-27): ${gateOpen ? 'GATE OPEN — DEFINITE certainty permitted.' : 'RESTRICTED — Maximum allowed certainty = ' + maxCertainty + '.'}
+• Evidence Completeness: ${score}% (6 evidence classes evaluated).
+• Certainty restriction: ${gateOpen ? 'No automated restriction is displayed; verify the source evidence before selecting certainty.' : 'The available evidence may limit the certainty of the final determination.'}
 • Mandatory Notice: Adjudicator must verify all raw source documents before placing signature.`;
 }

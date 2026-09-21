@@ -110,6 +110,46 @@ def purge_all_demo_data(db: Session) -> dict[str, int]:
     db.commit()
     return counts
 
+
+def purge_realtime_batches(db: Session) -> dict[str, int]:
+    """RealTime-only reset: wipes every RTImportBatch (any status) and its derived
+    longitudinal data, plus staged upload files. Unlike purge_all_demo_data, this never
+    touches canonical EDC/eSource adjudication data, users, or admin fixtures — safe for
+    a Monitor to trigger directly from the Imports page to clear stuck/failed batches."""
+
+    def _delete(model):
+        count = db.query(model).delete(synchronize_session=False)
+        counts[model.__tablename__] = count
+        return count
+
+    counts: dict[str, int] = {}
+    staging_paths = [p for (p,) in db.query(RTImportBatch.source_path).all() if p]
+
+    _delete(VisitDerivation)
+    _delete(ImportIssue)
+    _delete(CanonicalObservation)
+    _delete(ReviewerAssignment)
+    _delete(LongitudinalCaseDerivation)
+    _delete(RestrictedIdentityCrosswalk)
+    _delete(PatientHistoryField)
+    _delete(PatientHistory)
+    _delete(PatientRiskSummary)
+    _delete(VisitInstance)
+    _delete(LongitudinalParticipant)
+    _delete(RTImportBatch)
+
+    db.commit()
+
+    for path in staging_paths:
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            logger.warning("Could not remove staging file during realtime reset: %s", path)
+
+    return counts
+
+
 def purge_csv_scenarios(db: Session) -> dict[str, int]:
     """Scoped reset: deletes CSV/demo batches and their participants/assignments, preserving non-CSV batches."""
     from sqlalchemy import or_
@@ -230,14 +270,14 @@ def seed_baseline_cases(db: Session) -> dict[str, int]:
         # 1-4: Concordant cases
         (1, 2, DiagnosisCode.PE, DiagnosisCode.PE, CertaintyLevel.DEFINITE, CertaintyLevel.DEFINITE, None, AdjudicationStatus.CONCORDANT, OnsetClass.EOPE, SeverityGrade.WITH_SEVERE, True, True),
         (2, 1, DiagnosisCode.PE, DiagnosisCode.PE, CertaintyLevel.DEFINITE, CertaintyLevel.DEFINITE, None, AdjudicationStatus.CONCORDANT, OnsetClass.EOPE, SeverityGrade.WITH_SEVERE, True, True),
-        (3, 3, DiagnosisCode.OTHER, DiagnosisCode.OTHER, CertaintyLevel.PROBABLE, CertaintyLevel.PROBABLE, None, AdjudicationStatus.CONCORDANT, OnsetClass.LOPE, SeverityGrade.WITHOUT_SEVERE, False, False),
+        (3, 3, DiagnosisCode.PE, DiagnosisCode.PE, CertaintyLevel.PROBABLE, CertaintyLevel.PROBABLE, DiagnosisCode.OTHER, AdjudicationStatus.CONCORDANT, OnsetClass.LOPE, SeverityGrade.WITHOUT_SEVERE, False, False),
         (4, 1, DiagnosisCode.PE, DiagnosisCode.PE, CertaintyLevel.DEFINITE, CertaintyLevel.DEFINITE, None, AdjudicationStatus.CONCORDANT, OnsetClass.EOPE, SeverityGrade.WITH_SEVERE, True, True),
         # 5-7: Discordant cases (Reviewer A != Reviewer B, Reviewer C active/pending)
-        (5, 2, DiagnosisCode.PE, DiagnosisCode.OTHER, CertaintyLevel.DEFINITE, CertaintyLevel.PROBABLE, DiagnosisCode.PE, AdjudicationStatus.DISCORDANT, OnsetClass.EOPE, SeverityGrade.WITH_SEVERE, True, False),
+        (5, 2, DiagnosisCode.PE, DiagnosisCode.NOT_PE, CertaintyLevel.DEFINITE, CertaintyLevel.PROBABLE, DiagnosisCode.PE, AdjudicationStatus.DISCORDANT, OnsetClass.EOPE, SeverityGrade.WITH_SEVERE, True, False),
         (6, 1, DiagnosisCode.PE, DiagnosisCode.NOT_PE, CertaintyLevel.PROBABLE, CertaintyLevel.NOT_PE, None, AdjudicationStatus.DISCORDANT, OnsetClass.EOPE, SeverityGrade.WITH_SEVERE, True, False),
-        (7, 2, DiagnosisCode.OTHER, DiagnosisCode.PE, CertaintyLevel.POSSIBLE, CertaintyLevel.DEFINITE, DiagnosisCode.OTHER, AdjudicationStatus.DISCORDANT, OnsetClass.LOPE, SeverityGrade.WITH_SEVERE, False, True),
+        (7, 2, DiagnosisCode.NOT_PE, DiagnosisCode.PE, CertaintyLevel.POSSIBLE, CertaintyLevel.DEFINITE, DiagnosisCode.OTHER, AdjudicationStatus.DISCORDANT, OnsetClass.LOPE, SeverityGrade.WITH_SEVERE, False, True),
         # 8-9: Three-way divergent cases (A != B != C)
-        (8, 1, DiagnosisCode.PE, DiagnosisCode.OTHER, CertaintyLevel.PROBABLE, CertaintyLevel.PROBABLE, DiagnosisCode.NOT_PE, AdjudicationStatus.THREE_WAY_DIVERGENT, OnsetClass.EOPE, SeverityGrade.WITH_SEVERE, True, False),
+        (8, 1, DiagnosisCode.PE, DiagnosisCode.NOT_PE, CertaintyLevel.PROBABLE, CertaintyLevel.PROBABLE, DiagnosisCode.NOT_PE, AdjudicationStatus.THREE_WAY_DIVERGENT, OnsetClass.EOPE, SeverityGrade.WITH_SEVERE, True, False),
         (9, 2, DiagnosisCode.PE, DiagnosisCode.NOT_PE, CertaintyLevel.DEFINITE, CertaintyLevel.NOT_PE, DiagnosisCode.OTHER, AdjudicationStatus.THREE_WAY_DIVERGENT, OnsetClass.EOPE, SeverityGrade.WITH_SEVERE, True, False),
         # 10-12: Fresh in-review cases (assigned to Reviewer A & B, pending review)
         (10, 1, None, None, None, None, None, AdjudicationStatus.IN_REVIEW, OnsetClass.EOPE, SeverityGrade.WITH_SEVERE, True, True),
@@ -477,6 +517,7 @@ def seed_baseline_cases(db: Session) -> dict[str, int]:
                     severity=severity,
                     date_of_diagnosis=v_date,
                     rationale=sample_rationale_template.format(sid=sid),
+                    other_rationale="Reviewer C escalation rationale: the case required specialist adjudication because the primary review remained non-specific and the final diagnosis required an alternative clinical classification beyond the routine paired-review path." if diag_c == DiagnosisCode.OTHER else None,
                     comment="Reviewer C arbitration review completed.",
                     signed=True,
                     signed_at=now - timedelta(days=1),
@@ -486,12 +527,25 @@ def seed_baseline_cases(db: Session) -> dict[str, int]:
 
             # Seed Committee Decision for Concordant/Resolved cases on primary visit
             if status == AdjudicationStatus.CONCORDANT and v_num == 1:
+                final_diagnosis = diag_a
+                adopted_reviewer = ReviewerRole.REVIEWER_A
+                reviewer_c_rationale = None
+                reviewer_c_upn = None
+                reviewer_c_name = None
+                if final_diagnosis == DiagnosisCode.OTHER:
+                    adopted_reviewer = ReviewerRole.REVIEWER_C
+                    reviewer_c_rationale = "Reviewer C escalation rationale: final diagnosis was recorded as OTHER only after specialist review confirmed the case required a non-standard adjudication classification."
+                    reviewer_c_upn = adj_c_upn
+                    reviewer_c_name = "ACRN Demo Adjudicator C"
                 db.add(CommitteeDecision(
                     participant_id=p.id,
                     visit_id=visit.id,
                     visit_number=1,
-                    final_diagnosis=diag_a,
-                    adopted_reviewer=ReviewerRole.REVIEWER_A,
+                    final_diagnosis=final_diagnosis,
+                    adopted_reviewer=adopted_reviewer,
+                    reviewer_c_upn=reviewer_c_upn,
+                    reviewer_c_name=reviewer_c_name,
+                    reviewer_c_rationale=reviewer_c_rationale,
                     chair_upn="chairperson@acrnhealth.com",
                     chair_name="ACRN Committee Chair",
                     chair_rationale="Concordant determination verified and locked per charter.",
@@ -499,7 +553,7 @@ def seed_baseline_cases(db: Session) -> dict[str, int]:
                     locked=True,
                     closed=True,
                     closed_at=now - timedelta(hours=12),
-                    concordance_status="CONCORDANT_A_EQUALS_B",
+                    concordance_status="CONCORDANT_A_EQUALS_B" if adopted_reviewer == ReviewerRole.REVIEWER_A else "REVIEWER_C_ESCALATION",
                 ))
 
     db.commit()

@@ -19,6 +19,8 @@ class PortalUser(Base):
     portal_role = Column(String(40), nullable=True)
     study_scope = Column(String(500), nullable=True, default="*")
     status = Column(String(30), nullable=False, default="ACTIVE", index=True)
+    contract_valid = Column(Boolean, nullable=False, default=True)
+    contract_period = Column(String(100), nullable=True, default="1 Year (Active)")
     is_demo_account = Column(Boolean, nullable=False, default=True, index=True)
     must_change_password = Column(Boolean, nullable=False, default=False)
     failed_login_count = Column(Integer, nullable=False, default=0)
