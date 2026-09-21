@@ -138,6 +138,18 @@ export default function AdjudicatorWorkbench({
     return () => { cancelled = true; };
   }, [currentStep, user?.email]);
 
+  if (currentStep > 1 && !activeCase) {
+    return (
+      <div className="wizard-card">
+        <h2 className="wizard-title">No adjudication case selected</h2>
+        <p className="wizard-subtitle">Select an assigned subject from the queue before opening evidence or signing a determination.</p>
+        <button className="btn-large btn-back" onClick={() => setCurrentStep(1)}>
+          <ArrowLeft size={15} /> Return to Subject Queue
+        </button>
+      </div>
+    );
+  }
+
   const decisionSnapshot = () => ({
     selectedDiagnosis,
     meetsCriteria,

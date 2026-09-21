@@ -224,6 +224,7 @@ export default function App() {
             <button
               className={`rt-tab-btn ${activeView === 'workbench' && currentStep === 2 ? 'active' : currentStep > 2 ? 'completed' : ''}`}
               onClick={() => { setActiveView('workbench'); setCurrentStep(2); }}
+              disabled={!activeCase}
             >
               <span className="rt-tab-badge">2</span>
               eSource &amp; Evidence
@@ -232,6 +233,7 @@ export default function App() {
             <button
               className={`rt-tab-btn ${activeView === 'workbench' && currentStep === 3 ? 'active' : currentStep > 3 ? 'completed' : ''}`}
               onClick={() => { setActiveView('workbench'); setCurrentStep(3); }}
+              disabled={!activeCase}
             >
               <span className="rt-tab-badge">3</span>
               Approve &amp; Sign (FORM-ADJ-15)
