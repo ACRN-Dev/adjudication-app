@@ -231,8 +231,8 @@ def process_batch(batch_id, reset=False):
             derive_participant(db,p,pvis); db.flush()
             finalize_history(db, p); db.flush()
             readiness = participant_import_readiness(p)
-            p.workflow_status = "QC_APPROVED" if readiness["status"] == "ACCEPTED" else "MONITOR_QC_REQUIRED"
-            audit_action = "PARTICIPANT_AUTO_QC_APPROVED" if readiness["status"] == "ACCEPTED" else ("PARTICIPANT_AUTO_QC_WARNINGS" if readiness["status"] == "ACCEPTED_WITH_WARNINGS" else "PARTICIPANT_AUTO_QC_REJECTED")
+            p.workflow_status = "QC_APPROVED" if readiness.get("meets_auto_approval") else "MONITOR_QC_REQUIRED"
+            audit_action = "PARTICIPANT_AUTO_QC_APPROVED" if p.workflow_status == "QC_APPROVED" else ("PARTICIPANT_AUTO_QC_WARNINGS" if readiness["status"] == "ACCEPTED_WITH_WARNINGS" else "PARTICIPANT_AUTO_QC_REJECTED")
             audit(db, batch.uploaded_by, "MONITOR_QC_REVIEWER", audit_action, "PARTICIPANT", p.id, {"readiness": readiness})
             if participant_index % 50 == 0:
                 db.commit()

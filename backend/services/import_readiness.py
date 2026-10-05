@@ -159,6 +159,7 @@ def participant_import_readiness(participant):
         "assignable": status in {"ACCEPTED", "ACCEPTED_WITH_WARNINGS"},
         "override_allowed": status == "ACCEPTED_WITH_WARNINGS",
         "missing_visits_pass": True,
+        "meets_auto_approval": complete_visits >= MIN_COMPLETE_VISITS,
         "present_visits": len(scheduled),
         "complete_visits": complete_visits,
         "min_complete_visits": MIN_COMPLETE_VISITS,

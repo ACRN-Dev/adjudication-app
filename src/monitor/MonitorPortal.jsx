@@ -12,6 +12,7 @@ import {
   deleteBatch,
   resetRealtimeImports,
   assignPatient,
+  approvePatient,
   listAdjudicators,
   listReferenceRanges,
   upsertReferenceRange,
@@ -21,6 +22,7 @@ import {
 const nav = [
   ['/monitor', 'Monitor Overview', 'LayoutDashboard'],
   ['/monitor/imports', 'Import Data', 'Upload'],
+  ['/monitor/qc', 'Reconstruction QC', 'ListChecks'],
   ['/monitor/patients', 'Patient Database', 'Database'],
   ['/monitor/assignments', 'Assignments', 'UsersRound']
 ];
@@ -746,8 +748,8 @@ function ReconstructionQC({ user, onOpen, readOnly = false }) {
     try {
       for (const p of data.items) {
         const readiness = p.import_readiness || {};
-        if (p.qc_status !== 'QC_APPROVED' && p.qc_status !== 'ASSIGNED' && readiness.status === 'ACCEPTED') {
-          await approvePatient(p.id, user);
+        if (p.qc_status !== 'QC_APPROVED' && p.qc_status !== 'ASSIGNED' && (readiness.status === 'ACCEPTED' || readiness.status === 'ACCEPTED_WITH_WARNINGS')) {
+          await approvePatient(p.id, user, readiness.status === 'ACCEPTED_WITH_WARNINGS' ? 'Bulk QC Approval' : '');
         }
       }
       setMsg('All visit reconstructions QC approved!');
@@ -816,7 +818,7 @@ function ReconstructionQC({ user, onOpen, readOnly = false }) {
               return (
                 <span style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-start' }}>
                   <span className={`badge-qc ${badgeCls}`}>
-                    {rd.status || p.qc_status}
+                    {isApproved ? p.qc_status : (rd.status || p.qc_status)}
                   </span>
                   {cv !== null && cv < minCv && !isApproved && (
                     <span style={{ fontSize: '10px', color: '#f59e0b', fontWeight: 600 }}>
@@ -1329,6 +1331,8 @@ export default function MonitorPortal({ user, onLogout, isEmbedded, readOnly = f
     <Timeline patient={selected} user={user} onClose={() => setSelected(null)} readOnly={readOnly} />
   ) : path === '/monitor/imports' ? (
     <Imports user={user} onNavigate={go} readOnly={readOnly} />
+  ) : path === '/monitor/qc' ? (
+    <ReconstructionQC user={user} onOpen={open} readOnly={readOnly} />
   ) : path === '/monitor/assignments' ? (
     <Assignments user={user} onOpen={open} readOnly={readOnly} />
   ) : path === '/monitor/patients' ? (

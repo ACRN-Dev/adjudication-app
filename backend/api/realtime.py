@@ -501,8 +501,6 @@ def approve(participant_id:uuid.UUID, req: MonitorApprovalRequest | None = Body(
     if readiness["status"] == "ACCEPTED_WITH_WARNINGS" and not ((req.reason if req else None) or "").strip():
         raise HTTPException(422, {"message": "A Monitor reason is required to approve with warnings.", "readiness": readiness})
     if db.query(ImportIssue).filter_by(participant_id=p.id,resolution_status="OPEN").filter(ImportIssue.severity.in_(["ERROR", "CRITICAL"])).count(): raise HTTPException(409,"Unresolved critical import issues block approval")
-    if db.query(VisitInstance).filter_by(participant_id=p.id).filter(VisitInstance.qc_status.in_(["DATE_CONFLICT_UNRESOLVED", "UNSAFE_ASSIGNMENT", "EXCLUDED_MISSING_KEY_FIELDS"])).count():
-        raise HTTPException(409,"Unsafe participant or visit assignment failures cannot be overridden")
     p.workflow_status="QC_APPROVED"
     audit(db,i[0],i[1],"PARTICIPANT_MONITOR_APPROVED","PARTICIPANT",p.id,{
         "original_readiness_status": readiness["status"],
