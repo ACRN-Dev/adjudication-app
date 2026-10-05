@@ -83,7 +83,7 @@ function Page({ title, desc, children }) {
   );
 }
 
-function OperationalDashboard({ user, onOpen }) {
+function OperationalDashboard({ user, onOpen, readOnly = false }) {
   const [data, setData] = useState(null);
   const [caseProgress, setCaseProgress] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -198,12 +198,16 @@ function OperationalDashboard({ user, onOpen }) {
             <select className="chair-input" value={releaseStudy} onChange={(e) => setReleaseStudy(e.target.value)} aria-label="Final release study">
               {(data?.filters?.studies || ['PROTECT-Africa', 'LOPE-Nigeria']).map((study) => <option key={study} value={study}>{study}</option>)}
             </select>
-            <button className="a-primary" onClick={() => downloadFinalRelease('csv')} disabled={Boolean(releaseFormat)}>
-              <I.Download size={14} /> {releaseFormat === 'csv' ? 'Preparing…' : 'Final CSV'}
-            </button>
-            <button className="a-secondary" onClick={() => downloadFinalRelease('pdf')} disabled={Boolean(releaseFormat)}>
-              <I.FileText size={14} /> {releaseFormat === 'pdf' ? 'Preparing…' : 'Final PDF'}
-            </button>
+            {!readOnly && (
+              <>
+                <button className="a-primary" onClick={() => downloadFinalRelease('csv')} disabled={Boolean(releaseFormat)}>
+                  <I.Download size={14} /> {releaseFormat === 'csv' ? 'Preparing…' : 'Final CSV'}
+                </button>
+                <button className="a-secondary" onClick={() => downloadFinalRelease('pdf')} disabled={Boolean(releaseFormat)}>
+                  <I.FileText size={14} /> {releaseFormat === 'pdf' ? 'Preparing…' : 'Final PDF'}
+                </button>
+              </>
+            )}
           </div>
           <details className="a-panel dashboard-disclosure" style={{ marginBottom: '16px' }} open>
             <summary className="dashboard-disclosure-summary">
@@ -413,7 +417,7 @@ function ProgressBar({ pct, tone = 'info' }) {
   );
 }
 
-function Imports({ user, onNavigate }) {
+function Imports({ user, onNavigate, readOnly }) {
   const [batches, setBatches] = useState([]);
   const [msg, setMsg] = useState('');
   const [roster, setRoster] = useState([]);
@@ -725,7 +729,7 @@ function Imports({ user, onNavigate }) {
   );
 }
 
-function ReconstructionQC({ user, onOpen }) {
+function ReconstructionQC({ user, onOpen, readOnly = false }) {
   const [data, setData] = useState({ items: [], total: 0 });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -741,7 +745,8 @@ function ReconstructionQC({ user, onOpen }) {
     setMsg('Approving all visit reconstructions…');
     try {
       for (const p of data.items) {
-        if (p.qc_status !== 'QC_APPROVED' && p.qc_status !== 'ASSIGNED') {
+        const readiness = p.import_readiness || {};
+        if (p.qc_status !== 'QC_APPROVED' && p.qc_status !== 'ASSIGNED' && readiness.status === 'ACCEPTED') {
           await approvePatient(p.id, user);
         }
       }
@@ -773,36 +778,69 @@ function ReconstructionQC({ user, onOpen }) {
       )}
 
       <Table
-        cols={['Blinded Subject', 'Study', 'Visits', 'First Visit', 'Latest Visit', 'Derived Onset', 'Completeness', 'History', 'QC Status', 'Action']}
+        cols={['Blinded Subject', 'Study', 'Visits (Complete)', 'First Visit', 'Latest Visit', 'Derived Onset', 'Completeness', 'History', 'QC Status', 'Action']}
         rows={data.items.map((p) => ({
           id: p.id,
           data: p,
           cells: [
             <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{p.subject_id}</span>,
             <span className="study-badge">{p.study}</span>,
-            `${p.visit_count} visits`,
+            (() => {
+              const rd = p.import_readiness || {};
+              const cv = rd.complete_visits ?? null;
+              const minCv = rd.min_complete_visits ?? 4;
+              const maxCv = rd.max_complete_visits ?? 6;
+              const colour = cv === null ? '#888' : cv >= minCv ? '#22c55e' : cv === minCv - 1 ? '#f59e0b' : '#ef4444';
+              return (
+                <span style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <span>{p.visit_count} source rows</span>
+                  {cv !== null && (
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: colour }}>
+                      {cv}/{minCv}–{maxCv} complete visits
+                    </span>
+                  )}
+                </span>
+              );
+            })(),
             date(p.first_visit),
             date(p.latest_visit),
             p.onset_classification,
             `${Math.round((p.packet_completeness || 0) * 100)}%`,
             `${Math.round((p.history_completeness || 0) * 100)}%`,
-            <span
-              className={`badge-qc ${
-                p.qc_status === 'QC_APPROVED' || p.qc_status === 'ASSIGNED' ? 'approved' : 'pending'
-              }`}
-            >
-              {p.qc_status}
-            </span>,
+            (() => {
+              const rd = p.import_readiness || {};
+              const isApproved = p.qc_status === 'QC_APPROVED' || p.qc_status === 'ASSIGNED';
+              const badgeCls = isApproved ? 'approved' : rd.status === 'REJECTED' ? 'error' : 'pending';
+              const cv = rd.complete_visits ?? null;
+              const minCv = rd.min_complete_visits ?? 4;
+              return (
+                <span style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-start' }}>
+                  <span className={`badge-qc ${badgeCls}`}>
+                    {rd.status || p.qc_status}
+                  </span>
+                  {cv !== null && cv < minCv && !isApproved && (
+                    <span style={{ fontSize: '10px', color: '#f59e0b', fontWeight: 600 }}>
+                      ⚠ &lt;{minCv} complete visits
+                    </span>
+                  )}
+                </span>
+              );
+            })(),
             <div style={{ display: 'flex', gap: '6px' }}>
               <button className="a-link" onClick={() => onOpen(p)}>
                 Inspect
               </button>
-              {p.qc_status === 'MONITOR_QC_REQUIRED' && (
+              {p.qc_status === 'MONITOR_QC_REQUIRED' && p.import_readiness?.status !== 'REJECTED' && !readOnly && (
                 <button
                   className="a-primary"
                   style={{ fontSize: '10px', padding: '3px 8px' }}
                   onClick={async () => {
-                    await approvePatient(p.id, user);
+                    let reason = '';
+                    if (p.import_readiness?.status === 'ACCEPTED_WITH_WARNINGS') {
+                      reason = window.prompt('Enter Monitor reason for approving with warnings') || '';
+                      if (!reason.trim()) return;
+                    }
+                    await approvePatient(p.id, user, reason);
                     load();
                   }}
                 >
@@ -817,7 +855,7 @@ function ReconstructionQC({ user, onOpen }) {
   );
 }
 
-function Assignments({ user, onOpen }) {
+function Assignments({ user, onOpen, readOnly }) {
   const [data, setData] = useState({ items: [], total: 0 });
   const [roster, setRoster] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -888,7 +926,7 @@ function Assignments({ user, onOpen }) {
             <I.CheckCircle2 size={14} /> Completed cases
           </button>
         </div>
-        {assignmentTab === 'active' && (
+        {assignmentTab === 'active' && !readOnly && (
           <button className="a-primary" onClick={autoAssignAll} disabled={busy}>
             <I.Users size={14} /> {busy ? 'Assigning…' : 'Auto-Assign Demo Adjudicators (A & B to All)'}
           </button>
@@ -903,7 +941,7 @@ function Assignments({ user, onOpen }) {
       )}
 
       <Table
-        cols={['Blinded Subject', 'Visits', 'Derivation', 'QC Status', 'Reviewer A', 'Reviewer B', 'Actions']}
+        cols={['Blinded Subject', 'Visits', ...(readOnly ? [] : ['Derivation']), 'QC Status', 'Reviewer A', 'Reviewer B', ...(readOnly ? [] : ['Actions'])]}
         rows={data.items.map((p) => {
           const revA = (p.assignments || []).find((a) => a.reviewer_role === 'REVIEWER_A')?.reviewer_upn || '';
           const revB = (p.assignments || []).find((a) => a.reviewer_role === 'REVIEWER_B')?.reviewer_upn || '';
@@ -917,11 +955,11 @@ function Assignments({ user, onOpen }) {
             cells: [
               <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{p.subject_id}</span>,
               `${p.visit_count} visits`,
-              p.onset_classification,
+              ...(readOnly ? [] : [p.onset_classification]),
               <span className={`badge-qc ${p.is_completed || p.qc_status === 'ASSIGNED' ? 'assigned' : 'approved'}`}>
                 {p.is_completed ? 'COMPLETED' : p.qc_status}
               </span>,
-              assignmentTab === 'completed' ? (
+              assignmentTab === 'completed' || readOnly ? (
                 <span className="assignment-completed-reviewer">{revA || 'Reviewer A not recorded'}</span>
               ) : (
                 <select
@@ -937,7 +975,7 @@ function Assignments({ user, onOpen }) {
                   ))}
                 </select>
               ),
-              assignmentTab === 'completed' ? (
+              assignmentTab === 'completed' || readOnly ? (
                 <span className="assignment-completed-reviewer">{revB || 'Reviewer B not recorded'}</span>
               ) : (
                 <select
@@ -953,9 +991,11 @@ function Assignments({ user, onOpen }) {
                   ))}
                 </select>
               ),
-              <button className="a-link" onClick={() => onOpen(p)}>
-                View Package
-              </button>
+              ...(readOnly ? [] : [
+                <button className="a-link" onClick={() => onOpen(p)}>
+                  View Package
+                </button>
+              ])
             ]
           };
         })}
@@ -1010,7 +1050,7 @@ function Patients({ user, onOpen }) {
   );
 }
 
-function Timeline({ patient, user, onClose }) {
+function Timeline({ patient, user, onClose, readOnly }) {
   if (!patient) return null;
   const visits = (patient.visits || [])
     .filter((visit) => /^V0[1-6]$/i.test(String(visit.name || visit.visit_code || '')))
@@ -1040,6 +1080,7 @@ function Timeline({ patient, user, onClose }) {
         <button onClick={onClose}>
           <I.ArrowLeft size={14} /> Back
         </button>
+        {!readOnly && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', padding: '4px 8px', borderRadius: '6px' }}>
           <select value={assignRole} onChange={(e) => setAssignRole(e.target.value)} style={{ fontSize: '11px', padding: '4px' }}>
             <option value="REVIEWER_A">Reviewer A</option>
@@ -1057,6 +1098,7 @@ function Timeline({ patient, user, onClose }) {
             Assign Adjudicator
           </button>
         </div>
+        )}
       </div>
 
       {msg && (
@@ -1259,7 +1301,7 @@ function ReferenceRanges({ user }) {
   );
 }
 
-export default function MonitorPortal({ user, onLogout, isEmbedded }) {
+export default function MonitorPortal({ user, onLogout, isEmbedded, readOnly = false }) {
   const [path, setPath] = useState(location.pathname);
   const [selected, setSelected] = useState(null);
 
@@ -1284,15 +1326,15 @@ export default function MonitorPortal({ user, onLogout, isEmbedded }) {
   const open = async (r) => setSelected(await getPatient(r.id, user));
 
   let content = selected ? (
-    <Timeline patient={selected} user={user} onClose={() => setSelected(null)} />
+    <Timeline patient={selected} user={user} onClose={() => setSelected(null)} readOnly={readOnly} />
   ) : path === '/monitor/imports' ? (
-    <Imports user={user} onNavigate={go} />
+    <Imports user={user} onNavigate={go} readOnly={readOnly} />
   ) : path === '/monitor/assignments' ? (
-    <Assignments user={user} onOpen={open} />
+    <Assignments user={user} onOpen={open} readOnly={readOnly} />
   ) : path === '/monitor/patients' ? (
-    <Patients user={user} onOpen={open} />
+    <Patients user={user} onOpen={open} readOnly={readOnly} />
   ) : (
-    <OperationalDashboard user={user} onOpen={go} />
+    <OperationalDashboard user={user} onOpen={go} readOnly={readOnly} />
   );
 
   if (isEmbedded) return <ErrorBoundary>{content}</ErrorBoundary>;

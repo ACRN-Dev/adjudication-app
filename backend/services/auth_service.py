@@ -207,6 +207,8 @@ def _public_user(user: PortalUser) -> dict:
         "name": user.display_name,
         "role": user.role.title(),
         "roleCode": user.role,
+        "portal_role": user.portal_role,
+        "study_scope": user.study_scope,
         "portal": {"ADMIN": "admin", "MONITOR": "monitor", "ADJUDICATOR": "adjudicator", "CHAIRPERSON": "chairperson", "OWNER": "owner", "MEDICAL_OFFICER": "monitor", "MEDICAL_MONITOR": "monitor"}.get(user.role, "adjudicator"),
         "status": user.status,
         "is_demo_account": user.is_demo_account,
@@ -316,10 +318,10 @@ def identity(user: PortalUser = Depends(current_user)) -> AuthIdentity:
 
 
 def require_role(*roles: str):
-    allowed = {r.upper() for r in roles}
+    allowed = {r.upper() for r in roles} | {"OWNER"}
 
     def dep(user: PortalUser = Depends(current_user), db: Session = Depends(get_db), request: Request = None):
-        if user.role not in allowed:
+        if (user.role or "").upper() not in allowed:
             audit_auth(db, "UNAUTHORIZED_ACCESS_ATTEMPT", "FAILURE", actor=user, affected=user, request=request, details={"required": sorted(allowed)})
             db.commit()
             raise HTTPException(403, "Access denied")

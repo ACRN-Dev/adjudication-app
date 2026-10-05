@@ -1,6 +1,7 @@
 """Synthetic RealTime-shaped privacy, mapping, reconstruction and temporal tests."""
 from services.realtime_mapping import classify,map_variable,parse_datetime,parse_numeric,parse_coded,visit_code
 from services.realtime_pipeline import pseudonym,_fernet
+from services.import_readiness import participant_import_readiness
 from api.realtime import _timeline_visit_number
 
 def row(label,page="Vital Signs / Weight Height",form="Visit 3",value="",field_type="numeric",export=""):
@@ -56,3 +57,53 @@ def test_source_datetime_parser_supports_real_time_date_variants():
     assert parse_datetime("22/Apr/2026 10:57:00 SAST").isoformat() == "2026-04-22T10:57:00"
     assert parse_datetime("22/04/2026 10:57").isoformat() == "2026-04-22T10:57:00"
     assert parse_datetime("2026-04-22T10:57:00Z").isoformat() == "2026-04-22T10:57:00"
+
+
+def test_collection_indicators_are_not_mapped_as_lab_results():
+    assert map_variable(row("Was a urine protein dipstick test performed?", page="Assessment of Proteinuria")) is None
+    assert map_variable(row("Was a spot urine test for protein/creatinine ratio performed?", page="Assessment of Proteinuria")) is None
+    assert classify(row("Was a urine protein dipstick test performed?", page="Assessment of Proteinuria")) == "CLINICAL_COLLECTION_STATUS"
+
+
+def test_source_interpretation_is_context_not_result_value():
+    r = row("Red blood cell count result interpretation", page="Hematology")
+    assert map_variable(r) == "source_interpretation_rbc"
+    assert classify(r) == "CLINICAL_RESULT_INTERPRETATION"
+
+
+def test_readiness_accepts_evidence_rich_visit_with_missing_date_as_warning():
+    obs = type("Obs", (), {"prohibited_flag": False, "canonical_variable": "bp_systolic"})()
+    visit = type("Visit", (), {
+        "scheduled_visit_code": "V01",
+        "visit_datetime": None,
+        "observations": [obs],
+        "qc_status": "PENDING",
+        "visit_occurrence": 1,
+    })()
+    participant = type("Participant", (), {"visits": [visit]})()
+    readiness = participant_import_readiness(participant)
+    assert readiness["status"] == "ACCEPTED_WITH_WARNINGS"
+    assert readiness["accepted"] is True
+    assert "Visit date is missing" in readiness["warnings"][0]
+
+
+def test_readiness_duplicate_scheduled_visit_keeps_more_complete_instance():
+    sparse = type("Visit", (), {
+        "scheduled_visit_code": "V02",
+        "visit_datetime": None,
+        "observations": [],
+        "qc_status": "PENDING",
+        "visit_occurrence": 2,
+    })()
+    complete = type("Visit", (), {
+        "scheduled_visit_code": "V02",
+        "visit_datetime": parse_datetime("22/04/2026 10:57"),
+        "observations": [type("Obs", (), {"prohibited_flag": False, "canonical_variable": "bp_systolic"})()],
+        "qc_status": "PENDING",
+        "visit_occurrence": 1,
+    })()
+    participant = type("Participant", (), {"visits": [sparse, complete]})()
+    readiness = participant_import_readiness(participant)
+    v02 = next(item for item in readiness["visits"] if item["visit"] == "V02")
+    assert v02["status"] == "ACCEPTED_WITH_WARNINGS"
+    assert v02["mapped_fields"] == 1

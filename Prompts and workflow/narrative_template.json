@@ -1,0 +1,46 @@
+{
+  "version": "FORM-ADJ-PROSE-v2.0",
+  "engineModel": "ACRN-Residency-Prose-Engine v2.0 (Template-Based)",
+  "sections": [
+    {
+      "id": "sec1",
+      "title": "CLINICAL PRESENTATION",
+      "template": "We are presenting Participant {{id}} for adjudication \u2014 a {{ageStr}} African woman, {{obs}}{{comorStr}}. {{gaContext}}. {{enrollStr}} The clinical record has been prepared on Form {{formCode}} in accordance with SOP-ADJ-002; site and provider identifiers have been withheld to preserve adjudicator blinding."
+    },
+    {
+      "id": "sec2",
+      "title": "BLOOD PRESSURE COURSE",
+      "template": "The blood pressure trajectory comprises {{bpCount}} documented reading(s): {{bpNarr}}. The peak recorded blood pressure is {{peakStr}}. {{confStr}} {{sevStr}}"
+    },
+    {
+      "id": "sec3",
+      "title": "PROTEINURIA",
+      "template": "{{protSection}}"
+    },
+    {
+      "id": "sec4",
+      "title": "LABORATORY INVESTIGATIONS (END-ORGAN FUNCTION)",
+      "template": "{{labSection}}"
+    },
+    {
+      "id": "sec5",
+      "title": "FETAL ASSESSMENT",
+      "template": "{{fetalSection}}"
+    },
+    {
+      "id": "sec6",
+      "title": "CLINICAL COURSE, MANAGEMENT & DELIVERY",
+      "template": "{{courseSection}}"
+    },
+    {
+      "id": "sec7",
+      "title": "EVIDENCE GAPS",
+      "template": "{{missingSection}}"
+    },
+    {
+      "id": "sec8",
+      "title": "SYNTHESIS FOR ADJUDICATION",
+      "template": "In summary, this is a case of {{contextClue}}. The adjudicating physician is asked to review the source evidence above, taking into account the complete clinical trajectory and the protocol-defined diagnostic criteria for the ACRN PROTECT-Africa / LOPE-Nigeria programme, and to record an independent determination with a supporting rationale. No automated classification should be taken as a clinical conclusion \u2014 the determination rests entirely with the reviewing adjudicator."
+    }
+  ]
+}

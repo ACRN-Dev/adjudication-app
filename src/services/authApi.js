@@ -28,6 +28,9 @@ async function request(path, options = {}) {
         if (text) detail = `${detail}: ${text.slice(0, 180)}`;
       } catch {}
     }
+    if ((res.status === 500 || res.status === 502 || res.status === 503 || res.status === 504) && detail === `Request failed (${res.status}) at ${BASE}${path}`) {
+      detail = 'The backend API service is offline or unreachable on port 8000. Please ensure the backend is running (npm run dev:api).';
+    }
     throw new Error(detail);
   }
   return res.json();

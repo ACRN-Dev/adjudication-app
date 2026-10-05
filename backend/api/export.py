@@ -304,7 +304,7 @@ from models.canonical import AuditEvent
 import os
 
 ENABLE_UNBLINDED_EXPORT = os.getenv("ENABLE_UNBLINDED_EXPORT", "false").lower() == "true"
-UNBLINDED_PERMITTED_ROLES = {"ADMIN"}  # Pending formal confirmation from Nqobani Ncube
+UNBLINDED_PERMITTED_ROLES = {"ADMIN", "OWNER"}  # Pending formal confirmation from Nqobani Ncube
 
 
 def _require_final_release_access(user: PortalUser, study: str, db: Session):
@@ -317,6 +317,8 @@ def _require_final_release_access(user: PortalUser, study: str, db: Session):
         studies = {item.strip() for item in (user.study_scope or "*").split(",") if item.strip()}
         if "*" not in studies and study not in studies:
             raise HTTPException(403, "Study outside delegated scope")
+    elif user.role in ("ADMIN", "OWNER"):
+        pass
     else:
         raise HTTPException(403, f"Access denied: role '{role}' is not authorized for final study release")
 

@@ -23,6 +23,8 @@ DEFAULT_RANGES = {
     "WBC":              {"low": 4.5, "high": 11.0, "unit": "10^3/uL"},
     "BUN":              {"low": 7.0, "high": 20.0, "unit": "mg/dL"},
     "BILIRUBIN":        {"low": 0.1, "high": 1.2, "unit": "mg/dL"},
+    "ALC":              {"low": 1.0, "high": 3.5, "unit": "10^9/L"},
+    "ANC":              {"low": 2.0, "high": 7.5, "unit": "10^9/L"},
 }
 
 STUDY_RANGES = {
@@ -50,6 +52,13 @@ ANALYTE_ALIASES = {
     "wbc": "WBC",
     "total_bilirubin": "BILIRUBIN",
     "bun": "BUN",
+    "alc": "ALC",
+    "absolute_lymphocyte_count": "ALC",
+    "absolute_lymphocytes_count": "ALC",
+    "anc": "ANC",
+    "absolute_neutrophil_count": "ANC",
+    "absolute_neutrophils_count": "ANC",
+    "hematocrit": "HEMATOCRIT",
 }
 
 

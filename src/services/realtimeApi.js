@@ -32,7 +32,11 @@ export const deleteBatch=(id,user)=>request(`/batches/${id}`,user,{method:'DELET
 export const resetRealtimeImports=(user)=>request('/batches/reset-demo',user,{method:'POST'});
 export const listPatients=(user,params={})=>request(`/patients?${new URLSearchParams(params)}`,user);
 export const getPatient=(id,user)=>request(`/patients/${id}`,user);
-export const approvePatient=(id,user)=>request(`/patients/${id}/approve`,user,{method:'POST'});
+export const approvePatient=(id,user,reason='')=>request(`/patients/${id}/approve`,user,{
+  method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({reason})
+});
 export const assignPatient=(id,email,role,user)=>request(`/patients/${id}/assign?${new URLSearchParams({reviewer_upn:email,reviewer_role:role})}`,user,{method:'POST'});
 export const listAssigned=(user)=>request('/assigned',user);
 export const listAdjudicators=(user)=>request('/adjudicators',user);
@@ -76,12 +80,17 @@ export function asWorkbenchCase(data, user){
  const first=n=>values(n)[0]?.value;
  const bps=values('SBP').concat(values('bp_systolic')).map((x,i)=>({sbp:Number(x.value),dbp:Number((values('DBP').concat(values('bp_diastolic')))[i]?.value)||null,datetime:x.observed_at,visit:x.visit}));
  const userUpn=(user?.email||'').trim().toLowerCase();
- // Never fall back to another assignment entry: that would mislabel this user as a
- // different reviewer (e.g. Reviewer B silently submitting as Reviewer A) and collide
- // with that reviewer's already-signed record. The backend re-derives the true role
- // from the authoritative assignment anyway; this is just the initial UI hint.
  const assignment=(data.assignments||[]).find(a=>(a.reviewer_upn||'').trim().toLowerCase()===userUpn);
- const visits=data.visits||[];
+ const visits=(data.visits||[]).map(v => {
+   const gaLabel = v.ga || (v.ga_days && v.ga_days >= 45 ? `${Math.floor(v.ga_days / 7)} weeks, ${v.ga_days % 7} days` : null);
+   return {
+     ...v,
+     ga: gaLabel,
+     gestationalLabel: gaLabel || v.gestationalLabel || null,
+   };
+ });
  const signature=[...visits].reverse().find(visit=>visit.signature)?.signature||null;
- return {id:data.subject_id,databaseId:data.id,caseNo:`ADJ-${data.subject_id.slice(-6)}`,site:'Blinded site',status:data.qc_status||'Assigned',study:data.study,pktScore:data.packet_completeness||0,historyScore:data.history_completeness||0,gaAtEvent:data.longitudinal?.onset_classification||'Unclassifiable',derivedSubtype:data.longitudinal?.onset_classification||'UNCLASSIFIABLE',derivedSeverity:data.longitudinal?.maximum_severity||'NOT_ASSESSABLE',trigger:data.longitudinal?.trigger_status||'DV-30 pending',reviewerRole:assignment?.reviewer_role || 'REVIEWER_A',bp_readings:bps,upcr:first('UPCR')||first('upcr'),dipstick_raw:first('DIPSTICK_PROTEIN')||first('ua_protein'),platelet_count:first('PLATELETS')||first('platelets'),creatinine:first('CREATININE')||first('creatinine'),ast:first('AST')||first('ast'),alt:first('ALT')||first('alt'),ldh:first('LDH')||first('ldh'),delivery_date:first('DELIVERY_DATE')||first('delivery_date'),visits,signature,longitudinal:data.longitudinal,history:data.history||{},risk_summary:data.risk_summary||{},provenance:'SOURCE_RECORDED'};
+ const extractedAge = data.age || data.risk_summary?.age || data.history?.baseline?.find(f => f.field_key === 'age')?.value || data.history?.demographics?.find(f => f.key === 'age')?.value || null;
+ const eventGa = visits.find(v => v.ga)?.ga || null;
+ return {id:data.subject_id,databaseId:data.id,caseNo:`ADJ-${data.subject_id.slice(-6)}`,site:'Blinded site',status:data.qc_status||'Assigned',study:data.study,pktScore:data.packet_completeness||0,historyScore:data.history_completeness||0,age:extractedAge,gaAtEvent:eventGa,derivedSubtype:data.longitudinal?.onset_classification||'UNCLASSIFIABLE',derivedSeverity:data.longitudinal?.maximum_severity||'NOT_ASSESSABLE',trigger:data.longitudinal?.trigger_status||'DV-30 pending',reviewerRole:assignment?.reviewer_role || 'REVIEWER_A',bp_readings:bps,upcr:first('UPCR')||first('upcr'),dipstick_raw:first('DIPSTICK_PROTEIN')||first('ua_protein'),platelet_count:first('PLATELETS')||first('platelets'),creatinine:first('CREATININE')||first('creatinine'),ast:first('AST')||first('ast'),alt:first('ALT')||first('alt'),ldh:first('LDH')||first('ldh'),delivery_date:first('DELIVERY_DATE')||first('delivery_date'),visits,signature,longitudinal:data.longitudinal,history:data.history||{},risk_summary:data.risk_summary||{},provenance:'SOURCE_RECORDED'};
 }

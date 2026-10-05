@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowRight, ArrowLeft, CheckCircle2, Activity, Database, ShieldCheck, FileText, Lock, Download, EyeOff, UserX, AlertCircle, RefreshCw, Info, ExternalLink, ChevronDown, Bot, FilePlus, LogOut, Copy, Save, Server, Search, Calendar, ChevronRight, X, UserCheck, Stethoscope, AlertTriangle } from 'lucide-react';
-import PatientHistoryPanel from './PatientHistoryPanel';
+import { ArrowRight, ArrowLeft, CheckCircle2, Activity, Database, ShieldCheck, FileText, Lock, Download, EyeOff, UserX, AlertCircle, RefreshCw, Info, ExternalLink, ChevronDown, Bot, FilePlus, LogOut, Copy, Save, Server, Search, Calendar, ChevronRight, X, UserCheck, Stethoscope, AlertTriangle, Baby } from 'lucide-react';
 import { OverallSummary, VisitEvidencePanel, VisitRibbon } from './VisitEvidenceSections';
 import { generateNarrative, generateSummary, AI_ENGINE_MODEL } from '../services/demoNarrative';
+import { generateVisitNarrative, generateOverallNarrative } from '../services/clinicalNarrative';
 import { runDvEngine } from '../services/dvEngine';
 import { downloadPdfReport } from '../services/api';
 import { isReviewerVisitSigned, isVisitComplete, normalizeVisitEvidence } from '../services/visitEvidence';
@@ -109,6 +109,7 @@ export default function AdjudicatorWorkbench({
   const [fetalProvenance, setFetalProvenance] = useState({});
   const [visit5MappingLoading, setVisit5MappingLoading] = useState(false);
   const [visit5ValidationWarning, setVisit5ValidationWarning] = useState('');
+  const [showAiAssistant, setShowAiAssistant] = useState(false);
   const [caseProgress, setCaseProgress] = useState(null);
   const isSigned = activeCase?.status?.includes('Finalized');
   const isReviewerC = activeCase?.reviewerRole === 'REVIEWER_C';
@@ -362,9 +363,19 @@ export default function AdjudicatorWorkbench({
       setNarrativeText(existing);
       return;
     }
-    const generated = generateNarrative({ ...activeCase, visits: pages.slice(0, selectedVisitIndex + 1) }, formCode);
-    setVisitNarratives((current) => ({ ...current, [visitKey]: generated.fullText }));
-    setNarrativeText(generated.fullText);
+    // Use new v2.0 per-visit narrative engine via the normalised evidence visits
+    const visitNum = selectedVisitIndex + 1;
+    const ev = evidenceVisits[selectedVisitIndex];
+    if (ev) {
+      const visitText = generateVisitNarrative(ev, visitNum, activeCase);
+      setVisitNarratives((current) => ({ ...current, [visitKey]: visitText }));
+      setNarrativeText(visitText);
+    } else {
+      // Fallback to legacy overall narrative
+      const generated = generateNarrative({ ...activeCase, visits: pages.slice(0, selectedVisitIndex + 1) }, formCode);
+      setVisitNarratives((current) => ({ ...current, [visitKey]: generated.fullText }));
+      setNarrativeText(generated.fullText);
+    }
   }, [activeCase?.id, selectedVisitIndex]);
 
   useEffect(() => {
@@ -383,12 +394,20 @@ export default function AdjudicatorWorkbench({
     if (!activeCase) return;
     setIsGeneratingAi(true);
     setTimeout(() => {
-      const scopedCase = selectedVisitIndex < pages.length ? { ...activeCase, visits: pages.slice(0, selectedVisitIndex + 1) } : activeCase;
-      const generated = generateNarrative(scopedCase, formCode);
-      setNarrativeText(generated.fullText);
-      if (selectedVisitIndex < pages.length) {
+      if (selectedVisitIndex >= pages.length) {
+        // Overall summary — use new v2.0 engine
+        const overallText = generateOverallNarrative(evidenceVisits, activeCase);
+        setNarrativeText(overallText);
+      } else {
+        // Per-visit — use new v2.0 engine
+        const visitNum = selectedVisitIndex + 1;
+        const ev = evidenceVisits[selectedVisitIndex];
+        const visitText = ev
+          ? generateVisitNarrative(ev, visitNum, activeCase)
+          : generateNarrative({ ...activeCase, visits: pages.slice(0, selectedVisitIndex + 1) }, formCode).fullText;
+        setNarrativeText(visitText);
         const key = pages[selectedVisitIndex]?.visit_code || String(selectedVisitIndex + 1);
-        setVisitNarratives((current) => ({ ...current, [key]: generated.fullText }));
+        setVisitNarratives((current) => ({ ...current, [key]: visitText }));
       }
       setIsGeneratingAi(false);
     }, 450);
@@ -502,171 +521,7 @@ export default function AdjudicatorWorkbench({
         </div>
 
         
-        {evidenceVisits.some(v => v.visit_number === 5 || v.visit_code === 'V05' || v.name?.includes('Visit 5')) && (
-          <DropdownSection title="Fetal &amp; Neonatal Outcomes" icon={<Baby size={16} />} defaultOpen>
-            <div className="summary-card-grid" style={{ marginBottom: '16px' }}>
-              <div className="form-group">
-                <label style={{ fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Gestational Age at Delivery (weeks)</span>
-                  {fetalProvenance?.GA_AT_DELIVERY && (
-                    <span style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: 600 }}>
-                      CRF: {fetalProvenance.GA_AT_DELIVERY.raw_value || 'Documented'}
-                    </span>
-                  )}
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="15"
-                  max="45"
-                  className="form-input"
-                  placeholder="e.g. 38.2"
-                  value={gestationalAgeAtDelivery}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setGestationalAgeAtDelivery(val);
-                    const n = parseFloat(val);
-                    if (!Number.isNaN(n)) {
-                      if (n >= 37.0) {
-                        setFetalNeonatalAssessments(prev => Array.from(new Set([...prev.filter(c => c !== 'DELIVERY_LT_34W'), 'DELIVERY_GE_37W'])));
-                      } else if (n < 34.0) {
-                        setFetalNeonatalAssessments(prev => Array.from(new Set([...prev.filter(c => c !== 'DELIVERY_GE_37W' && c !== 'NORMAL_OUTCOME'), 'DELIVERY_LT_34W'])));
-                      }
-                    }
-                  }}
-                  disabled={isSigned}
-                />
-                <small>Numeric gestational age in weeks. Delivery outcome precedence applied.</small>
-              </div>
-
-              <div className="form-group">
-                <label style={{ fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Pregnancy Outcome</span>
-                  {fetalProvenance?.PREGNANCY_OUTCOME && (
-                    <span style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: 600 }}>
-                      CRF: {fetalProvenance.PREGNANCY_OUTCOME.raw_value || 'Documented'}
-                    </span>
-                  )}
-                </label>
-                <select
-                  className="form-select"
-                  value={pregnancyOutcome}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setPregnancyOutcome(val);
-                    if (val.toLowerCase() === 'stillbirth' || val.toLowerCase().includes('death')) {
-                      setFetalNeonatalAssessments(prev => Array.from(new Set([...prev.filter(c => c !== 'NORMAL_OUTCOME'), 'PERINATAL_FETAL_DEATH'])));
-                    }
-                  }}
-                  disabled={isSigned}
-                >
-                  <option value="Normal baby">Normal baby</option>
-                  <option value="Preterm birth">Preterm birth</option>
-                  <option value="Stillbirth">Stillbirth (Intrauterine / Fetal Death)</option>
-                  <option value="Early neonatal death">Early neonatal death</option>
-                  <option value="Ongoing pregnancy">Ongoing pregnancy</option>
-                  <option value="Other">Other</option>
-                </select>
-                <small>Applies delivery-outcome precedence (Death &gt; Preterm &gt; Normal baby).</small>
-              </div>
-            </div>
-
-            <label style={{ fontWeight: 700, display: 'block', marginBottom: '8px' }}>
-              Closed-Ended Fetal and Neonatal Assessments (Select all that apply)
-            </label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '10px', marginBottom: '12px' }}>
-              {VISIT5_ASSESSMENT_OPTIONS.map((opt) => {
-                const isChecked = fetalNeonatalAssessments.includes(opt.code);
-                const prov = fetalProvenance[opt.code];
-                const provState = prov?.state;
-
-                return (
-                  <div
-                    key={opt.code}
-                    onClick={() => handleToggleAssessment(opt.code)}
-                    style={{
-                      border: isChecked ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                      background: isChecked ? '#f0f9ff' : '#ffffff',
-                      borderRadius: '6px',
-                      padding: '12px',
-                      cursor: isSigned ? 'default' : 'pointer',
-                      transition: 'all 0.15s ease',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      gap: '6px'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => handleToggleAssessment(opt.code)}
-                        disabled={isSigned}
-                        style={{ marginTop: '3px', cursor: 'pointer' }}
-                      />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: isChecked ? 700 : 600, fontSize: '13px', color: isChecked ? '#0369a1' : '#1e293b' }}>
-                          {opt.label}
-                        </div>
-                        {opt.adverse && (
-                          <span style={{ fontSize: '10.5px', color: '#b91c1c', fontWeight: 600 }}>
-                            Adverse endpoint
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {prov && (
-                      <div style={{
-                        marginTop: '4px',
-                        padding: '4px 8px',
-                        background: provState === 'CONFIRMED_POSITIVE' ? '#dcfce7' : provState === 'CONFIRMED_NEGATIVE' ? '#f1f5f9' : '#fef3c7',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        color: provState === 'CONFIRMED_POSITIVE' ? '#166534' : provState === 'CONFIRMED_NEGATIVE' ? '#475569' : '#92400e',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}>
-                        <span>
-                          {provState === 'CONFIRMED_POSITIVE' && '✓ Source Confirmed'}
-                          {provState === 'CONFIRMED_NEGATIVE' && '— Source Confirmed Negative'}
-                          {provState === 'NOT_ASSESSED_OR_MISSING' && '⚠ Not Assessed / Missing in CRF'}
-                        </span>
-                        {prov.provenance?.field && (
-                          <span style={{ fontSize: '10px', opacity: 0.85 }}>
-                            {prov.provenance.form ? `${prov.provenance.form} / ` : ''}{prov.provenance.field}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {visit5ValidationWarning && (
-              <div role="alert" style={{
-                background: '#fef2f2',
-                border: '1px solid #f87171',
-                borderRadius: '6px',
-                padding: '10px 14px',
-                color: '#991b1b',
-                fontSize: '12.5px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                marginTop: '10px'
-              }}>
-                <AlertTriangle size={18} color="#dc2626" />
-                <div>
-                  <strong>Validation Rule Violation:</strong> {visit5ValidationWarning}
-                </div>
-              </div>
-            )}
-          </DropdownSection>
-        )}
+        
 
         <div className="wizard-footer"><div></div><button className="btn-large btn-next" onClick={() => setCurrentStep(2)} disabled={!activeCase}>Review Patient Evidence <ArrowRight size={16}/></button></div>
       </div>
@@ -678,370 +533,344 @@ export default function AdjudicatorWorkbench({
     return (
       <div>
         <div className="wizard-card">
-          {/* Header Actions */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+          {/* Header Actions & Patient Context */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <div>
-              <h2 className="wizard-title">Review Findings for Participant {activeCase.id}</h2>
-              <p className="wizard-subtitle">
-                {activeCase.qcStatus || "FORM-ADJ-01 QC Check Passed"} • SOP-ADJ-002 Blinding Active
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <h2 className="wizard-title" style={{ margin: 0, fontSize: '18px' }}>
+                  Review Findings for Participant {activeCase.id}
+                </h2>
+                <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', background: '#e0f2fe', color: '#0369a1' }}>
+                  {activeCase.caseNo || `ADJ-${activeCase.id}`}
+                </span>
+                <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px', background: '#f1f5f9', color: '#475569', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                  <EyeOff size={12} /> SOP-ADJ-002 Blinding Active
+                </span>
+              </div>
+              <p className="wizard-subtitle" style={{ margin: '4px 0 0', color: '#64748b', fontSize: '12.5px' }}>
+                Study: <strong>{activeCase.study || 'PROTECT-Africa'}</strong> · Site: <strong>{activeCase.site || 'ZWE001 (Harare Central)'}</strong> · Reviewer: <strong>{activeCase.reviewerRole || 'Reviewer A'}</strong>
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <button className="btn-secondary" onClick={onOpenRecusalModal}>
-                <UserX size={13} /> Declare Recusal (FORM-ADJ-08)
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              <button className="btn-secondary" style={{ fontSize: '12px' }} onClick={onOpenRecusalModal} title="Declare recusal under FORM-ADJ-08">
+                <UserX size={13} /> Recusal
               </button>
-              <button className="btn-secondary" onClick={onOpenDataQueryModal}>
-                <AlertCircle size={13} /> Raise Query (FORM-ADJ-09)
+              <button className="btn-secondary" style={{ fontSize: '12px' }} onClick={onOpenDataQueryModal} title="Raise clinical data query under FORM-ADJ-09">
+                <AlertCircle size={13} /> Raise Query
               </button>
-              <button className="btn-back" style={{ padding: '5px 10px' }} onClick={onOpenSourceDocs}>
-                Inspect Raw Docs
-              </button>
-              <button 
-                className="btn-secondary" 
-                style={{ padding: '5px 10px', background: '#f5f3ff', color: '#6d28d9', borderColor: '#c4b5fd', fontWeight: 600 }} 
-                onClick={onOpenSourceDocs}
-              >
-                <FileText size={13} style={{ marginRight: '4px' }} />
-                View Dating Ultrasound Scan
+              <button className="btn-back" style={{ padding: '5px 12px', fontSize: '12px' }} onClick={onOpenSourceDocs}>
+                <FileText size={13} style={{ marginRight: '4px' }} /> Inspect Raw Docs
               </button>
             </div>
           </div>
 
-          {/* SOP-ADJ-002 Biomarker Blinding Guardrail Banner — Neutral */}
-          <div style={{
-            background: '#f8fafc',
-            border: '1px solid #cbd5e1',
-            borderRadius: 'var(--radius-sm)',
-            padding: '10px 14px',
-            marginBottom: '16px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <EyeOff size={16} color="#64748b" />
-              <div>
-                <strong style={{ fontSize: '12.5px', color: '#1e293b' }}>Biomarker Blinding Guardrail (SOP-ADJ-002 §5.1)</strong>
-                <div style={{ fontSize: '11.5px', color: '#64748b' }}>
-                  sFlt-1/PlGF ratio &amp; POC outputs are strictly withheld until database lock.
+          {/* Top-Level Visit Navigation Ribbon */}
+          <VisitRibbon
+            visits={evidenceVisits}
+            selectedIndex={selectedVisitIndex}
+            onSelectVisit={handleVisitSelect}
+          />
+
+          {/* Active Visit Clinical Evidence or Overall Case Summary */}
+          {selectedVisitIndex === evidenceVisits.length ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              <OverallSummary visits={evidenceVisits} caseData={activeCase} />
+
+
+              <DropdownSection title="Overall Case Determination" icon={<ShieldCheck size={16} />} defaultOpen>
+                <div className="summary-card-grid" style={{ marginBottom: '16px' }}>
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ fontWeight: 700, fontSize: '15px' }}>Does this participant meet criteria for pre-eclampsia?</label>
+                    <div style={{ display: 'flex', gap: '16px', marginTop: '8px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                        <input type="radio" name="meetsCriteria" checked={meetsCriteria === true} onChange={() => { setMeetsCriteria(true); setSelectedDiagnosis('PE'); }} disabled={isSigned} /> Yes
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                        <input type="radio" name="meetsCriteria" checked={meetsCriteria === false} onChange={() => { setMeetsCriteria(false); setSelectedDiagnosis('Not PE'); }} disabled={isSigned} /> No
+                      </label>
+                    </div>
+                  </div>
+
+                  {meetsCriteria && (
+                    <>
+                      <div className="form-group">
+                        <label style={{ fontWeight: 700 }}>Overall Classification</label>
+                        <select className="form-select" value={selectedDiagnosis} onChange={(e) => setSelectedDiagnosis(e.target.value)} disabled={isSigned}>
+                          <option value="PE">PE</option>
+                          <option value="Severe PE">Severe PE</option>
+                          <option value="Eclampsia">Eclampsia</option>
+                          <option value="HELLP">HELLP</option>
+                          {isReviewerC && <option value="Other">Other</option>}
+                        </select>
+                      </div>
+                      
+                      <div className="form-group">
+                        <label style={{ fontWeight: 700 }}>Overall Severity</label>
+                        <select className="form-select" value={selectedSeverity} onChange={(e) => setSelectedSeverity(e.target.value)} disabled={isSigned}>
+                          <option value="With severe features">With severe features</option>
+                          <option value="Without severe features">Without severe features</option>
+                          <option value="Eclampsia / severe SAE">Eclampsia / severe SAE</option>
+                        </select>
+                      </div>
+                    </>
+                  )}
+
+                  {!meetsCriteria && (
+                    <div className="form-group">
+                      <label style={{ fontWeight: 700 }}>Non-PE Determination / Clinical Finding</label>
+                      <select className="form-select" value={selectedDiagnosis} onChange={(e) => setSelectedDiagnosis(e.target.value)} disabled={isSigned}>
+                        <option value="Chronic Hypertension (Superimposed PE Excluded)">Chronic Hypertension (Superimposed PE Excluded)</option>
+                        <option value="Gestational Hypertension">Gestational Hypertension</option>
+                        <option value="Normotensive / Normal Pregnancy">Normotensive / Normal Pregnancy</option>
+                        <option value="Transient Gestational Proteinuria (Resolved)">Transient Gestational Proteinuria (Resolved)</option>
+                        <option value="Unclassifiable">Unclassifiable</option>
+                      </select>
+                    </div>
+                  )}
+                  
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ fontWeight: 700 }}>Differential Diagnosis / Alternative Explanation <span style={{color: 'red'}}>*</span></label>
+                    <input
+                      className="form-input"
+                      type="text"
+                      value={differentialDiagnosis}
+                      onChange={(e) => setDifferentialDiagnosis(e.target.value)}
+                      placeholder="Record important alternatives considered or why none applied"
+                      disabled={isSigned}
+                      required
+                    />
+                    <small>This field is mandatory.</small>
+                  </div>
                 </div>
-              </div>
-            </div>
-            <span className="badge-tag">BLINDED</span>
-          </div>
+              </DropdownSection>
 
-            {/* FDA-Style Narrative Block */}
-          <div style={{
-            background: '#ffffff',
-            border: '1px solid #ea580c',
-            borderLeft: '4px solid #ea580c',
-            borderRadius: 'var(--radius-sm)',
-            marginBottom: '16px',
-            overflow: 'hidden'
-          }}>
-            <div style={{ background: '#fff7ed', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #ea580c' }}>
-              <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, color: '#9a3412' }}>
-                <FileText size={16} />
-                Blinded Clinical Narrative ({formCode})
-              </h4>
-              <div style={{ display: 'inline-flex', background: '#fdba74', borderRadius: '4px', padding: '2px' }}>
-                <button
-                  type="button"
-                  onClick={() => setNarrativeViewMode('TABLE')}
-                  style={{
-                    padding: '3px 8px', fontSize: '11px', fontWeight: 600, border: 'none', borderRadius: '3px', cursor: 'pointer',
-                    background: narrativeViewMode === 'TABLE' ? '#ffffff' : 'transparent',
-                    color: narrativeViewMode === 'TABLE' ? '#9a3412' : '#c2410c'
-                  }}
-                >
-                  📊 Structured
+              <div className="wizard-footer" style={{ marginTop: '24px' }}>
+                <button className="btn-large btn-back" onClick={() => setCurrentStep(1)}>
+                  <ArrowLeft size={16} /> Back to Queue
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setNarrativeViewMode('PROSE')}
-                  style={{
-                    padding: '3px 8px', fontSize: '11px', fontWeight: 600, border: 'none', borderRadius: '3px', cursor: 'pointer',
-                    background: narrativeViewMode === 'PROSE' ? '#ffffff' : 'transparent',
-                    color: narrativeViewMode === 'PROSE' ? '#9a3412' : '#c2410c'
-                  }}
-                >
-                  📝 Prose
-                </button>
-              </div>
-            </div>
-            <div style={{ padding: '16px' }}>
-              {isGeneratingAi ? (
-                <div style={{
-                  padding: '20px',
-                  textAlign: 'center',
-                  background: '#f8fafc',
-                  border: '1px dashed #cbd5e1',
-                  borderRadius: '4px',
-                  color: 'var(--acrn-navy-dark)',
-                  fontSize: '12px',
-                  fontWeight: 600
+                <button className="btn-large btn-next" onClick={() => {
+                  const perVisitOnset = evidenceVisits.map(v => {
+                    const dec = visitDecisions[v.id] || { meetsCriteria: false, onset: null };
+                    return {
+                        visit_number: v.visit_number || parseInt((v.visit_code || '').replace('V', '') || (v.name || '').replace('Visit ', '')) || 1,
+                        meets_criteria: dec.meetsCriteria,
+                        diagnosis: dec.meetsCriteria ? selectedDiagnosis : 'Not PE',
+                        onset_class: dec.meetsCriteria ? (dec.onset || selectedOnset) : null
+                    };
+                  });
+
+                  onOpenSignature({
+                    is_overall_first: true,
+                    per_visit_onset: perVisitOnset,
+                    reviewerRole: activeCase?.reviewerRole || 'REVIEWER_A',
+                    reviewerName: user?.display_name || user?.name || user?.email,
+                    diagnosis: meetsCriteria ? selectedDiagnosis : 'Not PE',
+                    meetsCriteria,
+                    onset: selectedOnset,
+                    severity: selectedSeverity,
+                    certainty: selectedCertainty,
+                    rationale: "Overall case determination signature.", 
+                    differentialDiagnosis: differentialDiagnosis.trim() || null,
+                    visitNumber: 1, 
+                    fetalNeonatalAssessments: fetalNeonatalAssessments,
+                    gestationalAgeAtDelivery: gestationalAgeAtDelivery !== '' ? Number(gestationalAgeAtDelivery) : null,
+                    pregnancyOutcome: pregnancyOutcome,
+                  });
                 }}>
-                  <RefreshCw size={18} className="spin" color="var(--acrn-navy-dark)" style={{ margin: '0 auto 6px', display: 'block' }} />
-                  🤖 AI Generative Engine: Synthesizing 13-section blinded clinical timeline for {activeCase.id}...
-                </div>
-              ) : narrativeViewMode === 'TABLE' ? (
-                <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '4px', overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                    <thead>
-                      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #cbd5e1', textAlign: 'left' }}>
-                        <th style={{ padding: '8px 12px', width: '25%', color: '#475569' }}>Narrative Section</th>
-                        <th style={{ padding: '8px 12px', width: '75%', color: '#475569' }}>Synthesized Clinical Documentation</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '8px 12px', fontWeight: 600 }}>1. Baseline &amp; Enrollment</td>
-                        <td style={{ padding: '8px 12px' }}>Subject {activeCase.id} ({activeCase.caseNo}) enrolled at site {activeCase.site || 'HARARE_01'}. Baseline ultrasound dated at booking.</td>
-                      </tr>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9', background: '#fafafa' }}>
-                        <td style={{ padding: '8px 12px', fontWeight: 600 }}>2. Blood Pressure Trajectory</td>
-                        <td style={{ padding: '8px 12px' }}>
-                          {activeCase.bpLog && activeCase.bpLog.length > 0 ? (
-                            activeCase.bpLog.map((b, idx) => (
-                              <span key={idx} style={{ display: 'inline-block', marginRight: '10px' }}>
-                                <strong>{getVisitLabel(b, idx)}:</strong> {b.sbp}/{b.dbp} mmHg
+                  <Lock size={15} /> Sign &amp; Submit Adjudication
+                </button>
+              </div>
+
+            </div>
+          ) : selectedEvidenceVisit && (
+            <>
+              <VisitEvidencePanel
+                visit={selectedEvidenceVisit}
+                selectedIndex={selectedVisitIndex}
+                visitCount={evidenceVisits.length}
+                onSelectVisit={handleVisitSelect}
+                caseData={activeCase}
+                narrativeText={narrativeText}
+              />
+
+              <div style={{ marginTop: '16px' }}>
+                <DropdownSection title={`Adjudicate ${selectedEvidenceVisit.name || selectedEvidenceVisit.visit_code || 'this Visit'}`} icon={<ShieldCheck size={16} />} defaultOpen>
+                  {(() => {
+                    const dec = visitDecisions[selectedEvidenceVisit.id] || { meetsCriteria: false, onset: 'Onset not yet classifiable' };
+                    return (
+                      <div className="summary-card-grid" style={{ marginBottom: '0' }}>
+                        <div className="form-group">
+                          <label style={{ fontWeight: 700 }}>PE Criteria Met at this Visit?</label>
+                          <select 
+                            className="form-select" 
+                            value={dec.meetsCriteria ? 'Yes' : 'No'}
+                            onChange={e => {
+                              const val = e.target.value === 'Yes';
+                              setVisitDecisions(prev => ({...prev, [selectedEvidenceVisit.id]: {...(prev[selectedEvidenceVisit.id]||{}), meetsCriteria: val}}));
+                              if (val) setMeetsCriteria(true);
+                            }}
+                            disabled={isSigned}
+                          >
+                            <option value="No">No</option>
+                            <option value="Yes">Yes</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label style={{ fontWeight: 700 }}>Onset Classification (if Yes)</label>
+                          <select 
+                            className="form-select" 
+                            value={dec.onset || 'Onset not yet classifiable'}
+                            onChange={e => {
+                               setVisitDecisions(prev => ({...prev, [selectedEvidenceVisit.id]: {...(prev[selectedEvidenceVisit.id]||{}), onset: e.target.value}}));
+                            }}
+                            disabled={!dec.meetsCriteria || isSigned}
+                          >
+                            <option value="Early-onset pre-eclampsia (EOPE)">Early-onset (EOPE) &lt; 34 weeks</option>
+                            <option value="Late-onset pre-eclampsia (LOPE)">Late-onset (LOPE) ≥ 34 weeks</option>
+                            <option value="Postpartum-only presentation">Postpartum-only presentation</option>
+                            <option value="Onset not yet classifiable">Onset not yet classifiable</option>
+                          </select>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </DropdownSection>
+              </div>
+
+              {/* Special Visit 5 Closed-Ended Outcome Endpoints Adjudication */}
+              {(selectedEvidenceVisit.visit_number === 5 || selectedEvidenceVisit.visit_code === 'V05' || selectedEvidenceVisit.name?.includes('Visit 5')) && (
+                <div style={{ marginTop: '16px' }}>
+                  <DropdownSection title="Adjudicate Visit 5 Fetal &amp; Neonatal Outcome Endpoints" icon={<Baby size={16} />} defaultOpen>
+                    {(() => {
+                      // Derive live CRF hints from the patient's mapped evidence
+                      const ev = selectedEvidenceVisit?.evidence || {};
+                      const getFirst = (keys) => {
+                        for (const k of keys) {
+                          const rows = ev[k];
+                          if (rows?.length) {
+                            const r = rows[0];
+                            return r.numeric_value ?? r.raw_source_value ?? r.parsed_text_value ?? r.coded_value ?? null;
+                          }
+                        }
+                        return null;
+                      };
+                      const crfGaDelivery = getFirst(['ega_delivery', 'EGA_DELIVERY', 'ga_at_delivery', 'GA_AT_DELIVERY']);
+                      const crfOutcome = getFirst(['pregnancy_outcome', 'PREGNANCY_OUTCOME', 'delivery_outcome', 'DELIVERY_OUTCOME']);
+                      const gaWeeks = crfGaDelivery != null ? parseFloat(crfGaDelivery) : null;
+                      const gaLabel = gaWeeks != null
+                        ? `${Math.floor(gaWeeks)} weeks, ${Math.round((gaWeeks % 1) * 10)} days`
+                        : null;
+                      const gaHint = crfGaDelivery != null
+                        ? `CRF: ${parseFloat(crfGaDelivery).toFixed(1)}${gaLabel ? ` (${gaLabel})` : ''}`
+                        : null;
+                      const outcomeHint = crfOutcome ? `CRF: ${crfOutcome}` : null;
+                      const gaDefault = crfGaDelivery != null ? String(parseFloat(crfGaDelivery).toFixed(1)) : '';
+                      const gaNote = gaWeeks != null
+                        ? (gaWeeks >= 37 ? `Documented delivery GA: ${gaLabel} (Term delivery ≥37w).`
+                          : gaWeeks < 34 ? `Documented delivery GA: ${gaLabel} (Preterm delivery <34w).`
+                          : `Documented delivery GA: ${gaLabel} (Late preterm 34–37w).`)
+                        : 'Gestational age at delivery not mapped from CRF — enter manually.';
+                      return (
+                        <div className="summary-card-grid" style={{ marginBottom: '14px' }}>
+                          <div className="form-group">
+                            <label style={{ fontWeight: 700, display: 'flex', justifyContent: 'space-between', fontSize: '12.5px' }}>
+                              <span>Gestational Age at Delivery (weeks)</span>
+                              {gaHint && (
+                                <span style={{ fontSize: '10.5px', color: 'var(--acrn-sky-blue, #4771AD)', fontWeight: 600 }}>
+                                  {gaHint}
+                                </span>
+                              )}
+                            </label>
+                            <div className="form-input" style={{ backgroundColor: '#f8fafc', color: '#475569', cursor: 'not-allowed', display: 'flex', alignItems: 'center', minHeight: '38px' }}>
+                              {gaDefault ? `${gaDefault} weeks` : 'Not mapped from CRF'}
+                            </div>
+                            <small>{gaNote}</small>
+                          </div>
+
+                          <div className="form-group">
+                            <label style={{ fontWeight: 700, display: 'flex', justifyContent: 'space-between', fontSize: '12.5px' }}>
+                              <span>Pregnancy Outcome</span>
+                              {outcomeHint && (
+                                <span style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: 600 }}>
+                                  {outcomeHint}
+                                </span>
+                              )}
+                            </label>
+                            <div className="form-input" style={{ backgroundColor: '#f8fafc', color: '#475569', cursor: 'not-allowed', display: 'flex', alignItems: 'center', minHeight: '38px' }}>
+                              {crfOutcome || 'Not mapped from CRF'}
+                            </div>
+                            <small>Mapped delivery outcome from clinical records.</small>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    <label style={{ fontWeight: 700, display: 'block', marginBottom: '8px', fontSize: '12.5px' }}>
+                      Closed-Ended Endpoints (SOP-ADJ-002 §6)
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '8px', marginBottom: '12px' }}>
+                      {VISIT5_ASSESSMENT_OPTIONS.map((opt) => {
+                        const isChecked = fetalNeonatalAssessments.includes(opt.code) || (opt.code === 'DELIVERY_GE_37W' && !isSigned && fetalNeonatalAssessments.length === 0) || (opt.code === 'NORMAL_OUTCOME' && !isSigned && fetalNeonatalAssessments.length === 0);
+                        return (
+                          <label
+                            key={opt.code}
+                            style={{
+                              border: isChecked ? '1px solid #0284c7' : '1px solid #cbd5e1',
+                              background: isChecked ? '#f0f9ff' : '#ffffff',
+                              borderRadius: '6px',
+                              padding: '10px 12px',
+                              cursor: isSigned ? 'default' : 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              fontSize: '12.5px'
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleToggleAssessment(opt.code)}
+                              disabled={isSigned}
+                              style={{ cursor: 'pointer' }}
+                            />
+                            <div style={{ flex: 1 }}>
+                              <span style={{ fontWeight: isChecked ? 700 : 500, color: isChecked ? '#0369a1' : '#1e293b' }}>
+                                {opt.label}
                               </span>
-                            ))
-                          ) : 'No hypertensive BP documented prior to onset.'}
-                        </td>
-                      </tr>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '8px 12px', fontWeight: 600 }}>3. Proteinuria &amp; Renal Function</td>
-                        <td style={{ padding: '8px 12px' }}>
-                          {activeCase.proteinuriaLog?.map(p => `${p.method}: ${p.result}`).join('; ') || 'Proteinuria verified by spot UPCR.'}
-                        </td>
-                      </tr>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9', background: '#fafafa' }}>
-                        <td style={{ padding: '8px 12px', fontWeight: 600 }}>4. Hematology &amp; Hepatic Labs</td>
-                        <td style={{ padding: '8px 12px' }}>
-                          {activeCase.labLog?.map(l => `${l.analyte}: ${l.result} ${l.unit}`).join(' | ') || 'Platelets, AST/ALT, and LDH documented.'}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div style={{
-                  background: '#ffffff',
-                  padding: '16px',
-                  borderRadius: '4px',
-                  border: '1px solid #cbd5e1',
-                  fontSize: '13px',
-                  lineHeight: '1.7',
-                  whiteSpace: 'pre-wrap',
-                  fontFamily: 'var(--font-sans)',
-                  color: '#1e293b',
-                  maxHeight: '600px',
-                  overflowY: 'auto'
-                }}>
-                {narrativeText}
+                              {opt.adverse && (
+                                <span style={{ marginLeft: '6px', fontSize: '10px', color: '#b91c1c', fontWeight: 700 }}>
+                                  (Adverse)
+                                </span>
+                              )}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </DropdownSection>
                 </div>
               )}
+            </>
+          )}
+
+          {/* Clean Wizard Navigation Footer */}
+          {selectedVisitIndex !== evidenceVisits.length && (
+            <div className="wizard-footer" style={{ marginTop: '24px' }}>
+              <button className="btn-large btn-back" onClick={() => setCurrentStep(1)}>
+                <ArrowLeft size={16} /> Back to Queue
+              </button>
+              <button className="btn-large btn-next" onClick={() => handleVisitSelect(selectedVisitIndex + 1)}>
+                Next <ArrowRight size={16} />
+              </button>
             </div>
-          </div>
-          
-          <PatientHistoryPanel caseData={activeCase} />
-
-
-
-            <DropdownSection title="Visit Specific Evidence" icon={<FileText size={16} />} defaultOpen>
-              {selectedVisitIndex===evidenceVisits.length ? <OverallSummary visits={evidenceVisits} /> : selectedEvidenceVisit && <VisitEvidencePanel visit={selectedEvidenceVisit} selectedIndex={selectedVisitIndex} visitCount={evidenceVisits.length} onSelectVisit={handleVisitSelect} />}
-            </DropdownSection>
-
-            <DropdownSection title="Visit navigation" icon={<Database size={16} />} defaultOpen={false}>
-              <VisitRibbon visits={evidenceVisits} selectedIndex={selectedVisitIndex} onSelectVisit={handleVisitSelect} />
-              <p style={{ margin: '12px 0 0', color: 'var(--text-muted)', fontSize: '12px' }}>
-                Use the visit tabs to review source evidence. Derived classifications are shown for context only and do not replace the recorded source data.
-              </p>
-            </DropdownSection>
-
-          
-        {evidenceVisits.some(v => v.visit_number === 5 || v.visit_code === 'V05' || v.name?.includes('Visit 5')) && (
-          <DropdownSection title="Fetal &amp; Neonatal Outcomes" icon={<Baby size={16} />} defaultOpen>
-            <div className="summary-card-grid" style={{ marginBottom: '16px' }}>
-              <div className="form-group">
-                <label style={{ fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Gestational Age at Delivery (weeks)</span>
-                  {fetalProvenance?.GA_AT_DELIVERY && (
-                    <span style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: 600 }}>
-                      CRF: {fetalProvenance.GA_AT_DELIVERY.raw_value || 'Documented'}
-                    </span>
-                  )}
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="15"
-                  max="45"
-                  className="form-input"
-                  placeholder="e.g. 38.2"
-                  value={gestationalAgeAtDelivery}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setGestationalAgeAtDelivery(val);
-                    const n = parseFloat(val);
-                    if (!Number.isNaN(n)) {
-                      if (n >= 37.0) {
-                        setFetalNeonatalAssessments(prev => Array.from(new Set([...prev.filter(c => c !== 'DELIVERY_LT_34W'), 'DELIVERY_GE_37W'])));
-                      } else if (n < 34.0) {
-                        setFetalNeonatalAssessments(prev => Array.from(new Set([...prev.filter(c => c !== 'DELIVERY_GE_37W' && c !== 'NORMAL_OUTCOME'), 'DELIVERY_LT_34W'])));
-                      }
-                    }
-                  }}
-                  disabled={isSigned}
-                />
-                <small>Numeric gestational age in weeks. Delivery outcome precedence applied.</small>
-              </div>
-
-              <div className="form-group">
-                <label style={{ fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Pregnancy Outcome</span>
-                  {fetalProvenance?.PREGNANCY_OUTCOME && (
-                    <span style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: 600 }}>
-                      CRF: {fetalProvenance.PREGNANCY_OUTCOME.raw_value || 'Documented'}
-                    </span>
-                  )}
-                </label>
-                <select
-                  className="form-select"
-                  value={pregnancyOutcome}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setPregnancyOutcome(val);
-                    if (val.toLowerCase() === 'stillbirth' || val.toLowerCase().includes('death')) {
-                      setFetalNeonatalAssessments(prev => Array.from(new Set([...prev.filter(c => c !== 'NORMAL_OUTCOME'), 'PERINATAL_FETAL_DEATH'])));
-                    }
-                  }}
-                  disabled={isSigned}
-                >
-                  <option value="Normal baby">Normal baby</option>
-                  <option value="Preterm birth">Preterm birth</option>
-                  <option value="Stillbirth">Stillbirth (Intrauterine / Fetal Death)</option>
-                  <option value="Early neonatal death">Early neonatal death</option>
-                  <option value="Ongoing pregnancy">Ongoing pregnancy</option>
-                  <option value="Other">Other</option>
-                </select>
-                <small>Applies delivery-outcome precedence (Death &gt; Preterm &gt; Normal baby).</small>
-              </div>
-            </div>
-
-            <label style={{ fontWeight: 700, display: 'block', marginBottom: '8px' }}>
-              Closed-Ended Fetal and Neonatal Assessments (Select all that apply)
-            </label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '10px', marginBottom: '12px' }}>
-              {VISIT5_ASSESSMENT_OPTIONS.map((opt) => {
-                const isChecked = fetalNeonatalAssessments.includes(opt.code);
-                const prov = fetalProvenance[opt.code];
-                const provState = prov?.state;
-
-                return (
-                  <div
-                    key={opt.code}
-                    onClick={() => handleToggleAssessment(opt.code)}
-                    style={{
-                      border: isChecked ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                      background: isChecked ? '#f0f9ff' : '#ffffff',
-                      borderRadius: '6px',
-                      padding: '12px',
-                      cursor: isSigned ? 'default' : 'pointer',
-                      transition: 'all 0.15s ease',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      gap: '6px'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => handleToggleAssessment(opt.code)}
-                        disabled={isSigned}
-                        style={{ marginTop: '3px', cursor: 'pointer' }}
-                      />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: isChecked ? 700 : 600, fontSize: '13px', color: isChecked ? '#0369a1' : '#1e293b' }}>
-                          {opt.label}
-                        </div>
-                        {opt.adverse && (
-                          <span style={{ fontSize: '10.5px', color: '#b91c1c', fontWeight: 600 }}>
-                            Adverse endpoint
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {prov && (
-                      <div style={{
-                        marginTop: '4px',
-                        padding: '4px 8px',
-                        background: provState === 'CONFIRMED_POSITIVE' ? '#dcfce7' : provState === 'CONFIRMED_NEGATIVE' ? '#f1f5f9' : '#fef3c7',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        color: provState === 'CONFIRMED_POSITIVE' ? '#166534' : provState === 'CONFIRMED_NEGATIVE' ? '#475569' : '#92400e',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}>
-                        <span>
-                          {provState === 'CONFIRMED_POSITIVE' && '✓ Source Confirmed'}
-                          {provState === 'CONFIRMED_NEGATIVE' && '— Source Confirmed Negative'}
-                          {provState === 'NOT_ASSESSED_OR_MISSING' && '⚠ Not Assessed / Missing in CRF'}
-                        </span>
-                        {prov.provenance?.field && (
-                          <span style={{ fontSize: '10px', opacity: 0.85 }}>
-                            {prov.provenance.form ? `${prov.provenance.form} / ` : ''}{prov.provenance.field}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {visit5ValidationWarning && (
-              <div role="alert" style={{
-                background: '#fef2f2',
-                border: '1px solid #f87171',
-                borderRadius: '6px',
-                padding: '10px 14px',
-                color: '#991b1b',
-                fontSize: '12.5px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                marginTop: '10px'
-              }}>
-                <AlertTriangle size={18} color="#dc2626" />
-                <div>
-                  <strong>Validation Rule Violation:</strong> {visit5ValidationWarning}
-                </div>
-              </div>
-            )}
-          </DropdownSection>
-        )}
-
-        <div className="wizard-footer">
-            <button className="btn-large btn-back" onClick={() => setCurrentStep(1)}>
-              <ArrowLeft size={16} /> Back to Queue
-            </button>
-            <button className="btn-large btn-next" onClick={() => setCurrentStep(3)}>
-              Approve Summary &amp; Sign <ArrowRight size={16} />
-            </button>
-          </div>
+          )}
         </div>
       </div>
     );
   }
 
   // Completed and signed record view
-  if (currentStep === 4 || (currentStep === 3 && isSigned)) {
+  if (currentStep === 4 || isSigned) {
     const isConsensusFinal = isSigned || allVisitsFinalized;
     const sig = activeCase.signature || {
       signer: "Dr. Tinotenda Chibongore",
@@ -1092,7 +921,9 @@ export default function AdjudicatorWorkbench({
               </div>
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>Final Diagnosis:</span>
-                <div style={{ fontWeight: 700, color: 'var(--acrn-navy-dark)' }}>{activeCase.derivedSubtype} • {activeCase.derivedSeverity}</div>
+                <div style={{ fontWeight: 700, color: 'var(--acrn-navy-dark)' }}>
+                  {activeCase.last_diagnosis || activeCase.determination || 'Adjudicator determination — see signed record'}
+                </div>
               </div>
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>Cryptographic Hash:</span>
@@ -1138,340 +969,5 @@ export default function AdjudicatorWorkbench({
     );
   }
 
-  // Approve clinical summary and sign (Overall Flow)
-  return (
-    <div>
-      <div className="wizard-card">
-        <h2 className="wizard-title">Final Adjudication &amp; Sign Record ({activeCase.id})</h2>
-        <p className="wizard-subtitle">Record your overall determination for this case and classify the onset per visit.</p>
-
-        {/* Overall Determination */}
-        <DropdownSection title="Overall Case Determination" icon={<ShieldCheck size={16} />} defaultOpen>
-          <div className="summary-card-grid" style={{ marginBottom: '16px' }}>
-            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-              <label style={{ fontWeight: 700, fontSize: '15px' }}>Does this participant meet criteria for pre-eclampsia?</label>
-              <div style={{ display: 'flex', gap: '16px', marginTop: '8px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                  <input type="radio" name="meetsCriteria" checked={meetsCriteria === true} onChange={() => { setMeetsCriteria(true); setSelectedDiagnosis('PE'); }} disabled={isSigned} /> Yes
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                  <input type="radio" name="meetsCriteria" checked={meetsCriteria === false} onChange={() => { setMeetsCriteria(false); setSelectedDiagnosis('Not PE'); }} disabled={isSigned} /> No
-                </label>
-              </div>
-            </div>
-
-            {meetsCriteria && (
-              <>
-                <div className="form-group">
-                  <label style={{ fontWeight: 700 }}>Overall Classification</label>
-                  <select className="form-select" value={selectedDiagnosis} onChange={(e) => setSelectedDiagnosis(e.target.value)} disabled={isSigned}>
-                    <option value="PE">PE</option>
-                    <option value="Severe PE">Severe PE</option>
-                    <option value="Eclampsia">Eclampsia</option>
-                    <option value="HELLP">HELLP</option>
-                    {isReviewerC && <option value="Other">Other</option>}
-                  </select>
-                </div>
-                
-                <div className="form-group">
-                  <label style={{ fontWeight: 700 }}>Overall Severity</label>
-                  <select className="form-select" value={selectedSeverity} onChange={(e) => setSelectedSeverity(e.target.value)} disabled={isSigned}>
-                    <option value="With severe features">With severe features</option>
-                    <option value="Without severe features">Without severe features</option>
-                    <option value="Eclampsia / severe SAE">Eclampsia / severe SAE</option>
-                  </select>
-                </div>
-              </>
-            )}
-            
-            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-              <label style={{ fontWeight: 700 }}>Differential Diagnosis / Alternative Explanation <span style={{color: 'red'}}>*</span></label>
-              <input
-                className="form-input"
-                type="text"
-                value={differentialDiagnosis}
-                onChange={(e) => setDifferentialDiagnosis(e.target.value)}
-                placeholder="Record important alternatives considered or why none applied"
-                disabled={isSigned}
-                required
-              />
-              <small>This field is mandatory.</small>
-            </div>
-          </div>
-        </DropdownSection>
-
-        {/* Per-visit Onset Grid */}
-        {meetsCriteria && (
-          <DropdownSection title="Per-Visit Onset Grid" icon={<Database size={16} />} defaultOpen>
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '12px' }}>
-              For each visit with evidence, indicate if pre-eclampsia criteria were met and the onset classification.
-            </p>
-            <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                <thead style={{ background: '#f8fafc', borderBottom: '1px solid var(--border-subtle)' }}>
-                  <tr>
-                    <th style={{ padding: '10px' }}>Visit</th>
-                    <th style={{ padding: '10px' }}>Date</th>
-                    <th style={{ padding: '10px' }}>PE Present?</th>
-                    <th style={{ padding: '10px' }}>Onset Classification (if Yes)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {evidenceVisits.map((v, i) => {
-                    const dec = visitDecisions[v.id] || { meetsCriteria: false, onset: 'Onset not yet classifiable' };
-                    return (
-                      <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '10px', fontWeight: 600 }}>{v.name || v.visit_code || `Visit ${i+1}`}</td>
-                        <td style={{ padding: '10px' }}>{new Date(v.date || v.visit_date).toLocaleDateString()}</td>
-                        <td style={{ padding: '10px' }}>
-                          <select 
-                            className="form-select" 
-                            style={{ padding: '4px', fontSize: '13px' }}
-                            value={dec.meetsCriteria ? 'Yes' : 'No'}
-                            onChange={e => {
-                              const val = e.target.value === 'Yes';
-                              setVisitDecisions(prev => ({...prev, [v.id]: {...(prev[v.id]||{}), meetsCriteria: val}}));
-                            }}
-                            disabled={isSigned}
-                          >
-                            <option value="No">No</option>
-                            <option value="Yes">Yes</option>
-                          </select>
-                        </td>
-                        <td style={{ padding: '10px' }}>
-                          <select 
-                            className="form-select" 
-                            style={{ padding: '4px', fontSize: '13px' }}
-                            value={dec.onset || 'Onset not yet classifiable'}
-                            onChange={e => {
-                               setVisitDecisions(prev => ({...prev, [v.id]: {...(prev[v.id]||{}), onset: e.target.value}}));
-                            }}
-                            disabled={!dec.meetsCriteria || isSigned}
-                          >
-                            <option value="Early-onset pre-eclampsia (EOPE)">Early-onset (EOPE) &lt; 34 weeks</option>
-                            <option value="Late-onset pre-eclampsia (LOPE)">Late-onset (LOPE) ≥ 34 weeks</option>
-                            <option value="Postpartum-only presentation">Postpartum-only presentation</option>
-                            <option value="Onset not yet classifiable">Onset not yet classifiable</option>
-                          </select>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </DropdownSection>
-        )}
-
-        
-        {evidenceVisits.some(v => v.visit_number === 5 || v.visit_code === 'V05' || v.name?.includes('Visit 5')) && (
-          <DropdownSection title="Fetal &amp; Neonatal Outcomes" icon={<Baby size={16} />} defaultOpen>
-            <div className="summary-card-grid" style={{ marginBottom: '16px' }}>
-              <div className="form-group">
-                <label style={{ fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Gestational Age at Delivery (weeks)</span>
-                  {fetalProvenance?.GA_AT_DELIVERY && (
-                    <span style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: 600 }}>
-                      CRF: {fetalProvenance.GA_AT_DELIVERY.raw_value || 'Documented'}
-                    </span>
-                  )}
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="15"
-                  max="45"
-                  className="form-input"
-                  placeholder="e.g. 38.2"
-                  value={gestationalAgeAtDelivery}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setGestationalAgeAtDelivery(val);
-                    const n = parseFloat(val);
-                    if (!Number.isNaN(n)) {
-                      if (n >= 37.0) {
-                        setFetalNeonatalAssessments(prev => Array.from(new Set([...prev.filter(c => c !== 'DELIVERY_LT_34W'), 'DELIVERY_GE_37W'])));
-                      } else if (n < 34.0) {
-                        setFetalNeonatalAssessments(prev => Array.from(new Set([...prev.filter(c => c !== 'DELIVERY_GE_37W' && c !== 'NORMAL_OUTCOME'), 'DELIVERY_LT_34W'])));
-                      }
-                    }
-                  }}
-                  disabled={isSigned}
-                />
-                <small>Numeric gestational age in weeks. Delivery outcome precedence applied.</small>
-              </div>
-
-              <div className="form-group">
-                <label style={{ fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Pregnancy Outcome</span>
-                  {fetalProvenance?.PREGNANCY_OUTCOME && (
-                    <span style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: 600 }}>
-                      CRF: {fetalProvenance.PREGNANCY_OUTCOME.raw_value || 'Documented'}
-                    </span>
-                  )}
-                </label>
-                <select
-                  className="form-select"
-                  value={pregnancyOutcome}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setPregnancyOutcome(val);
-                    if (val.toLowerCase() === 'stillbirth' || val.toLowerCase().includes('death')) {
-                      setFetalNeonatalAssessments(prev => Array.from(new Set([...prev.filter(c => c !== 'NORMAL_OUTCOME'), 'PERINATAL_FETAL_DEATH'])));
-                    }
-                  }}
-                  disabled={isSigned}
-                >
-                  <option value="Normal baby">Normal baby</option>
-                  <option value="Preterm birth">Preterm birth</option>
-                  <option value="Stillbirth">Stillbirth (Intrauterine / Fetal Death)</option>
-                  <option value="Early neonatal death">Early neonatal death</option>
-                  <option value="Ongoing pregnancy">Ongoing pregnancy</option>
-                  <option value="Other">Other</option>
-                </select>
-                <small>Applies delivery-outcome precedence (Death &gt; Preterm &gt; Normal baby).</small>
-              </div>
-            </div>
-
-            <label style={{ fontWeight: 700, display: 'block', marginBottom: '8px' }}>
-              Closed-Ended Fetal and Neonatal Assessments (Select all that apply)
-            </label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '10px', marginBottom: '12px' }}>
-              {VISIT5_ASSESSMENT_OPTIONS.map((opt) => {
-                const isChecked = fetalNeonatalAssessments.includes(opt.code);
-                const prov = fetalProvenance[opt.code];
-                const provState = prov?.state;
-
-                return (
-                  <div
-                    key={opt.code}
-                    onClick={() => handleToggleAssessment(opt.code)}
-                    style={{
-                      border: isChecked ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                      background: isChecked ? '#f0f9ff' : '#ffffff',
-                      borderRadius: '6px',
-                      padding: '12px',
-                      cursor: isSigned ? 'default' : 'pointer',
-                      transition: 'all 0.15s ease',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      gap: '6px'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => handleToggleAssessment(opt.code)}
-                        disabled={isSigned}
-                        style={{ marginTop: '3px', cursor: 'pointer' }}
-                      />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: isChecked ? 700 : 600, fontSize: '13px', color: isChecked ? '#0369a1' : '#1e293b' }}>
-                          {opt.label}
-                        </div>
-                        {opt.adverse && (
-                          <span style={{ fontSize: '10.5px', color: '#b91c1c', fontWeight: 600 }}>
-                            Adverse endpoint
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {prov && (
-                      <div style={{
-                        marginTop: '4px',
-                        padding: '4px 8px',
-                        background: provState === 'CONFIRMED_POSITIVE' ? '#dcfce7' : provState === 'CONFIRMED_NEGATIVE' ? '#f1f5f9' : '#fef3c7',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        color: provState === 'CONFIRMED_POSITIVE' ? '#166534' : provState === 'CONFIRMED_NEGATIVE' ? '#475569' : '#92400e',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}>
-                        <span>
-                          {provState === 'CONFIRMED_POSITIVE' && '✓ Source Confirmed'}
-                          {provState === 'CONFIRMED_NEGATIVE' && '— Source Confirmed Negative'}
-                          {provState === 'NOT_ASSESSED_OR_MISSING' && '⚠ Not Assessed / Missing in CRF'}
-                        </span>
-                        {prov.provenance?.field && (
-                          <span style={{ fontSize: '10px', opacity: 0.85 }}>
-                            {prov.provenance.form ? `${prov.provenance.form} / ` : ''}{prov.provenance.field}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {visit5ValidationWarning && (
-              <div role="alert" style={{
-                background: '#fef2f2',
-                border: '1px solid #f87171',
-                borderRadius: '6px',
-                padding: '10px 14px',
-                color: '#991b1b',
-                fontSize: '12.5px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                marginTop: '10px'
-              }}>
-                <AlertTriangle size={18} color="#dc2626" />
-                <div>
-                  <strong>Validation Rule Violation:</strong> {visit5ValidationWarning}
-                </div>
-              </div>
-            )}
-          </DropdownSection>
-        )}
-
-        <div className="wizard-footer" style={{ marginTop: '24px' }}>
-          <button className="btn-large btn-back" onClick={() => setCurrentStep(2)}>
-            <ArrowLeft size={15} /> Back to Evidence
-          </button>
-
-          <button className="btn-large btn-next" onClick={() => {
-            // Build per_visit_onset array
-            const perVisitOnset = evidenceVisits.map(v => {
-               const dec = visitDecisions[v.id] || { meetsCriteria: false, onset: null };
-               return {
-                  visit_number: v.visit_number || parseInt((v.visit_code || '').replace('V', '') || (v.name || '').replace('Visit ', '')) || 1,
-                  meets_criteria: dec.meetsCriteria,
-                  diagnosis: dec.meetsCriteria ? selectedDiagnosis : 'Not PE',
-                  onset_class: dec.meetsCriteria ? (dec.onset || selectedOnset) : null
-               };
-            });
-
-            onOpenSignature({
-              is_overall_first: true,
-              per_visit_onset: perVisitOnset,
-              reviewerRole: activeCase?.reviewerRole || 'REVIEWER_A',
-              reviewerName: user?.display_name || user?.name || user?.email,
-              diagnosis: meetsCriteria ? selectedDiagnosis : 'Not PE',
-              meetsCriteria,
-              onset: selectedOnset, // default overall
-              severity: selectedSeverity,
-              certainty: selectedCertainty,
-              rationale: "Overall case determination signature.", // placeholder
-              differentialDiagnosis: differentialDiagnosis.trim() || null,
-              visitNumber: 1, // backend will override this in the loop
-              
-              fetalNeonatalAssessments: fetalNeonatalAssessments,
-              gestationalAgeAtDelivery: gestationalAgeAtDelivery !== '' ? Number(gestationalAgeAtDelivery) : null,
-              pregnancyOutcome: pregnancyOutcome,
-              fetalAssessmentStatus: fetalNeonatalAssessments?.length > 0 ? 'CONFIRMED' : null,
-              fetalNeonatalProvenance: fetalProvenance
-            });
-          }} disabled={!differentialDiagnosis.trim()}>
-            <ShieldCheck size={16} /> Sign &amp; Lock Adjudication Record
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 }

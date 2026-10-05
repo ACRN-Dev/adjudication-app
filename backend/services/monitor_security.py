@@ -19,6 +19,7 @@ ROLES = {
     "CHAIRPERSON",
     "COORDINATOR",
     "MONITOR_QC",
+    "OWNER",
 }
 PROHIBITED=("sflt-1","sflt1","plgf","seng","biomarker","poc result","treatment allocation","randomisation","randomization")
 @dataclass(frozen=True)
@@ -43,9 +44,9 @@ def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get
                         raise HTTPException(403,"Monitor Portal access denied")
                     studies=tuple(filter(None,(user.study_scope or "*").split(",")))
                     return MonitorIdentity(user.email,pr,studies)
-                if user.role=="ADMIN":
+                if user.role in ("ADMIN", "OWNER"):
                     studies=tuple(filter(None,(user.study_scope or "*").split(",")))
-                    return MonitorIdentity(user.email,"ADMIN",studies)
+                    return MonitorIdentity(user.email,user.role,studies)
                 if user.role=="CHAIRPERSON":
                     studies=tuple(filter(None,(user.study_scope or "*").split(",")))
                     return MonitorIdentity(user.email,"CHAIRPERSON",studies)

@@ -80,6 +80,8 @@ def parse_php_serialized_instances(text):
     
     # Check if it has instance prefixes
     if not re.search(r'#\d+\s*-', text):
+        if text.strip().lower() in {"# - no", "# - n/a", "no data", "not available", "# - n", "# -", "n/a", "unknown"}:
+            return {None: "source field unavailable"}
         return {None: text}
         
     results = {}
@@ -97,12 +99,16 @@ def parse_php_serialized_instances(text):
         if sm:
             declared_len = int(sm.group(1))
             parsed = sm.group(2)
-            if len(parsed.encode("utf-8")) != declared_len and len(parsed) != declared_len:
-                results[idx] = parsed
+            if parsed.strip().lower() in {"# - no", "# - n/a", "no data", "not available", "# - n", "# -", "n/a", "unknown"}:
+                results[idx] = "source field unavailable"
             else:
                 results[idx] = parsed
         else:
-            results[idx] = re.sub(r';$', '', val)
+            cleaned_val = re.sub(r';$', '', val)
+            if cleaned_val.strip().lower() in {"# - no", "# - n/a", "no data", "not available", "# - n", "# -", "n/a", "unknown"}:
+                results[idx] = "source field unavailable"
+            else:
+                results[idx] = cleaned_val
                 
     return results
 
@@ -258,6 +264,67 @@ def is_yes(value):
 def missing_detail(value):
     return value is None or str(value).strip() in {"", "0"}
 
+
+def build_demographic_string(age, gravida, para_live, para_misc, conditions=None):
+    """Generates a grammatically correct, clinical demographic opening sentence."""
+    
+    # 1. Base Demographics
+    if age:
+        base = f"A {age}-year-old African woman"
+    else:
+        base = "An adult African woman"
+
+    # 2. Obstetric History Logic
+    g = int(gravida) if gravida is not None else 0
+    p_live = int(para_live) if para_live is not None else 0
+    p_misc = int(para_misc) if para_misc is not None else 0
+
+    if g == 0:
+        obs_string = "Nulligravida"
+    elif g == 1 and p_live == 0 and p_misc == 0:
+        obs_string = "Primigravida (Nulliparous)"
+    else:
+        obs_string = f"Gravida {g}, Para {p_live}"
+        # Only mention miscarriages if they exist
+        if p_misc == 1:
+            obs_string += " (one previous miscarriage)"
+        elif p_misc > 1:
+            obs_string += f" ({p_misc} previous miscarriages)"
+
+    # 3. Medical History Logic
+    # Clean up weird AI inputs like treating "Nulliparous" as a disease
+    bad_conditions = ["none", "nulliparous", "n/a", "no", "unknown", ""]
+    
+    if isinstance(conditions, (list, tuple, set)):
+        norm_map = {
+            "pre-existing chronic htn": "chronic hypertension",
+            "pre-gestational diabetes": "pre-gestational diabetes",
+            "family history pe": "family history of preeclampsia",
+            "prior pe-indicated c-section": "prior preeclampsia-indicated Cesarean section",
+        }
+        cleaned_list = [
+            norm_map.get(str(c).strip().lower(), str(c).strip())
+            for c in conditions
+            if c and str(c).strip().lower() not in bad_conditions
+            and not str(c).strip().lower().startswith("age")
+            and "nulliparous" not in str(c).strip().lower()
+        ]
+        if not cleaned_list:
+            conditions = None
+        elif len(cleaned_list) == 1:
+            conditions = cleaned_list[0]
+        elif len(cleaned_list) == 2:
+            conditions = f"{cleaned_list[0]} and {cleaned_list[1]}"
+        else:
+            conditions = f"{', '.join(cleaned_list[:-1])} and {cleaned_list[-1]}"
+
+    if not conditions or str(conditions).strip().lower() in bad_conditions:
+        med_string = "presents for routine clinical trial screening with no known prior medical history or chronic conditions."
+    else:
+        med_string = f"presents for clinical trial screening. Her medical history is significant for {conditions}."
+
+    return f"{base}, {obs_string}, {med_string}"
+
 def compute_risk_summary(fields):
     chips = set()
     
@@ -333,10 +400,10 @@ def compute_risk_summary(fields):
         chips.add("Nulliparous")
         
     # Parity calculations
-    try: gravidity = int(get_field_val(fields, "if_yes_how_many_previous_pregnancies") or 0)
-    except: gravidity = 0
-    if prev_preg == "Yes" and gravidity == 0:
-        gravidity = 1
+    try: prev_pregnancies = int(get_field_val(fields, "if_yes_how_many_previous_pregnancies") or 0)
+    except: prev_pregnancies = 0
+    
+    gravidity = prev_pregnancies + 1 if prev_preg == "Yes" else 1
         
     try: parity = int(get_field_val(fields, "number_of_live_births") or 0)
     except: parity = 0
@@ -352,9 +419,20 @@ def compute_risk_summary(fields):
     
     parity_summary = f"G{gravidity} P{parity} +{miscarriages}M +{sb_int}SB · {vag} SVD / {cs} CS"
     
+    # Age is stored in domain="baseline"; history fields use other domains.
+    # Query all fields regardless of domain to find age.
+    age_val = (
+        get_field_val(fields, "age")
+        or get_field_val(fields, "age_at_enrollment")
+        or get_field_val(fields, "age_years")
+    )
+    demographic_opening = build_demographic_string(age_val, gravidity, parity, miscarriages, chips)
+
     return {
         "chips": sorted(list(chips)),
         "parity_summary": parity_summary,
+        "demographic_opening": demographic_opening,
+        "age": int(age_val) if (age_val and str(age_val).strip().isdigit()) else (age_val or None),
         "gravidity": gravidity,
         "parity": parity,
         "miscarriages": miscarriages,
@@ -412,7 +490,8 @@ def finalize_history(db, participant):
         db.add(summary)
         
     for k, v in risk_data.items():
-        setattr(summary, k, v)
+        if k in {"chips", "parity_summary", "gravidity", "parity", "miscarriages", "stillbirths", "vaginal_deliveries", "c_sections", "chronic_htn", "pregestational_diabetes"}:
+            setattr(summary, k, v)
         
     completeness = calculate_history_completeness(fields)
     summary.completeness_score = completeness

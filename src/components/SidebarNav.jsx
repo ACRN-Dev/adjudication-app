@@ -47,26 +47,18 @@ export default function SidebarNav({
       badge: activeCase ? activeCase.id : null,
     },
     {
-      id: 'evidence',
-      label: 'eSource Evidence',
-      icon: Activity,
-      action: () => { setActiveView('workbench'); setCurrentStep(2); },
-      active: activeView === 'workbench' && currentStep === 2,
-    },
-    {
-      id: 'sign',
-      label: 'Approve & Sign',
-      icon: FileText,
-      action: () => { setActiveView('workbench'); setCurrentStep(3); },
-      active: activeView === 'workbench' && currentStep === 3,
-    },
-    {
-      id: 'tmf',
-      label: 'Locked eTMF',
-      icon: Lock,
-      action: () => { if (isSigned) { setActiveView('workbench'); setCurrentStep(4); } },
-      active: activeView === 'workbench' && currentStep === 4,
-      disabled: !isSigned,
+      id: 'feedback',
+      label: 'Send Feedback',
+      icon: HelpCircle,
+      action: () => {
+        if (activeCase && typeof window !== 'undefined') {
+           window.dispatchEvent(new CustomEvent('open-data-query-modal'));
+        } else {
+           alert('Please select a subject from the queue first.');
+        }
+      },
+      active: false,
+      disabled: !activeCase,
     },
     ...(isCommitteeCase ? [{
       id: 'committee',
@@ -76,13 +68,6 @@ export default function SidebarNav({
       active: activeView === 'committee',
     }] : []),
     {
-      id: 'qc',
-      label: 'QC Portal & Gates',
-      icon: CheckSquare,
-      action: () => { setActiveView('workbench'); setCurrentStep(2); },
-      active: false,
-    },
-    {
       id: 'sops',
       label: 'SOP Library',
       icon: BookOpen,
@@ -91,7 +76,7 @@ export default function SidebarNav({
     },
     {
       id: 'guide',
-      label: 'User Guide',
+      label: 'Clinical Guidelines',
       icon: HelpCircle,
       action: onOpenHelp,
       active: false,
@@ -147,7 +132,7 @@ export default function SidebarNav({
 
       <div className="rt-sidebar-menu">
         <div className="rt-menu-group-label">Adjudication Steps</div>
-        {menuItems.slice(0, 4).map(item => {
+        {menuItems.filter(item => ['subjects', 'feedback', 'committee'].includes(item.id)).map(item => {
           const Icon = item.icon;
           return (
             <button
@@ -166,7 +151,7 @@ export default function SidebarNav({
         <div className="rt-menu-divider" />
 
         <div className="rt-menu-group-label">Governance &amp; Tools</div>
-        {menuItems.slice(4).map(item => {
+        {menuItems.filter(item => ['sops', 'guide'].includes(item.id)).map(item => {
           const Icon = item.icon;
           return (
             <button

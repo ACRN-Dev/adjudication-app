@@ -104,6 +104,7 @@ assert.equal(visits[3].proteinuria[0].evidence_state, 'pending');
 assert.equal(visits[3].labs[0].evidence_state, 'conflicting');
 assert.equal(isVisitComplete(visits[3]), true);
 assert.equal(isVisitComplete({ signed: true, status: 'IN_REVIEW' }), false, 'one reviewer signature does not unlock overall final adjudication');
+assert.equal(visits[0].interpretation.certainty.includes('Definite'), false, 'automated visit certainty does not assign Definite');
 
 const legacy = normalizeVisitEvidence({
   id: 'LEGACY-001',
@@ -118,5 +119,70 @@ assert.equal(legacy[0].bp.length, 1);
 const rows = buildLongitudinalRows(visits);
 assert.ok(rows.find((row) => row.key === 'creatinine').cells[1].value.includes('1.31'));
 assert.ok(rows.find((row) => row.key === 'alt').cells[1].value.includes('78'));
+
+const dynamic = normalizeVisitEvidence({
+  id: 'DYNAMIC-001',
+  visits: [{
+    id: 'v06',
+    name: 'V06',
+    evidence: {
+      source_interpretation_rbc: [{ raw_source_value: 'Abnormal (CS)', source: { form: 'Visit 6', page: 'Hematology', field: 'RBC interpretation', row: 44 } }],
+      neonatal_death_description: [{ raw_source_value: 'Macerated still birth', source: { form: 'Adverse Event', page: 'Adverse Event', field: 'Death description - Neonatal', row: 45 } }],
+      RBC: [{ value: '1.30', unit: 'x10^12/L' }],
+      HAEMOGLOBIN: [{ value: '13.8', unit: 'g/dL' }],
+      HAEMATOCRIT: [{ value: '40.8', unit: '%' }],
+    },
+  }],
+});
+assert.equal(dynamic[0].otherResults.some((row) => row.key === 'source_interpretation_rbc'), true, 'source interpretations remain displayable context');
+assert.equal(dynamic[0].otherResults.some((row) => row.key === 'neonatal_death_description'), true, 'additional mapped neonatal outcomes remain available');
+assert.equal(dynamic[0].labs.find((row) => row.key === 'RBC').evidence_state, 'conflicting', 'RBC inconsistency is flagged for review');
+
+// Test not performed visit detection and fallback date resolution
+const notPerformedCase = normalizeVisitEvidence({
+  id: 'MISSED-001',
+  delivery_date: '2026-02-23T00:00:00Z',
+  visits: [
+    {
+      id: 'v01',
+      name: 'V01',
+      evidence: {
+        SBP: [{ value: '120', observed_at: '2026-02-10T10:00:00Z' }],
+        DBP: [{ value: '75', observed_at: '2026-02-10T10:00:00Z' }],
+      }
+    },
+    {
+      id: 'v02',
+      name: 'V02',
+      evidence: {
+        visit_date: [{ value: 'Delivered', source: { field: 'Reason for not performing visit' } }]
+      }
+    },
+    {
+      id: 'v04',
+      name: 'V04',
+      evidence: {
+        visit_date: [{ value: 'Missed visit', source: { field: 'Reason for not performing visit' } }]
+      }
+    },
+    {
+      id: 'v05',
+      name: 'V05',
+      evidence: {
+        delivery_mode: [{ value: 'Cesarean', observed_at: '2026-02-23T00:00:00Z' }],
+        birth_weight: [{ value: '2500' }]
+      }
+    }
+  ]
+});
+
+assert.equal(notPerformedCase[0].is_not_performed, false);
+assert.equal(notPerformedCase[0].date, '2026-02-10T10:00:00.000Z', 'falls back to observation timestamp when visit.date is absent');
+assert.equal(notPerformedCase[1].is_not_performed, true);
+assert.equal(notPerformedCase[1].not_performed_reason, 'Delivered');
+assert.equal(notPerformedCase[2].is_not_performed, true);
+assert.equal(notPerformedCase[2].not_performed_reason, 'Missed visit');
+assert.equal(notPerformedCase[3].is_not_performed, false);
+assert.equal(notPerformedCase[3].date, '2026-02-23T00:00:00.000Z', 'Visit 5 resolves date from delivery observation or caseData');
 
 console.log('visitEvidence service tests passed');

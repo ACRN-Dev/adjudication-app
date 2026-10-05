@@ -2,7 +2,7 @@
 import os, re, uuid
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter,UploadFile,File,BackgroundTasks,Depends,HTTPException,Header,Query,Request
+from fastapi import APIRouter,UploadFile,File,BackgroundTasks,Depends,HTTPException,Header,Query,Request,Body
 from pydantic import BaseModel
 from sqlalchemy.orm import Session,selectinload
 from database import get_db
@@ -59,11 +59,11 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
             if not pr or pr not in MONITOR_PORTAL_ROLES:
                 return u.email, "MONITOR", False
             return u.email, pr, True
-        if u.role == "ADMIN":
-            return u.email, "ADMIN", True
+        if u.role in {"ADMIN", "OWNER"}:
+            return u.email, u.role, True
         if u.role in {"ADJUDICATOR", "CHAIRPERSON"}:
             return u.email, u.role, False
-        raise HTTPException(403, "Monitor/QC authority required")
+        raise HTTPException(403, f"Monitor/QC authority required. Current role: {u.role}")
     # No cookie at all — fall back to demo headers only when demo mode is enabled,
     # and only after verifying the claimed user actually exists with that role.
     # Trusting the header value alone would let anyone impersonate any adjudicator.
@@ -90,7 +90,7 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
                 raise HTTPException(403, detail={"code": "PASSWORD_CHANGE_REQUIRED", "message": "You must set a new password before continuing."})
             if demo_user.role != claimed_role and not (demo_user.role == "ADJUDICATOR" and claimed_role in {"REVIEWER_A", "REVIEWER_B"}):
                 raise HTTPException(403, detail={"message": "Role mismatch for demo identity.", "reason": "role_mismatch"})
-            is_qc = claimed_role in MONITOR or demo_user.role in {"MONITOR", "ADMIN"}
+            is_qc = claimed_role in MONITOR or demo_user.role in {"MONITOR", "ADMIN", "OWNER"}
             return demo_user.email, claimed_role, is_qc
     raise HTTPException(401, detail={"message": "Authentication required. Please sign in.", "reason": "no_session"})
 
@@ -126,12 +126,17 @@ def _progress_pct(b):
 
 
 def bjson(b, db=None):
-    report = {"accepted": 0, "rejected": 0, "participants": []}
+    report = {"accepted": 0, "accepted_with_warnings": 0, "rejected": 0, "participants": []}
     if db and b.status in {"AUTO_QC_COMPLETE", "MONITOR_QC_REQUIRED"}:
         participants = db.query(LongitudinalParticipant).filter_by(source_batch_id=b.id).all()
         for participant in participants:
             readiness = participant_import_readiness(participant)
-            report["accepted" if readiness["accepted"] else "rejected"] += 1
+            if readiness["status"] == "ACCEPTED":
+                report["accepted"] += 1
+            elif readiness["status"] == "ACCEPTED_WITH_WARNINGS":
+                report["accepted_with_warnings"] += 1
+            else:
+                report["rejected"] += 1
             report["participants"].append({"subject_id": participant.blinded_subject_id, **readiness})
     return {"id":str(b.id),"filename":b.filename,"checksum":b.checksum,"file_size":b.file_size,"uploaded_at":b.uploaded_at,"rows":b.row_count,"rows_processed":b.rows_processed,"participants":b.participant_count,"visits":b.visit_count,"mapping_version":b.mapping_version,"status":b.status,"progress_pct":_progress_pct(b),"validation_result":b.validation_result,"blinding_result":b.blinding_result,"errors":b.error_count,"warnings":b.warning_count,"prohibited_excluded":b.prohibited_count,"finished_at":b.processing_finished_at,"error_summary":b.error_summary,"import_report":report}
 @router.post("/batches",status_code=202)
@@ -260,10 +265,36 @@ def pjson(p, db=None):
     except Exception:
         assignments = []
     is_completed, canonical_visit_count = completion_state(db, p) if db else (False, 0)
-    readiness = participant_import_readiness(p) if db else None
+    readiness = participant_import_readiness(p)
+    age_val = None
+    if db:
+        f = (
+            db.query(PatientHistoryField)
+            .filter(
+                PatientHistoryField.participant_id == p.id,
+                PatientHistoryField.field_key.in_(["age", "age_years", "age_at_enrollment"])
+            )
+            .first()
+        )
+        if f and f.value:
+            try: age_val = int(f.value)
+            except: age_val = f.value
+            
+    def _get_recon(p, db):
+        if not db or not p.source_batch_id: return {}
+        b = db.get(RTImportBatch, p.source_batch_id)
+        if not b or not b.validation_result: return {}
+        res = b.validation_result
+        if isinstance(res, str):
+            import json
+            try: res = json.loads(res)
+            except: res = {}
+        return (res or {}).get("reconciliation", {})
+
     return {
         "id":str(p.id),
         "subject_id":p.blinded_subject_id,
+        "age": age_val,
         "study":p.study,
         "visit_count":p.available_visit_count or 0,
         "first_visit":p.first_visit_date.isoformat() if p.first_visit_date else None,
@@ -282,6 +313,7 @@ def pjson(p, db=None):
         "case_status": "COMPLETED" if is_completed else p.workflow_status,
         "canonical_visit_count": canonical_visit_count,
         "import_readiness": readiness,
+        "reconciliation": _get_recon(p, db),
     }
 @router.get("/patients")
 def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",view:str="all",include_rejected:bool=False,i=Depends(authenticated),db:Session=Depends(get_db)):
@@ -390,12 +422,32 @@ def timeline(p,db, reviewer_upn=None):
             })
         canonical_visit = canonical_visits.get(visit_number)
         reviewer_record = reviewer_records.get(visit_number)
+        ga_label = f"{v.gestational_age_days // 7} weeks, {v.gestational_age_days % 7} days" if (v.gestational_age_days and v.gestational_age_days >= 45) else None
+
+        obs_dts = [o.observation_datetime for o in v.observations if o.observation_datetime]
+        resolved_date = v.visit_datetime or (min(obs_dts) if obs_dts else None)
+
+        not_performed_reason = None
+        for o in v.observations:
+            fld = (o.source_field_label or "").lower()
+            val = str(o.raw_source_value or o.parsed_text_value or "").strip()
+            if "not performing" in fld or "not performed" in fld or "missed" in fld or val.lower() in {"delivered", "missed visit", "withdrew", "lost to follow-up"}:
+                not_performed_reason = val
+                break
+
         visits.append({
             "id":str(v.id),"name":v.scheduled_visit_code,"visit_number":visit_number,"occurrence":v.visit_occurrence,
-            "date":v.visit_datetime,"ga_days":v.gestational_age_days,"form":v.form_title,
+            "date":resolved_date,"ga_days":v.gestational_age_days,"ga":ga_label,"gestationalLabel":ga_label,"form":v.form_title,
             "form_version":v.form_version,
+            "not_performed_reason": not_performed_reason,
             "reconstruction":{"method":v.reconstruction_method,"confidence":v.reconstruction_confidence,"qc_status":v.qc_status},
             "evidence":evidence,
+            "reconciliation":{
+                "displayed_clinical_results": sum(len(items or []) for items in evidence.values()),
+                "mapped_clinical_rows": sum(1 for o in v.observations if not o.prohibited_flag and o.canonical_variable),
+                "prohibited_blinded_rows": sum(1 for o in v.observations if o.prohibited_flag),
+                "conflicting_rows": sum(1 for o in v.observations if (o.quality_status or "").upper() == "CONFLICTING"),
+            },
             "signed": bool(reviewer_record),
             "status": canonical_visit.status if canonical_visit else None,
             "resolution_status": canonical_visit.status if canonical_visit else None,
@@ -412,9 +464,12 @@ def timeline(p,db, reviewer_upn=None):
     d=db.query(LongitudinalCaseDerivation).filter_by(participant_id=p.id).first()
     long=None if not d else {"earliest_qualifying_date":d.earliest_qualifying_pe_date,"first_qualifying_visit_id":str(d.first_qualifying_visit_id) if d.first_qualifying_visit_id else None,"onset_classification":d.onset_classification,"maximum_severity":d.maximum_severity,"packet_completeness":d.packet_completeness,"certainty_restriction":d.certainty_restriction,"trigger_status":d.trigger_status,"recorded_site_diagnosis":d.recorded_site_diagnosis,"recorded_site_diagnosis_date":d.recorded_site_diagnosis_date,"discrepancy":d.recorded_versus_derived_discrepancy,"explanation":d.explanation}
     history_fields = db.query(PatientHistoryField).filter_by(participant_id=p.id).order_by(PatientHistoryField.domain, PatientHistoryField.instance_index, PatientHistoryField.field_key).all()
-    history = {"obstetric": [], "conditions": [], "medications": [], "medical": [], "family": [], "allergy_surgery": []}
+    history = {"obstetric": [], "conditions": [], "medications": [], "medical": [], "family": [], "allergy_surgery": [], "baseline": []}
+    age_from_fields = None
     for f in history_fields:
         item = history_item(f)
+        if f.field_key == "age" and f.value:
+            age_from_fields = f.value
         if f.domain in history:
             history[f.domain].append(item)
         if f.domain == "conditions":
@@ -422,8 +477,9 @@ def timeline(p,db, reviewer_upn=None):
         elif f.domain in {"medical", "family", "allergy_surgery"}:
             history["conditions"].append(item)
     rs = db.query(PatientRiskSummary).filter_by(participant_id=p.id).first()
-    risk_summary = {"chips": rs.chips if rs else [], "parity_summary": rs.parity_summary if rs else "", "gravidity": rs.gravidity if rs else 0, "parity": rs.parity if rs else 0, "miscarriages": rs.miscarriages if rs else 0, "stillbirths": rs.stillbirths if rs else 0, "vaginal_deliveries": rs.vaginal_deliveries if rs else 0, "c_sections": rs.c_sections if rs else 0, "chronic_htn": rs.chronic_htn if rs else False, "pregestational_diabetes": rs.pregestational_diabetes if rs else False}
-    return {**pjson(p, db),"visits":visits,"longitudinal":long,"history":history,"risk_summary":risk_summary}
+    parsed_age = int(age_from_fields) if (age_from_fields and str(age_from_fields).isdigit()) else age_from_fields
+    risk_summary = {"age": parsed_age, "chips": rs.chips if rs else [], "parity_summary": rs.parity_summary if rs else "", "gravidity": rs.gravidity if rs else 0, "parity": rs.parity if rs else 0, "miscarriages": rs.miscarriages if rs else 0, "stillbirths": rs.stillbirths if rs else 0, "vaginal_deliveries": rs.vaginal_deliveries if rs else 0, "c_sections": rs.c_sections if rs else 0, "chronic_htn": rs.chronic_htn if rs else False, "pregestational_diabetes": rs.pregestational_diabetes if rs else False}
+    return {**pjson(p, db),"age":parsed_age,"visits":visits,"longitudinal":long,"history":history,"risk_summary":risk_summary}
 @router.get("/patients/{participant_id}")
 def patient(participant_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends(get_db)):
     p=loaded(db,participant_id)
@@ -431,23 +487,42 @@ def patient(participant_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends
     # Record the caller's actual authority, not a hardcoded portal: this view is reachable
     # by every role now, so a fixed "MONITOR" would misattribute the access.
     audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"MONITOR" if i[2] else "NON_QC","role":i[1]}); db.commit(); return {**timeline(p,db,i[0]),"lab_issues":evaluate_participant_labs(db,p)}
+class MonitorApprovalRequest(BaseModel):
+    reason: Optional[str] = None
+
+
 @router.post("/patients/{participant_id}/approve")
-def approve(participant_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
+def approve(participant_id:uuid.UUID, req: MonitorApprovalRequest | None = Body(default=None), i=Depends(monitor),db:Session=Depends(get_db)):
     p=db.get(LongitudinalParticipant,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
     readiness = participant_import_readiness(p)
-    if not readiness["accepted"]:
-        raise HTTPException(409, {"message": "Algorithmic completeness check failed.", "readiness": readiness})
-    if db.query(ImportIssue).filter_by(participant_id=p.id,resolution_status="OPEN").count(): raise HTTPException(409,"Unresolved import issues block approval")
-    if db.query(VisitInstance).filter_by(participant_id=p.id).filter(VisitInstance.qc_status.in_(["MONITOR_QC_REQUIRED", "DATE_CONFLICT"])).count():
-        raise HTTPException(409,"Conflicting source visit dates require Monitor/QC review before approval")
-    p.workflow_status="QC_APPROVED"; audit(db,i[0],i[1],"PARTICIPANT_AUTO_QC_APPROVED","PARTICIPANT",p.id,{"readiness": readiness}); db.commit(); return {"status":p.workflow_status,"readiness":readiness}
+    if readiness["status"] == "REJECTED":
+        raise HTTPException(409, {"message": "Hard import-readiness rejection cannot be overridden.", "readiness": readiness})
+    if readiness["status"] == "ACCEPTED_WITH_WARNINGS" and not ((req.reason if req else None) or "").strip():
+        raise HTTPException(422, {"message": "A Monitor reason is required to approve with warnings.", "readiness": readiness})
+    if db.query(ImportIssue).filter_by(participant_id=p.id,resolution_status="OPEN").filter(ImportIssue.severity.in_(["ERROR", "CRITICAL"])).count(): raise HTTPException(409,"Unresolved critical import issues block approval")
+    if db.query(VisitInstance).filter_by(participant_id=p.id).filter(VisitInstance.qc_status.in_(["DATE_CONFLICT_UNRESOLVED", "UNSAFE_ASSIGNMENT", "EXCLUDED_MISSING_KEY_FIELDS"])).count():
+        raise HTTPException(409,"Unsafe participant or visit assignment failures cannot be overridden")
+    p.workflow_status="QC_APPROVED"
+    audit(db,i[0],i[1],"PARTICIPANT_MONITOR_APPROVED","PARTICIPANT",p.id,{
+        "original_readiness_status": readiness["status"],
+        "warnings": readiness.get("warnings", []),
+        "monitor_reason": (req.reason if req else None),
+        "approved_at": datetime.utcnow().isoformat(),
+    })
+    db.commit(); return {"status":p.workflow_status,"readiness":readiness}
 @router.post("/patients/{participant_id}/assign")
 def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends(monitor),db:Session=Depends(get_db)):
     p=db.get(LongitudinalParticipant,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
     if completion_state(db, p)[0]: raise HTTPException(409,"This case is already completed and cannot be assigned")
-    if p.workflow_status=="MONITOR_QC_REQUIRED": p.workflow_status="QC_APPROVED"
+    readiness = participant_import_readiness(p)
+    if readiness["status"] == "REJECTED":
+        raise HTTPException(409, {"message": "Hard import-readiness rejection cannot be assigned.", "readiness": readiness})
+    if p.workflow_status=="MONITOR_QC_REQUIRED" and readiness["status"] == "ACCEPTED":
+        p.workflow_status="QC_APPROVED"
+    elif p.workflow_status=="MONITOR_QC_REQUIRED":
+        raise HTTPException(409, {"message": "Monitor warning acknowledgement is required before assignment.", "readiness": readiness})
     if reviewer_role not in {"REVIEWER_A","REVIEWER_B"}: raise HTTPException(422,"Invalid reviewer role")
     reviewer_upn=reviewer_upn.strip().lower()
     reviewer=db.query(PortalUser).filter_by(email=reviewer_upn,role="ADJUDICATOR",status="ACTIVE").first()
@@ -576,15 +651,144 @@ def adjudicators(i=Depends(monitor), db:Session=Depends(get_db)):
     workloads=dict(db.query(ReviewerAssignment.reviewer_upn, __import__('sqlalchemy').func.count(ReviewerAssignment.id)).filter_by(status="ASSIGNED").group_by(ReviewerAssignment.reviewer_upn).all())
     return [{"email": u.email, "display_name": u.display_name, "portal_role": u.portal_role,
              "active_workload": workloads.get(u.email,0)} for u in rows]
+_CLINICIAN_BIAS_FIELDS = {
+    "pe_status",
+    "recorded_pe_status",
+    "recorded_pe_diagnosis",
+    "clinician_diagnosis",
+    "clinician_opinion",
+    "site_diagnosis",
+    "final_diagnosis",
+}
+
+
+def _strip_bias_fields(response: dict) -> dict:
+    """Remove clinician bias fields from an adjudicator-bound timeline response."""
+    for key in _CLINICIAN_BIAS_FIELDS:
+        response.pop(key, None)
+
+    if isinstance(response.get("longitudinal"), dict):
+        for key in _CLINICIAN_BIAS_FIELDS:
+            response["longitudinal"].pop(key, None)
+
+    for visit in response.get("visits", []):
+        if isinstance(visit.get("evidence"), dict):
+            for key in _CLINICIAN_BIAS_FIELDS:
+                visit["evidence"].pop(key, None)
+
+    return response
+
+
 @router.get("/assigned/{participant_id}")
 def assigned_patient(participant_id:uuid.UUID,i=Depends(actor),db:Session=Depends(get_db)):
     if not db.query(ReviewerAssignment).filter_by(participant_id=participant_id,reviewer_upn=i[0]).first(): raise HTTPException(403,"Participant is not assigned to this reviewer")
     p=loaded(db,participant_id)
     if not p or p.workflow_status!="ASSIGNED" or completion_state(db, p)[0]: raise HTTPException(404,"Assigned participant unavailable")
-    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"ADJUDICATOR"}); db.commit(); return timeline(p,db,i[0])
+    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"ADJUDICATOR"}); db.commit()
+    payload = timeline(p, db, i[0])
+    if i[1] == "ADJUDICATOR":
+        payload = _strip_bias_fields(payload)
+    return payload
+
+
+# ── Auto-assignment (MONITOR authority only) ──────────────────────────────────
+
+class AutoAssignRequest(BaseModel):
+    participant_id: str
+    reason: Optional[str] = "Auto-assignment by system"
+
+
+_AUTO_ASSIGN_CAP = 50
+
+
+@router.post("/auto-assign", status_code=201)
+def auto_assign(req: AutoAssignRequest, i=Depends(monitor), db: Session=Depends(get_db)):
+    """Assign the two least-loaded active adjudicators as REVIEWER_A and REVIEWER_B.
+
+    Rules:
+    - Only MONITOR-role callers may invoke this endpoint.
+    - Each reviewer may hold at most _AUTO_ASSIGN_CAP active assignments.
+    - Raises HTTP 409 when fewer than two eligible reviewers exist.
+    - The same reviewer may not be assigned both slots.
+    """
+    try:
+        participant_id = uuid.UUID(req.participant_id)
+    except ValueError:
+        raise HTTPException(422, "participant_id must be a valid UUID")
+
+    p = db.get(LongitudinalParticipant, participant_id)
+    if not p:
+        raise HTTPException(404, "Participant not found")
+    if completion_state(db, p)[0]:
+        raise HTTPException(409, "This case is already completed and cannot be auto-assigned")
+
+    # Count active assignments per adjudicator
+    from sqlalchemy import func as _func
+    workloads = dict(
+        db.query(ReviewerAssignment.reviewer_upn, _func.count(ReviewerAssignment.id))
+        .filter_by(status="ASSIGNED")
+        .group_by(ReviewerAssignment.reviewer_upn)
+        .all()
+    )
+
+    adjudicators = (
+        db.query(PortalUser)
+        .filter_by(role="ADJUDICATOR", status="ACTIVE")
+        .order_by(PortalUser.email)
+        .all()
+    )
+
+    eligible = [
+        u for u in adjudicators
+        if workloads.get(u.email, 0) < _AUTO_ASSIGN_CAP
+    ]
+    # Sort ascending by current workload so the least-loaded reviewers are picked first
+    eligible.sort(key=lambda u: workloads.get(u.email, 0))
+
+    if len(eligible) < 2:
+        raise HTTPException(
+            409,
+            f"Auto-assignment failed: fewer than 2 eligible adjudicators available "
+            f"(cap={_AUTO_ASSIGN_CAP} active cases). Rebalance the roster and retry."
+        )
+
+    reviewer_a_upn = eligible[0].email
+    reviewer_b_upn = eligible[1].email
+
+    for upn, role in ((reviewer_a_upn, "REVIEWER_A"), (reviewer_b_upn, "REVIEWER_B")):
+        existing = db.query(ReviewerAssignment).filter_by(
+            participant_id=p.id, reviewer_role=role
+        ).first()
+        if existing:
+            existing.reviewer_upn = upn
+        else:
+            db.add(ReviewerAssignment(participant_id=p.id, reviewer_upn=upn, reviewer_role=role))
+
+    if p.workflow_status not in {"ASSIGNED", "QC_APPROVED"}:
+        p.workflow_status = "ASSIGNED"
+
+    audit(
+        db, i[0], i[1],
+        "REVIEWER_AUTO_ASSIGNED", "PARTICIPANT", p.id,
+        {
+            "reviewer_a": reviewer_a_upn,
+            "reviewer_b": reviewer_b_upn,
+            "reason": req.reason,
+            "cap": _AUTO_ASSIGN_CAP,
+        },
+    )
+    db.commit()
+    return {
+        "status": "ASSIGNED",
+        "participant_id": str(p.id),
+        "reviewer_a": reviewer_a_upn,
+        "reviewer_b": reviewer_b_upn,
+        "reason": req.reason,
+    }
 
 
 # ── Configurable per-site/per-lab reference ranges (Monitor/QC authority only) ──
+
 def rjson(r):
     return {"id":str(r.id),"analyte":r.analyte,"site_code":r.site_code,"lab_code":r.lab_code,"unit":r.unit,"low":r.low,"high":r.high,"is_active":r.is_active,"created_by":r.created_by,"updated_at":r.updated_at}
 

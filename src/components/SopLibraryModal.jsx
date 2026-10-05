@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, BookOpen, ShieldCheck, FileText, CheckCircle2, Lock, Award, ClipboardList } from 'lucide-react';
 
-const SOP_DOCUMENTS = {
+export const SOP_DOCUMENTS = {
   AGENT_SOP: {
     title: "ACRN AI Adjudication Agent Master Specification",
     code: "SPEC-AI-001 v1.0",

@@ -4,9 +4,10 @@ import {
   Calendar, Download, RefreshCw, Send, CheckSquare, ShieldCheck, ChevronRight, Eye, X
 } from 'lucide-react';
 import EvidenceInspectorModal from './EvidenceInspectorModal';
+import '../admin/admin.css';
 import './chairperson.css';
 
-export default function ChairpersonPortal({ user, onLogout, isEmbedded }) {
+export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly = false }) {
   const [activeTab, setActiveTab] = useState('concordance');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -15,6 +16,7 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded }) {
   const [agendaPack, setAgendaPack] = useState(null);
   const [meetings, setMeetings] = useState([]);
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(false);
 
   // Minutes Form state
   const [meetingTitle, setMeetingTitle] = useState('PROTECT-Africa Adjudication Committee Session #1');
@@ -287,606 +289,472 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded }) {
     }
   };
 
-  return (
-    <div className="chair-container" style={isEmbedded ? { padding: 0, height: '100%' } : {}}>
-      {/* Chairperson Header */}
-      {!isEmbedded && (
-      <header className="chair-header">
-        <div className="chair-header-title">
-          <img src="/acrn-logo.png" alt="ACRN" style={{ height: '32px', width: 'auto', objectFit: 'contain' }} />
+  const NAV_ITEMS = [
+    { key: 'concordance', label: 'Concordance Tracker', icon: <Scale size={15} /> },
+    { key: 'agenda',      label: 'Meeting Agenda Pack', icon: <FileText size={15} /> },
+    { key: 'minutes',     label: 'Record Minutes & Sign-Off', icon: <ShieldCheck size={15} /> },
+    { key: 'archive',     label: `Meeting Archive (${meetings.length})`, icon: <Calendar size={15} /> },
+  ];
+
+  const handleTabChange = (key) => {
+    setActiveTab(key);
+    if (key === 'agenda') fetchAgenda();
+    if (key === 'archive') fetchMeetings();
+  };
+
+  const TAB_DESCS = {
+    concordance: 'Live batch monitoring of primary (A) and secondary (B) reviewer submissions and Reviewer C escalations.',
+    agenda: 'Auto-generated committee agenda pack summarising all outstanding discordant and pending cases.',
+    minutes: 'Record official committee deliberations and apply a 21 CFR Part 11 electronic signature to close the batch.',
+    archive: 'Scheduled upcoming meetings and signed, archived session minutes.',
+  };
+
+  const content = (
+    <>
+      {/* Demo orientation banner */}
+      {isUsingDemoData && (
+        <div role="status" className="a-notice warn" style={{ marginBottom: '12px' }}>
+          <AlertTriangle size={15} />
           <div>
-            <h1>Adjudication Chairperson Workspace</h1>
-            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
-              PROTECT-Africa &amp; LOPE-Nigeria Endpoint Consensus Management
-            </div>
+            <strong>Demo orientation data</strong>
+            <span>No live adjudication cases were found. Records shown below are illustrative examples only.</span>
           </div>
-          <span className="chair-badge">Chairperson Role</span>
+          <button style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#92400e', fontWeight: 700 }} onClick={() => setIsUsingDemoData(false)} aria-label="Dismiss">âœ•</button>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '13px', fontWeight: 600 }}>{user?.display_name || 'Chairperson'}</div>
-            <div style={{ fontSize: '11px', color: '#94a3b8' }}>{user?.email}</div>
-          </div>
-          <button
-            onClick={onLogout}
-            className="chair-btn chair-btn-secondary"
-            style={{ padding: '6px 12px', fontSize: '12px' }}
-          >
-            <LogOut size={14} /> Sign Out
-          </button>
-        </div>
-      </header>
       )}
 
-      {/* Navigation Tabs */}
-      <nav className="chair-nav">
-        <button
-          className={`chair-nav-btn ${activeTab === 'concordance' ? 'active' : ''}`}
-          onClick={() => setActiveTab('concordance')}
-        >
-          <Scale size={15} /> Completed Adjudications &amp; Concordance
-        </button>
-        <button
-          className={`chair-nav-btn ${activeTab === 'agenda' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('agenda'); fetchAgenda(); }}
-        >
-          <FileText size={15} /> Meeting Agenda Pack
-        </button>
-        <button
-          className={`chair-nav-btn ${activeTab === 'minutes' ? 'active' : ''}`}
-          onClick={() => setActiveTab('minutes')}
-        >
-          <ShieldCheck size={15} /> Record Minutes &amp; Sign-Off
-        </button>
-        <button
-          className={`chair-nav-btn ${activeTab === 'archive' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('archive'); fetchMeetings(); }}
-        >
-          <Calendar size={15} /> Meeting Archive ({meetings.length})
-        </button>
-      </nav>
+      {/* KPI metrics strip */}
+      <div className="a-metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '14px' }}>
+        <div style={{ borderLeft: '3px solid #10b981' }}>
+          <strong style={{ color: '#047857' }}>{summary.concordant}</strong>
+          <span>Concordant (A = B)</span>
+        </div>
+        <div style={{ borderLeft: '3px solid #ef4444' }}>
+          <strong style={{ color: '#b91c1c' }}>{summary.discordant}</strong>
+          <span>Discordant (A ≠ B)</span>
+        </div>
+        <div style={{ borderLeft: '3px solid #f59e0b' }}>
+          <strong style={{ color: '#b45309' }}>{summary.three_way_divergent}</strong>
+          <span>3-Way Divergent</span>
+        </div>
+        <div style={{ borderLeft: '3px solid #64748b' }}>
+          <strong style={{ color: '#334155' }}>{summary.closed}</strong>
+          <span>Closed &amp; Archived</span>
+        </div>
+      </div>
 
-      {/* Content Body */}
-      <main className="chair-content">
-        {/* Demo Data Orientation Banner */}
-        {isUsingDemoData && (
-          <div role="status" style={{
-            background: '#fffbeb',
-            border: '1px solid #f59e0b',
-            borderRadius: '8px',
-            padding: '10px 16px',
-            marginBottom: '16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            fontSize: '13px',
-            color: '#92400e',
-          }}>
-            <AlertTriangle size={16} color="#f59e0b" />
-            <span>
-              <strong>Demo orientation data:</strong> No live adjudication cases were found in the database.
-              The records shown below are illustrative examples only. Complete an A/B submission cycle to populate real cases.
-            </span>
-            <button
-              onClick={() => setIsUsingDemoData(false)}
-              style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#92400e', fontWeight: 700, fontSize: '14px' }}
-              aria-label="Dismiss"
-            >✕</button>
+      {/* Page heading for active tab */}
+      <div className="a-page-head">
+        <div>
+          <h1>{NAV_ITEMS.find(n => n.key === activeTab)?.label}</h1>
+          <p>{TAB_DESCS[activeTab]}</p>
+        </div>
+        {activeTab === 'concordance' && !readOnly && (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <select className="a-toolbar" style={{ padding: '0 8px', height: '30px', fontSize: '9.5px' }} value={releaseStudy} onChange={e => setReleaseStudy(e.target.value)}>
+              <option value="PROTECT-Africa">PROTECT-Africa</option>
+              <option value="LOPE-Nigeria">LOPE-Nigeria</option>
+            </select>
+            <button className="a-primary" onClick={() => downloadFinalRelease('csv')} disabled={Boolean(releaseFormat)}>
+              <Download size={13} /> {releaseFormat === 'csv' ? 'Preparing…' : 'Final CSV'}
+            </button>
+            <button className="a-secondary" style={{ padding: '6px 9px', display:'inline-flex', gap:'5px', alignItems:'center', fontSize:'9.5px', cursor:'pointer' }} onClick={() => downloadFinalRelease('pdf')} disabled={Boolean(releaseFormat)}>
+              <FileText size={13} /> {releaseFormat === 'pdf' ? 'Preparing…' : 'Final PDF'}
+            </button>
           </div>
         )}
-
-        {/* KPI Stat Cards */}
-        <div className="chair-stats-grid">
-          <div className="chair-stat-card" style={{ borderLeft: '4px solid #10b981' }}>
-            <div className="chair-stat-label">Concordant (A = B)</div>
-            <div className="chair-stat-val" style={{ color: '#047857' }}>{summary.concordant}</div>
-            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Ready for consent calendar</div>
-          </div>
-          <div className="chair-stat-card" style={{ borderLeft: '4px solid #ef4444' }}>
-            <div className="chair-stat-label">Discordant (A ≠ B)</div>
-            <div className="chair-stat-val" style={{ color: '#b91c1c' }}>{summary.discordant}</div>
-            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Requires committee discussion</div>
-          </div>
-          <div className="chair-stat-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-            <div className="chair-stat-label">3-Way Divergent (A ≠ B ≠ C)</div>
-            <div className="chair-stat-val" style={{ color: '#b45309' }}>{summary.three_way_divergent}</div>
-            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Reviewer C independent outcome</div>
-          </div>
-          <div className="chair-stat-card" style={{ borderLeft: '4px solid #64748b' }}>
-            <div className="chair-stat-label">Closed &amp; Archived</div>
-            <div className="chair-stat-val" style={{ color: '#334155' }}>{summary.closed}</div>
-            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Meeting minutes e-signed</div>
-          </div>
-        </div>
-
-        {/* TAB 1: Completed Adjudications & Concordance Tracker */}
         {activeTab === 'concordance' && (
-          <div className="chair-table-card">
-            {errorMsg && (
-              <div style={{ margin: '16px 20px 0', padding: '12px 14px', color: '#991b1b', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', fontSize: '13px' }}>
-                {errorMsg}
-              </div>
-            )}
-            <div className="chair-table-header">
-              <div>
-                <h2>Completed Adjudications Roster</h2>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                  Live batch monitoring of primary (A) and secondary (B) reviewer submissions and Reviewer C escalations.
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                <select className="chair-input" value={releaseStudy} onChange={(e) => setReleaseStudy(e.target.value)} aria-label="Final release study">
-                  <option value="PROTECT-Africa">PROTECT-Africa</option>
-                  <option value="LOPE-Nigeria">LOPE-Nigeria</option>
-                </select>
-                <button onClick={() => downloadFinalRelease('csv')} className="chair-btn chair-btn-primary" style={{ fontSize: '12px' }} disabled={Boolean(releaseFormat)}>
-                  <Download size={13} /> {releaseFormat === 'csv' ? 'Preparing…' : 'Final CSV'}
-                </button>
-                <button onClick={() => downloadFinalRelease('pdf')} className="chair-btn chair-btn-secondary" style={{ fontSize: '12px' }} disabled={Boolean(releaseFormat)}>
-                  <FileText size={13} /> {releaseFormat === 'pdf' ? 'Preparing…' : 'Final PDF'}
-                </button>
-                <button onClick={fetchAdjudications} className="chair-btn chair-btn-secondary" style={{ fontSize: '12px' }}>
-                  <RefreshCw size={13} className={loading ? 'spin' : ''} /> Refresh
-                </button>
-              </div>
-            </div>
+          <button className="a-primary" onClick={fetchAdjudications} disabled={loading}>
+            <RefreshCw size={13} /> {loading ? 'Loading…' : 'Refresh'}
+          </button>
+        )}
+      </div>
 
-            <div className="chair-table-wrap">
-              <table className="chair-table chair-decision-table">
-                <thead>
-                  <tr>
-                    <th style={{ minWidth: '150px' }}>Patient</th>
-                    <th style={{ minWidth: '85px' }}>Visit</th>
-                    <th style={{ minWidth: '90px' }}>Site</th>
-                    <th style={{ minWidth: '120px' }}>Study</th>
-                    <th style={{ minWidth: '160px' }}>Reviewer A</th>
-                    <th style={{ minWidth: '160px' }}>Reviewer B</th>
-                    <th style={{ minWidth: '160px' }}>Reviewer C</th>
-                    <th style={{ minWidth: '160px' }}>Concordance Status</th>
-                    <th style={{ minWidth: '140px' }}>Inspect</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {adjudications.length === 0 ? (
-                    <tr>
-                      <td colSpan="9" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>
-                        No completed adjudication cases found in current batch.
-                      </td>
-                    </tr>
-                  ) : (
-                    adjudications.map((adj, index) => {
-                      const rawStatus = String(adj.concordance_status || adj.concordance || adj.status || '').toUpperCase();
-                      const isLope = String(adj.study_code || '').toUpperCase().includes('LOPE');
-                      const isNewPatient = index === 0 || adjudications[index - 1].subject_id !== adj.subject_id;
-                      
-                      const renderBadge = () => {
-                        if (rawStatus.includes('MAJORITY') || rawStatus === 'RESOLVED_BY_MAJORITY') {
-                          return <span className="tag-majority"><CheckCircle size={12} /> Resolved by Majority</span>;
-                        }
-                        if (rawStatus === 'CONCORDANT' || rawStatus === 'CONCORDANT_A_EQUALS_B' || (rawStatus.includes('CONCORDANT') && !rawStatus.includes('DISCORDANT'))) {
-                          return <span className="tag-concordant"><CheckCircle size={12} /> Concordant (A=B)</span>;
-                        }
-                        if (rawStatus.includes('THREE_WAY') || rawStatus.includes('DIVERGENT')) {
-                          return <span className="tag-divergent"><Scale size={12} /> 3-Way Divergent</span>;
-                        }
-                        if (rawStatus === 'RESOLVED_BY_REVIEWER_C') {
-                          return <span className="tag-concordant"><ShieldCheck size={12} /> Reviewer C Final</span>;
-                        }
-                        if (rawStatus.includes('ESCALATED') || rawStatus.includes('REVIEWER_C') || rawStatus === 'ESCALATED_TO_C') {
-                          return <span className="tag-active-c"><Users size={12} /> Reviewer C Active</span>;
-                        }
-                        if (rawStatus.includes('DISCORDANT')) {
-                          return <span className="tag-discordant"><AlertTriangle size={12} /> Discordant (A≠B)</span>;
-                        }
-                        if (rawStatus.includes('CLOSED')) {
-                          return <span className="tag-closed"><Lock size={12} /> Closed</span>;
-                        }
-                        if (rawStatus.includes('FINAL') || rawStatus.includes('CHAIR')) {
-                          return <span className="tag-concordant"><ShieldCheck size={12} /> Finalized</span>;
-                        }
-                        return <span className="tag-closed">{rawStatus || 'Pending'}</span>;
-                      };
+      {errorMsg && (
+        <div className="a-notice" style={{ borderLeftColor: '#b91c1c', background: '#fef2f2', marginBottom: '10px' }}>
+          <AlertTriangle size={14} /><span style={{ color: '#991b1b' }}>{errorMsg}</span>
+        </div>
+      )}
 
-                      const renderRev = (rev, isC = false) => {
-                        if (!rev) return <span className="cell-pending">{isC ? '—' : 'Pending'}</span>;
-                        const diag = typeof rev === 'string' ? rev : rev.diagnosis || '—';
-                        const cert = typeof rev === 'object' ? rev.certainty : null;
-                        const certLower = String(cert || '').toLowerCase();
-                        const certCls = certLower.includes('definite') ? 'definite' : certLower.includes('probable') ? 'probable' : certLower.includes('possible') ? 'possible' : '';
-                        return (
-                          <div className="rev-cell">
-                            <div className={`diag-title ${isC ? 'rev-c-diag' : ''}`}>{diag}</div>
-                            {cert && <span className={`certainty-pill ${certCls}`}>{cert}</span>}
-                            {typeof rev === 'object' && (
-                              <div className="inline-evidence-details" style={{ marginTop: '5px', fontSize: '10px', color: '#475569', lineHeight: 1.35 }}>
-                                <div className="inline-evidence-details"><strong>Criteria:</strong> {rev.meets_criteria === true ? 'Yes' : rev.meets_criteria === false ? 'No' : 'Not recorded'}</div>
-                                <div><strong>Onset:</strong> {rev.onset_class || 'Not recorded'}</div>
-                                <div><strong>Severity:</strong> {rev.severity || 'Not recorded'}</div>
-                                <div><strong>Diagnosis date:</strong> {rev.date_of_diagnosis ? new Date(rev.date_of_diagnosis).toLocaleString() : 'Not recorded'}</div>
-                                {rev.differential_diagnosis && <div><strong>Differential:</strong> {rev.differential_diagnosis}</div>}
-                                {rev.rationale && <div title={rev.rationale}><strong>Rationale:</strong> {rev.rationale}</div>}
-                              </div>
+      {/* ── TAB 1: Concordance tracker ── */}
+      {activeTab === 'concordance' && (
+        <div className="a-table-wrap">
+          <table className="a-table">
+            <caption>Completed Adjudications Roster — {Object.keys(groupedAdjudications).length} subject{Object.keys(groupedAdjudications).length !== 1 ? 's' : ''}</caption>
+            <thead>
+              <tr>
+                <th>Subject ID</th>
+                <th>Visit</th>
+                <th>Site / Study</th>
+                <th>Reviewer A</th>
+                <th>Reviewer B</th>
+                <th>Reviewer C</th>
+                <th>Concordance</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(groupedAdjudications).length === 0 ? (
+                <tr><td colSpan="8" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>No adjudication records yet.</td></tr>
+              ) : (
+                Object.entries(groupedAdjudications).map(([subjectId, items]) =>
+                  items.map((adj, adjIndex) => {
+                    const rawStatus = String(adj.concordance || adj.status || '').toUpperCase();
+                    const renderRev = (reviewer, isC = false) => reviewer ? (
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '9px' }}>{reviewer.diagnosis || 'Pending'}</div>
+                        {reviewer.onset_class && <div style={{ fontSize: '8px', color: '#64748b' }}>{reviewer.onset_class}</div>}
+                        {isC && <span className="a-badge warn" style={{ fontSize: '7px' }}>Reviewer C</span>}
+                      </div>
+                    ) : <span style={{ color: '#94a3b8', fontSize: '9px' }}>—</span>;
+                    const renderBadge = () => {
+                      if (rawStatus.includes('CONCORDANT')) return <span className="a-badge ok">Concordant</span>;
+                      if (rawStatus.includes('THREE_WAY') || rawStatus.includes('DIVERGENT')) return <span className="a-badge" style={{ background: '#fef3c7', color: '#92400e' }}>3-Way Divergent</span>;
+                      if (rawStatus.includes('DISCORDANT')) return <span className="a-badge bad">Discordant</span>;
+                      if (rawStatus.includes('CLOSED')) return <span className="a-badge" style={{ background: '#e2e8f0', color: '#334155' }}>Closed</span>;
+                      return <span className="a-badge">{adj.concordance || 'Pending'}</span>;
+                    };
+                    return (
+                      <tr key={`${subjectId}-${adjIndex}`}>
+                        <td><strong>{adjIndex === 0 ? subjectId : ''}</strong></td>
+                        <td>Visit {adj.visit_number || '—'}</td>
+                        <td><span style={{ fontSize: '9px' }}>{adj.site_code || 'HARARE_01'}<br/><span style={{ color: '#64748b' }}>{adj.study_code || 'PROTECT-Africa'}</span></span></td>
+                        <td>{renderRev(adj.reviewer_a)}</td>
+                        <td>{renderRev(adj.reviewer_b)}</td>
+                        <td>{renderRev(adj.reviewer_c, true)}</td>
+                        <td>{renderBadge()}</td>
+                        <td>
+                          <div className="a-actions">
+                            <button onClick={() => setInspectionItem(adj)}>Inspect</button>
+                            {!readOnly && (rawStatus.includes('DISCORDANT') || rawStatus.includes('DIVERGENT') || rawStatus.includes('REVIEWER_C')) && (
+                              <button onClick={() => openFinalizeCase(adj)} style={{ color: '#b45309' }}>Finalize</button>
                             )}
                           </div>
-                        );
-                      };
+                        </td>
+                      </tr>
+                    );
+                  })
+                )
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-                      return (
-                        <React.Fragment key={adj.id}>
-                        {isNewPatient && <tr className="next-patient-divider"><td colSpan="9"><span className="next-patient-kicker">Next patient</span><strong>{adj.subject_id}</strong><span>{adj.study_code || 'Study not recorded'}</span></td></tr>}
-                        <tr className="patient-visit-row">
-                          <td><span className="patient-label">Patient</span><span className="subj-id-cell">{adj.subject_id}</span></td>
-                          <td><strong>{adj.visit_code || `Visit ${adj.visit_number || 1}`}</strong></td>
-                          <td><span className="site-cell">{adj.site_code || 'HARARE_01'}</span></td>
-                          <td><span className={`study-badge ${isLope ? 'lope' : ''}`}>{adj.study_code || 'PROTECT-Africa'}</span></td>
-                          <td>{renderRev(adj.reviewer_a)}</td>
-                          <td>{renderRev(adj.reviewer_b)}</td>
-                          <td>{renderRev(adj.reviewer_c, true)}</td>
-                          <td>{renderBadge()}</td>
-                          <td>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                              <button className="chair-btn chair-btn-secondary inspect-btn" onClick={() => setInspectionItem(adj)}><Eye size={14} /> Inspect evidence</button>
-                              {(rawStatus.includes('DISCORDANT') || rawStatus.includes('DIVERGENT') || rawStatus.includes('REVIEWER_C')) && (
-                                <button className="chair-btn chair-btn-primary inspect-btn" onClick={() => openFinalizeCase(adj)}><CheckSquare size={14} /> Finalize case</button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                        </React.Fragment>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {inspectionItem && (
-          <EvidenceInspectorModal
-            item={inspectionItem}
-            allPatientVisits={groupedAdjudications[inspectionItem.subject_id] || []}
-            onClose={() => setInspectionItem(null)}
-            onSelectVisit={(v) => setInspectionItem(v)}
-          />
-        )}
-
-        {finalizeItem && (
-          <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(15, 23, 42, 0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-            <form onSubmit={handleFinalizeCase} className="chair-table-card" style={{ width: 'min(720px, 100%)', maxHeight: '90vh', overflowY: 'auto', padding: '24px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '16px', marginBottom: '18px' }}>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: '18px' }}>Finalize {finalizeItem.subject_id}</h2>
-                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Visit {finalizeItem.visit_number || 1} · {finalizeItem.concordance}</div>
-                </div>
-                <button type="button" className="chair-btn chair-btn-secondary" onClick={() => setFinalizeItem(null)} aria-label="Close finalization form"><X size={16} /></button>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div className="chair-form-group"><label>Final diagnosis</label><select className="chair-input" value={finalizeDraft.final_diagnosis} onChange={e => setFinalizeDraft({ ...finalizeDraft, final_diagnosis: e.target.value })}><option value="PE">PE</option><option value="Not PE">Not PE</option><option value="Severe PE">Severe PE</option><option value="Eclampsia">Eclampsia</option><option value="HELLP">HELLP</option></select></div>
-                <div className="chair-form-group"><label>Adopted onset</label><select className="chair-input" value={finalizeDraft.final_onset_class} onChange={e => setFinalizeDraft({ ...finalizeDraft, final_onset_class: e.target.value })}><option value="EOPE">EOPE</option><option value="LOPE">LOPE</option><option value="POSTPARTUM">POSTPARTUM</option><option value="UNCLASSIFIABLE">UNCLASSIFIABLE</option></select></div>
-                <div className="chair-form-group"><label>Final severity</label><select className="chair-input" value={finalizeDraft.final_severity} onChange={e => setFinalizeDraft({ ...finalizeDraft, final_severity: e.target.value })}><option value="With severe features">With severe features</option><option value="Without severe features">Without severe features</option><option value="Eclampsia / SAE">Eclampsia / SAE</option></select></div>
-                <div className="chair-form-group"><label>Final certainty</label><select className="chair-input" value={finalizeDraft.final_certainty} onChange={e => setFinalizeDraft({ ...finalizeDraft, final_certainty: e.target.value })}><option value="Definite">Definite</option><option value="Probable">Probable</option><option value="Possible">Possible</option><option value="Not PE">Not PE</option></select></div>
-              </div>
-              <div className="chair-form-group"><label>Meeting title</label><input className="chair-input" value={finalizeDraft.meeting_title} onChange={e => setFinalizeDraft({ ...finalizeDraft, meeting_title: e.target.value })} required /></div>
-              <div className="chair-form-group"><label>Attendees</label><input className="chair-input" value={finalizeDraft.attendees} onChange={e => setFinalizeDraft({ ...finalizeDraft, attendees: e.target.value })} required /></div>
-              <div className="chair-form-group"><label>Minutes</label><textarea className="chair-textarea" rows="4" value={finalizeDraft.minutes} onChange={e => setFinalizeDraft({ ...finalizeDraft, minutes: e.target.value })} placeholder="Record the case discussion and meeting outcome." minLength="10" required /></div>
-              <div className="chair-form-group"><label>Chair rationale</label><textarea className="chair-textarea" rows="4" value={finalizeDraft.chair_rationale} onChange={e => setFinalizeDraft({ ...finalizeDraft, chair_rationale: e.target.value })} placeholder="Explain why this final determination was adopted." minLength="5" required /></div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px' }}><button type="button" className="chair-btn chair-btn-secondary" onClick={() => setFinalizeItem(null)}>Cancel</button><button type="submit" className="chair-btn chair-btn-primary" disabled={isFinalizing}><ShieldCheck size={14} /> {isFinalizing ? 'Finalizing...' : 'Finalize and lock case'}</button></div>
-            </form>
-          </div>
-        )}
-
-        {/* TAB 2: Meeting Agenda Pack Generator */}
-        {activeTab === 'agenda' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <div className="chair-table-card" style={{ padding: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: '16px' }}>Meeting Agenda Pack — {batchId}</h2>
-                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                    Pack ID: <code>{agendaPack?.pack_id || 'PENDING'}</code> &nbsp;·&nbsp; Concordance Rate: <strong>{agendaPack?.concordance_rate_pct || 0}%</strong>
+      {/* ── TAB 2: Agenda Pack ── */}
+      {activeTab === 'agenda' && (
+        <div className="a-panel">
+          {!agendaPack ? (
+            <div className="a-empty"><FileText size={32} color="#cbd5e1" /><p style={{ color: '#94a3b8' }}>No agenda pack available. Discordant cases will appear here once A/B submissions are recorded.</p></div>
+          ) : (
+            <>
+              <dl style={{ display: 'grid', gap: '6px', marginBottom: '12px' }}>
+                {[
+                  ['Batch', agendaPack.batch_id],
+                  ['Total Cases', agendaPack.total_cases],
+                  ['Discordant', agendaPack.discordant_count],
+                  ['Concordant', agendaPack.concordant_count],
+                  ['Three-Way Divergent', agendaPack.three_way_divergent_count],
+                ].map(([label, value]) => (
+                  <div key={label} className="a-panel" style={{ padding: '6px 10px', marginBottom: 0 }}>
+                    <dt style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase' }}>{label}</dt>
+                    <dd style={{ fontWeight: 700, marginLeft: 0 }}>{value ?? '—'}</dd>
+                  </div>
+                ))}
+              </dl>
+              {(agendaPack.items || []).map((item, i) => (
+                <div key={i} className="a-panel" style={{ marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <strong style={{ fontSize: '11px' }}>{item.subject_id} — Visit {item.visit_number}</strong>
+                    <span className={`a-badge ${item.concordance?.includes('DISCORDANT') ? 'bad' : item.concordance?.includes('THREE_WAY') ? 'warn' : 'ok'}`}>{item.concordance}</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '9.5px' }}>
+                    <div><strong>Reviewer A:</strong> {item.reviewer_a?.diagnosis || '—'}</div>
+                    <div><strong>Reviewer B:</strong> {item.reviewer_b?.diagnosis || '—'}</div>
                   </div>
                 </div>
-                <button className="chair-btn chair-btn-primary" onClick={() => window.print()}>
-                  <Download size={14} /> Print / Export Agenda Pack
-                </button>
-              </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
 
-              {/* Discordant Arbitration Items */}
-              <div style={{ marginBottom: '24px' }}>
-                <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#991b1b', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <AlertTriangle size={16} /> Item 1: Cases for Committee Arbitration ({agendaPack?.items_for_committee_arbitration?.length || 0})
-                </h3>
-                <table className="chair-table" style={{ border: '1px solid #fee2e2' }}>
-                  <thead>
-                    <tr style={{ background: '#fff5f5' }}>
-                      <th>Subject ID</th>
-                      <th>Visit</th>
-                      <th>Reviewer A (Primary)</th>
-                      <th>Reviewer B (Secondary)</th>
-                      <th>Reviewer C (if escalated)</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(agendaPack?.items_for_committee_arbitration || []).map(item => (
-                      <tr key={item.id}>
-                        <td><strong>{item.subject_id}</strong></td>
-                        <td>{item.visit_code || `Visit ${item.visit_number || 1}`}</td>
-                        <td>{item.reviewer_a?.diagnosis} ({item.reviewer_a?.certainty})</td>
-                        <td>{item.reviewer_b?.diagnosis} ({item.reviewer_b?.certainty})</td>
-                        <td>{item.reviewer_c?.diagnosis || '—'}</td>
-                        <td><span className="tag-discordant">{item.concordance}</span></td>
-                      </tr>
-                    ))}
-                    {(!agendaPack?.items_for_committee_arbitration || agendaPack.items_for_committee_arbitration.length === 0) && (
-                      <tr><td colSpan="6" style={{ textAlign: 'center', color: '#94a3b8' }}>No discordant cases pending.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Consent Calendar Items */}
+      {/* ── TAB 3: Record Minutes & Sign-Off ── */}
+      {activeTab === 'minutes' && (
+        <div className="a-panel">
+          {signSuccess && (
+            <div className="a-notice" style={{ borderLeftColor: '#15803d', background: '#f0fdf4', marginBottom: '12px' }}>
+              <CheckCircle size={14} color="#15803d" />
               <div>
-                <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#166534', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <CheckCircle size={16} /> Item 2: Consent Calendar ({agendaPack?.concordant_cases_consent_calendar?.length || 0})
-                </h3>
-                <table className="chair-table" style={{ border: '1px solid #dcfce7' }}>
-                  <thead>
-                    <tr style={{ background: '#f0fdf4' }}>
-                      <th>Subject ID</th>
-                      <th>Visit</th>
-                      <th>Consensus Outcome</th>
-                      <th>Certainty</th>
-                      <th>Concordance</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(agendaPack?.concordant_cases_consent_calendar || []).map(item => (
-                      <tr key={item.id}>
-                        <td><strong>{item.subject_id}</strong></td>
-                        <td>{item.visit_code || `Visit ${item.visit_number || 1}`}</td>
-                        <td>{item.reviewer_a?.diagnosis}</td>
-                        <td>{item.reviewer_a?.certainty}</td>
-                        <td><span className="tag-concordant">A = B Concordant</span></td>
-                      </tr>
-                    ))}
-                    {(!agendaPack?.concordant_cases_consent_calendar || agendaPack.concordant_cases_consent_calendar.length === 0) && (
-                      <tr><td colSpan="5" style={{ textAlign: 'center', color: '#94a3b8' }}>No concordant cases pending.</td></tr>
-                    )}
-                  </tbody>
-                </table>
+                <strong>Batch signed and closed successfully</strong>
+                <span>Batch: {signSuccess.batch_id} · Cases closed: {signSuccess.cases_closed} · Hash: {signSuccess.signature_hash?.slice(0, 16)}…</span>
               </div>
             </div>
-          </div>
-        )}
-
-        {/* TAB 3: Record Meeting Minutes & Sign-Off */}
-        {activeTab === 'minutes' && (
-          <div className="chair-table-card" style={{ padding: '24px' }}>
-            <h2 style={{ fontSize: '16px', marginBottom: '4px' }}>Formal Committee Meeting Minutes &amp; 21 CFR Part 11 Sign-Off</h2>
-            <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '20px' }}>
-              Record official minutes, verify attendee roster, and execute Chairperson electronic signature to close out the adjudication batch.
+          )}
+          {readOnly ? (
+            <div className="a-notice" style={{ marginBottom: 0 }}>
+              <ShieldCheck size={14} />
+              <span>Sign-off is restricted to the Chairperson role. You are viewing this tab in read-only mode.</span>
             </div>
-
-            {signSuccess && (
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '16px', borderRadius: '6px', marginBottom: '20px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#166534', fontWeight: 700, fontSize: '14px' }}>
-                  <CheckCircle size={18} /> Meeting Formally Signed &amp; Closed
-                </div>
-                <div style={{ fontSize: '12px', color: '#166534', marginTop: '6px' }}>
-                  Meeting ID: <code>{signSuccess.meeting_id}</code> &nbsp;·&nbsp; Closed Cases: <strong>{signSuccess.closed_cases_count}</strong>
-                </div>
-                <div style={{ fontSize: '11px', color: '#4b5563', marginTop: '4px', wordBreak: 'break-all' }}>
-                  21 CFR Part 11 Digital Signature Hash: <code>{signSuccess.signature_hash}</code>
-                </div>
-              </div>
-            )}
-
-            <form onSubmit={handleSignOffMeeting}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div className="chair-form-group">
-                  <label>Meeting Title / Session Name</label>
-                  <input
-                    type="text"
-                    className="chair-input"
-                    value={meetingTitle}
-                    onChange={(e) => setMeetingTitle(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="chair-form-group">
-                  <label>Adjudication Batch Reference</label>
-                  <input
-                    type="text"
-                    className="chair-input"
-                    value={batchId}
-                    onChange={(e) => setBatchId(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="chair-form-group">
-                <label>Committee Attendees (comma-separated UPNs / Names)</label>
-                <input
-                  type="text"
-                  className="chair-input"
-                  value={attendees}
-                  onChange={(e) => setAttendees(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="chair-form-group" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <input
-                  type="checkbox"
-                  id="quorumCheck"
-                  checked={quorumMet}
-                  onChange={(e) => setQuorumMet(e.target.checked)}
-                />
-                <label htmlFor="quorumCheck" style={{ margin: 0, cursor: 'pointer' }}>
-                  <strong>Quorum Verified:</strong> At least 3 qualified voting committee members present throughout session
+          ) : (
+            <form onSubmit={handleSignOffMeeting} style={{ display: 'grid', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <label style={{ display: 'grid', gap: '4px', fontSize: '9.5px' }}>
+                  Meeting Title / Session Name
+                  <input className="a-toolbar" style={{ height: '30px', padding: '0 8px' }} type="text" value={meetingTitle} onChange={e => setMeetingTitle(e.target.value)} required />
+                </label>
+                <label style={{ display: 'grid', gap: '4px', fontSize: '9.5px' }}>
+                  Adjudication Batch Reference
+                  <input className="a-toolbar" style={{ height: '30px', padding: '0 8px' }} type="text" value={batchId} onChange={e => setBatchId(e.target.value)} />
                 </label>
               </div>
-
-              <div className="chair-form-group">
-                <label>Official Meeting Minutes &amp; Deliberation Summary</label>
-                <textarea
-                  rows="6"
-                  className="chair-textarea"
-                  value={minutesText}
-                  onChange={(e) => setMinutesText(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="chair-form-group">
-                <label>Select Cases Finalized &amp; Closed in this Session ({selectedCaseIds.length} selected):</label>
-                <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '10px', background: '#f8fafc' }}>
+              <label style={{ display: 'grid', gap: '4px', fontSize: '9.5px' }}>
+                Committee Attendees (comma-separated UPNs)
+                <input className="a-toolbar" style={{ height: '30px', padding: '0 8px' }} type="text" value={attendees} onChange={e => setAttendees(e.target.value)} required />
+              </label>
+              <label style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '9.5px', cursor: 'pointer' }}>
+                <input type="checkbox" checked={quorumMet} onChange={e => setQuorumMet(e.target.checked)} />
+                <strong>Quorum Verified:</strong> At least 3 qualified voting committee members present throughout session
+              </label>
+              <label style={{ display: 'grid', gap: '4px', fontSize: '9.5px' }}>
+                Official Meeting Minutes &amp; Deliberation Summary
+                <textarea className="a-toolbar" style={{ height: '120px', padding: '8px', resize: 'vertical', fontFamily: 'inherit' }} rows="6" value={minutesText} onChange={e => setMinutesText(e.target.value)} required />
+              </label>
+              <div style={{ fontSize: '9.5px' }}>
+                <strong>Select Cases Finalized &amp; Closed in this Session ({selectedCaseIds.length} selected):</strong>
+                <div style={{ maxHeight: '160px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '4px', padding: '8px', background: '#f8fafc', marginTop: '4px' }}>
                   {meetingCases.map(adj => (
-                    <label key={adj.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', cursor: 'pointer', fontSize: '12.5px' }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedCaseIds.includes(adj.subject_id)}
-                        onChange={() => handleToggleCaseSelection(adj.subject_id)}
-                      />
+                    <label key={adj.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 0', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={selectedCaseIds.includes(adj.subject_id)} onChange={() => handleToggleCaseSelection(adj.subject_id)} />
                       <span><strong>{adj.subject_id}</strong> ({adj.study_code}) — {adj.concordance}</span>
                     </label>
                   ))}
                 </div>
               </div>
-
-              <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '16px', borderRadius: '6px', marginBottom: '20px' }}>
-                <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '4px' }}>
-                  21 CFR Part 11 Electronic Signature Attestation
-                </div>
-                <div style={{ fontSize: '12px', color: '#64748b', lineHeight: '1.5' }}>
-                  By clicking <strong>"Sign &amp; Close Adjudication Batch"</strong>, I certify that I am the Chairperson of the Clinical Endpoint Adjudication Committee, that these minutes accurately reflect committee deliberations, and that all finalized cases are closed in compliance with ICH E6(R2) and the study protocol.
-                </div>
+              <div className="a-notice" style={{ borderLeftColor: '#1d4ed8', background: '#eff6ff' }}>
+                <Lock size={13} />
+                <span style={{ fontSize: '9.5px' }}>By clicking <strong>"Sign &amp; Close Adjudication Batch"</strong>, you certify as Chairperson that these minutes accurately reflect committee deliberations and all finalised cases are closed in compliance with ICH E6(R2) and the study protocol.</span>
               </div>
-
-              <button
-                type="submit"
-                className="chair-btn chair-btn-primary"
-                style={{ width: '100%', padding: '12px', justifyContent: 'center', fontSize: '14px' }}
-                disabled={isSigning}
-              >
-                <Lock size={16} /> {isSigning ? 'Computing Cryptographic Sign-Off...' : 'Sign & Close Adjudication Batch'}
+              <button type="submit" className="a-primary" style={{ width: '100%', justifyContent: 'center', padding: '10px', fontSize: '12px' }} disabled={isSigning}>
+                <Lock size={15} /> {isSigning ? 'Computing Cryptographic Sign-Off…' : 'Sign & Close Adjudication Batch'}
               </button>
             </form>
-          </div>
-        )}
+          )}
+        </div>
+      )}
 
-        {/* TAB 4: Meeting Archive */}
-        {activeTab === 'archive' && (
-          <div className="chair-table-card" style={{ padding: '20px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '20px' }}>
-              <div>
-                <div className="chair-table-header" style={{ marginBottom: '12px' }}>
-                  <h2>Committee Meeting Scheduling</h2>
-                </div>
-                <form onSubmit={createMeeting} style={{ display: 'grid', gap: '12px' }}>
-                  <div className="chair-form-group">
-                    <label>Meeting Title</label>
-                    <input className="chair-input" value={newMeetingTitle} onChange={(e) => setNewMeetingTitle(e.target.value)} required />
+      {/* ── TAB 4: Meeting Archive ── */}
+      {activeTab === 'archive' && (
+        <>
+          <div className="a-grid2">
+            <div className="a-panel">
+              <h2>Schedule New Meeting</h2>
+              {!readOnly ? (
+                <form onSubmit={createMeeting} style={{ display: 'grid', gap: '10px' }}>
+                  <label style={{ display: 'grid', gap: '3px', fontSize: '9.5px' }}>
+                    Meeting Title
+                    <input className="a-toolbar" style={{ height: '30px', padding: '0 8px' }} value={newMeetingTitle} onChange={e => setNewMeetingTitle(e.target.value)} required />
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <label style={{ display: 'grid', gap: '3px', fontSize: '9.5px' }}>
+                      Scheduled Date &amp; Time
+                      <input className="a-toolbar" style={{ height: '30px', padding: '0 8px' }} type="datetime-local" value={newMeetingDateTime} onChange={e => setNewMeetingDateTime(e.target.value)} required />
+                    </label>
+                    <label style={{ display: 'grid', gap: '3px', fontSize: '9.5px' }}>
+                      Batch
+                      <input className="a-toolbar" style={{ height: '30px', padding: '0 8px' }} value={newMeetingBatchId} onChange={e => setNewMeetingBatchId(e.target.value)} />
+                    </label>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                    <div className="chair-form-group">
-                      <label>Scheduled Date &amp; Time</label>
-                      <input className="chair-input" type="datetime-local" value={newMeetingDateTime} onChange={(e) => setNewMeetingDateTime(e.target.value)} required />
-                    </div>
-                    <div className="chair-form-group">
-                      <label>Batch</label>
-                      <input className="chair-input" value={newMeetingBatchId} onChange={(e) => setNewMeetingBatchId(e.target.value)} />
-                    </div>
-                  </div>
-                  <div className="chair-form-group">
-                    <label>Attendees</label>
-                    <input className="chair-input" value={newMeetingAttendees} onChange={(e) => setNewMeetingAttendees(e.target.value)} />
-                  </div>
-                  <div className="chair-form-group">
-                    <label>Agenda / Meeting Notes</label>
-                    <textarea className="chair-textarea" rows="4" value={newMeetingAgenda} onChange={(e) => setNewMeetingAgenda(e.target.value)} />
-                  </div>
-                  <button type="submit" className="chair-btn chair-btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
-                    <Calendar size={14} /> Save Meeting
+                  <label style={{ display: 'grid', gap: '3px', fontSize: '9.5px' }}>
+                    Attendees
+                    <input className="a-toolbar" style={{ height: '30px', padding: '0 8px' }} value={newMeetingAttendees} onChange={e => setNewMeetingAttendees(e.target.value)} />
+                  </label>
+                  <label style={{ display: 'grid', gap: '3px', fontSize: '9.5px' }}>
+                    Agenda / Meeting Notes
+                    <textarea className="a-toolbar" style={{ height: '80px', padding: '8px', resize: 'vertical', fontFamily: 'inherit' }} rows="4" value={newMeetingAgenda} onChange={e => setNewMeetingAgenda(e.target.value)} />
+                  </label>
+                  <button type="submit" className="a-primary" style={{ width: '100%', justifyContent: 'center' }}>
+                    <Calendar size={13} /> Save Meeting
                   </button>
                 </form>
-              </div>
-
-              <div>
-                <div className="chair-table-header" style={{ marginBottom: '12px' }}>
-                  <h2>Scheduled Meetings</h2>
+              ) : (
+                <div className="a-notice" style={{ marginTop: '8px' }}>
+                  <ShieldCheck size={13} />
+                  <span>Meeting scheduling is restricted to the Chairperson role.</span>
                 </div>
-                <div style={{ display: 'grid', gap: '10px' }}>
-                  {meetings.length === 0 ? (
-                    <div style={{ padding: '20px', background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '8px', color: '#64748b' }}>No meetings scheduled yet.</div>
-                  ) : (
-                    meetings.map(m => (
-                      <div key={m.id} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start' }}>
-                          <div>
-                            <div style={{ fontWeight: 700 }}>{m.title}</div>
-                            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-                              {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : 'No date'} · {m.status}
-                            </div>
+              )}
+            </div>
+
+            <div className="a-panel">
+              <h2>Upcoming Meetings</h2>
+              {meetings.length === 0 ? (
+                <div className="a-empty"><Calendar size={28} color="#cbd5e1" /><p style={{ color: '#94a3b8' }}>No meetings scheduled yet.</p></div>
+              ) : (
+                <div style={{ display: 'grid', gap: '8px' }}>
+                  {meetings.map(m => (
+                    <div key={m.id} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', padding: '10px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: '10px' }}>{m.title}</div>
+                          <div style={{ fontSize: '9px', color: '#64748b', marginTop: '2px' }}>
+                            {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : 'No date'} · {m.status}
                           </div>
-                          {m.status !== 'CANCELLED' && (
-                            <button onClick={() => cancelMeeting(m.id)} className="chair-btn chair-btn-secondary" style={{ fontSize: '11px', padding: '6px 10px' }}>
-                              <X size={12} /> Cancel
-                            </button>
-                          )}
                         </div>
-                        <div style={{ fontSize: '11px', color: '#475569', marginTop: '8px' }}>
-                          Batch: {m.batch_id || '—'} · Cases: {m.case_count || 0}
-                        </div>
+                        {!readOnly && m.status !== 'CANCELLED' && (
+                          <button onClick={() => cancelMeeting(m.id)} className="a-secondary" style={{ padding: '4px 8px', fontSize: '9px', cursor: 'pointer', display: 'flex', gap: '4px', alignItems: 'center' }}>
+                            <X size={11} /> Cancel
+                          </button>
+                        )}
                       </div>
-                    ))
-                  )}
+                      <div style={{ fontSize: '9px', color: '#475569', marginTop: '6px' }}>Batch: {m.batch_id || '—'} · Cases: {m.case_count || 0}</div>
+                    </div>
+                  ))}
                 </div>
-              </div>
+              )}
             </div>
+          </div>
 
-            <div className="chair-table-header" style={{ marginTop: '24px' }}>
-              <h2>Archived Committee Meetings &amp; Signed Minutes</h2>
-            </div>
-            <table className="chair-table" style={{ marginTop: '12px' }}>
+          <h2 style={{ margin: '18px 0 8px', fontSize: '11px', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Archived Committee Meetings &amp; Signed Minutes</h2>
+          <div className="a-table-wrap">
+            <table className="a-table">
+              <caption>Signed session archive</caption>
               <thead>
                 <tr>
-                  <th>Session Title</th>
-                  <th>Batch</th>
-                  <th>Chairperson</th>
-                  <th>Signed Date</th>
-                  <th>Cases Closed</th>
-                  <th>Part 11 Hash</th>
-                  <th>Status</th>
+                  <th>Session Title</th><th>Batch</th><th>Chairperson</th>
+                  <th>Signed Date</th><th>Cases Closed</th><th>Part 11 Hash</th><th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {meetings.length === 0 ? (
-                  <tr>
-                    <td colSpan="7" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>
-                      No signed meeting records archived yet.
-                    </td>
+                  <tr><td colSpan="7" style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>No signed meeting records archived yet.</td></tr>
+                ) : meetings.map(m => (
+                  <tr key={m.id}>
+                    <td><strong>{m.title}</strong></td>
+                    <td><code>{m.batch_id || '—'}</code></td>
+                    <td>{m.chair_name} ({m.chair_upn})</td>
+                    <td>{m.signed_at ? new Date(m.signed_at).toLocaleString() : '—'}</td>
+                    <td><span className="a-badge ok">{m.case_count} cases</span></td>
+                    <td><code style={{ fontSize: '9px' }}>{m.signature_hash?.slice(0, 16)}…</code></td>
+                    <td><span className="a-badge">{m.status}</span></td>
                   </tr>
-                ) : (
-                  meetings.map(m => (
-                    <tr key={m.id}>
-                      <td><strong>{m.title}</strong></td>
-                      <td><code>{m.batch_id || '—'}</code></td>
-                      <td>{m.chair_name} ({m.chair_upn})</td>
-                      <td>{m.signed_at ? new Date(m.signed_at).toLocaleString() : '—'}</td>
-                      <td><span className="tag-concordant">{m.case_count} cases</span></td>
-                      <td><code style={{ fontSize: '11px' }}>{m.signature_hash?.slice(0, 16)}...</code></td>
-                      <td><span className="tag-closed">{m.status}</span></td>
-                    </tr>
-                  ))
-                )}
+                ))}
               </tbody>
             </table>
           </div>
-        )}
-      </main>
+        </>
+      )}
+    </>
+  );
+
+  // ── Finalize Case Modal (inline panel overlay) ──────────────────
+  const finalizeModal = finalizeItem && (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }}>
+      <div style={{ background: '#fff', borderRadius: '4px', width: '100%', maxWidth: '680px', boxShadow: '0 10px 30px rgba(0,0,0,0.25)', border: '1px solid #d8dee7', overflow: 'hidden', fontFamily: 'Poppins,Arial,sans-serif' }}>
+        <div style={{ background: '#162035', color: '#fff', padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', fontWeight: 700 }}>
+          <span>Finalize Case — {finalizeItem.subject_id}</span>
+          <button style={{ background: 'none', border: 0, color: '#cbd5e1', cursor: 'pointer', display: 'flex' }} onClick={() => setFinalizeItem(null)} aria-label="Close"><X size={16} /></button>
+        </div>
+        <form onSubmit={handleFinalizeCase} style={{ padding: '16px', display: 'grid', gap: '12px', maxHeight: '70vh', overflowY: 'auto' }}>
+          {[
+            { label: 'Meeting Title', field: 'meeting_title', type: 'text' },
+            { label: 'Chair Rationale', field: 'chair_rationale', type: 'text' },
+            { label: 'Final Diagnosis', field: 'final_diagnosis', type: 'select', options: ['PE', 'GH', 'cPE', 'Eclampsia', 'HELLP', 'Normal', 'Other'] },
+            { label: 'Onset Class', field: 'final_onset_class', type: 'select', options: ['EOPE', 'LOPE', 'Not Applicable'] },
+            { label: 'Severity', field: 'final_severity', type: 'select', options: ['With severe features', 'Without severe features', 'Not Applicable'] },
+            { label: 'Certainty', field: 'final_certainty', type: 'select', options: ['Definite', 'Probable', 'Possible', 'Unlikely'] }
+          ].map(({ label, field, type, options }) => (
+            <label key={field} style={{ display: 'grid', gap: '3px', fontSize: '9.5px' }}>
+              {label}
+              {type === 'select' ? (
+                <select className="a-toolbar" style={{ height: '30px', padding: '0 8px' }} value={finalizeDraft[field] || ''} onChange={e => setFinalizeDraft(p => ({ ...p, [field]: e.target.value }))} required>
+                  <option value="" disabled>Select {label}</option>
+                  {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              ) : (
+                <input className="a-toolbar" style={{ height: '30px', padding: '0 8px' }} type={type} value={finalizeDraft[field] || ''} onChange={e => setFinalizeDraft(p => ({ ...p, [field]: e.target.value }))} required={['meeting_title','chair_rationale'].includes(field)} />
+              )}
+            </label>
+          ))}
+          <label style={{ display: 'grid', gap: '3px', fontSize: '9.5px' }}>
+            Official Minutes
+            <textarea className="a-toolbar" style={{ height: '90px', padding: '8px', resize: 'vertical', fontFamily: 'inherit' }} rows="4" value={finalizeDraft.minutes || ''} onChange={e => setFinalizeDraft(p => ({ ...p, minutes: e.target.value }))} required />
+          </label>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', paddingTop: '4px' }}>
+            <button type="button" style={{ border: '1px solid #cbd5e1', background: '#fff', padding: '6px 12px', fontSize: '9.5px', cursor: 'pointer' }} onClick={() => setFinalizeItem(null)}>Cancel</button>
+            <button type="submit" className="a-primary" disabled={isFinalizing}>
+              <CheckSquare size={13} /> {isFinalizing ? 'Finalizing…' : 'Confirm & Finalize'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+
+  if (isEmbedded) return <>{content}{finalizeModal}{inspectionItem && <EvidenceInspectorModal item={inspectionItem} onClose={() => setInspectionItem(null)} />}</>;
+
+  return (
+    <div className="admin-app">
+      {finalizeModal}
+      {inspectionItem && <EvidenceInspectorModal item={inspectionItem} onClose={() => setInspectionItem(null)} />}
+
+      {/* ── Header ── */}
+      <header className="a-header">
+        <div className="a-brand">
+          <span><img src="/acrn-logo.png" alt="Africa Clinical Research Network" /></span>
+          <div>
+            <strong>ACRN Adjudication Platform</strong>
+            <small>Chairperson Consensus Portal</small>
+          </div>
+        </div>
+        <div className="a-boundary">
+          <Scale size={13} /> Committee Chairperson Role
+        </div>
+        <div className="a-user">
+          <div>
+            <strong>{user?.name || user?.display_name || 'Chairperson'}</strong>
+            <small>{user?.email || user?.role}</small>
+          </div>
+          <button onClick={onLogout} aria-label="Sign out"><LogOut size={16} /></button>
+        </div>
+      </header>
+
+      {/* ── Body ── */}
+      <div className="a-body">
+        {/* Sidebar nav */}
+        <aside className={`a-nav ${navCollapsed ? 'collapsed' : ''}`}>
+          <section>
+            <h2>CHAIRPERSON</h2>
+            {NAV_ITEMS.map(item => (
+              <button
+                key={item.key}
+                className={activeTab === item.key ? 'active' : ''}
+                onClick={() => handleTabChange(item.key)}
+                style={{ padding: '8px 12px', marginBottom: '6px', fontSize: '10px' }}
+              >
+                {item.icon}<span>{item.label}</span>
+              </button>
+            ))}
+          </section>
+          <button className="a-collapse" onClick={() => setNavCollapsed(!navCollapsed)} style={{ marginTop: 'auto' }}>
+            {navCollapsed ? <ChevronRight size={13} /> : <><ChevronRight size={13} style={{ transform: 'rotate(180deg)' }} /> <span>Collapse</span></>}
+          </button>
+          <div className="a-env">
+            <Lock size={13} />
+            <span>CHAIRPERSON<br /><small>21 CFR Part 11</small></span>
+          </div>
+        </aside>
+
+        {/* Main content */}
+        <main className="a-main">
+          <div className="a-crumb">
+            <span>Chairperson</span>
+            <ChevronRight size={12} />
+            <span>{NAV_ITEMS.find(n => n.key === activeTab)?.label}</span>
+          </div>
+          {content}
+        </main>
+      </div>
     </div>
   );
 }
+

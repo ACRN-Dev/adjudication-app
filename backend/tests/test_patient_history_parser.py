@@ -1,5 +1,6 @@
 import pytest
 from services.history_parser import (
+    build_demographic_string,
     compute_risk_summary,
     finalize_history,
     history_domain,
@@ -142,3 +143,17 @@ def test_process_history_row_in_session_deduplication():
     
     db.close()
 
+def test_build_demographic_string_nulliparous():
+    # User Test 1
+    res = build_demographic_string(24, 1, 0, 0, "Nulliparous")
+    assert res == "A 24-year-old African woman, Primigravida (Nulliparous), presents for routine clinical trial screening with no known prior medical history or chronic conditions."
+
+def test_build_demographic_string_multimorbid():
+    # User Test 2
+    res = build_demographic_string(40, 4, 2, 1, "chronic hypertension and pre-gestational diabetes")
+    assert res == "A 40-year-old African woman, Gravida 4, Para 2 (one previous miscarriage), presents for clinical trial screening. Her medical history is significant for chronic hypertension and pre-gestational diabetes."
+
+def test_build_demographic_string_with_chips():
+    # Test chip filtering and normalization
+    res = build_demographic_string(40, 4, 2, 1, ["Pre-existing chronic HTN", "Pre-gestational diabetes", "Nulliparous"])
+    assert res == "A 40-year-old African woman, Gravida 4, Para 2 (one previous miscarriage), presents for clinical trial screening. Her medical history is significant for chronic hypertension and pre-gestational diabetes."

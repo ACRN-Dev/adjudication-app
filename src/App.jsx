@@ -9,6 +9,7 @@ import SopLibraryModal from './components/SopLibraryModal';
 import RecusalModal from './components/RecusalModal';
 import DataQueryModal from './components/DataQueryModal';
 import CommitteeDashboard from './components/CommitteeDashboard';
+import ErrorBoundary from './components/ErrorBoundary';
 import LoginPage from './components/LoginPage';
 import ForceChangePassword from './components/ForceChangePassword';
 import AdminPortal from './admin/AdminPortal';
@@ -140,8 +141,23 @@ export default function App() {
     if (nextCase) setActiveCaseId(nextCase.id);
   };
 
+  useEffect(() => {
+    const handleOpenQuery = () => setShowDataQueryModal(true);
+    window.addEventListener('open-data-query-modal', handleOpenQuery);
+    return () => window.removeEventListener('open-data-query-modal', handleOpenQuery);
+  }, []);
+
   const handleSubmitQuery = (queryData) => {
     setShowDataQueryModal(false);
+    
+    const savedQueries = JSON.parse(localStorage.getItem('data_queries') || '[]');
+    savedQueries.unshift({
+      ...queryData,
+      raisedBy: user?.name || user?.display_name || user?.email || 'Adjudicator',
+      status: 'Pending Monitor Review'
+    });
+    localStorage.setItem('data_queries', JSON.stringify(savedQueries));
+
     alert(`FORM-ADJ-09 Data Query Sent: Query for Participant ${queryData.caseId} submitted to Adjudication Coordinator for review and dispatch.`);
   };
 
@@ -159,31 +175,28 @@ export default function App() {
     );
   }
 
-      if (user?.roleCode === 'OWNER') {
-        return <OwnerPortal user={user} onLogout={handleLogout} />;
-      }
-      if (currentPath.startsWith('/owner')) {
-        return <OwnerPortal user={user} onLogout={handleLogout} />;
-      }
-      if (currentPath.startsWith('/admin')) {
-    const adminRoles = ['ADMIN', 'TECHNICAL_ADMIN', 'CLINICAL_OPS_ADMIN', 'QA_AUDITOR', 'GOVERNANCE_REVIEWER', 'ACCESS_REVIEWER'];
+  if (user?.portal === 'owner' || currentPath.startsWith('/owner')) {
+    return <OwnerPortal user={user} onLogout={handleLogout} />;
+  }
+  if (currentPath.startsWith('/admin')) {
+    const adminRoles = ['ADMIN', 'TECHNICAL_ADMIN', 'CLINICAL_OPS_ADMIN', 'QA_AUDITOR', 'GOVERNANCE_REVIEWER', 'ACCESS_REVIEWER', 'OWNER'];
     if (!adminRoles.includes(user?.roleCode)) {
       return <div role="alert" style={{ padding: 40, fontFamily: 'Poppins, sans-serif' }}><h1>Access denied</h1><p>Your current role is not permitted to access the Admin Portal.</p><button className="btn-primary" onClick={handleLogout}>Return to sign in</button></div>;
     }
-    return <AdminPortal user={user} onLogout={handleLogout} />;
+    return <AdminPortal user={user} onLogout={handleLogout} readOnly={user?.roleCode === 'OWNER'} />;
   }
   if (currentPath.startsWith('/monitor')) {
     const monitorRoles=['MONITOR','MEDICAL_OFFICER','MEDICAL_MONITOR','ADMIN','CHAIRPERSON','ADJUDICATION_COORDINATOR','MONITOR_QC_REVIEWER','QA_REVIEWER','RELEASE_OPERATOR','OWNER'];
     if(!monitorRoles.includes(user?.roleCode)) return <div role="alert" style={{padding:40}}><h1>Access denied</h1><p>Your role cannot access Monitor/QC operational case data.</p><button onClick={handleLogout}>Return to sign in</button></div>;
     return <MonitorPortal user={user} onLogout={handleLogout}/>;
   }
-  if (currentPath.startsWith('/chairperson') || user?.roleCode === 'CHAIRPERSON' || user?.portal === 'chairperson' || user?.roleCode === 'OWNER') {
+  if (currentPath.startsWith('/chairperson') || user?.roleCode === 'CHAIRPERSON' || user?.portal === 'chairperson') {
     return <ChairpersonPortal user={user} onLogout={handleLogout} />;
   }
 
   const isSigned = activeCase?.status?.includes('Finalized');
 
-  return (
+  return (<ErrorBoundary>
     <div className="app-container">
       {/* RealTime CTMS Header Bar */}
       <Header
@@ -211,44 +224,6 @@ export default function App() {
 
         {/* Main Viewport */}
         <main className="main-viewport">
-          {/* RealTime CTMS Horizontal Tab Strip */}
-          <div className="rt-tab-strip">
-            <button
-              className={`rt-tab-btn ${activeView === 'workbench' && currentStep === 1 ? 'active' : currentStep > 1 ? 'completed' : ''}`}
-              onClick={() => { setActiveView('workbench'); setCurrentStep(1); }}
-            >
-              <span className="rt-tab-badge">1</span>
-              Subject Queue
-            </button>
-
-            <button
-              className={`rt-tab-btn ${activeView === 'workbench' && currentStep === 2 ? 'active' : currentStep > 2 ? 'completed' : ''}`}
-              onClick={() => { setActiveView('workbench'); setCurrentStep(2); }}
-              disabled={!activeCase}
-            >
-              <span className="rt-tab-badge">2</span>
-              eSource &amp; Evidence
-            </button>
-
-            <button
-              className={`rt-tab-btn ${activeView === 'workbench' && currentStep === 3 ? 'active' : currentStep > 3 ? 'completed' : ''}`}
-              onClick={() => { setActiveView('workbench'); setCurrentStep(3); }}
-              disabled={!activeCase}
-            >
-              <span className="rt-tab-badge">3</span>
-              Approve &amp; Sign (FORM-ADJ-15)
-            </button>
-
-            <button
-              className={`rt-tab-btn ${activeView === 'workbench' && currentStep === 4 ? 'active completed' : ''}`}
-              onClick={() => { if (isSigned) { setActiveView('workbench'); setCurrentStep(4); } }}
-              disabled={!isSigned}
-            >
-              <span className="rt-tab-badge">4</span>
-              Locked eTMF Record
-            </button>
-
-          </div>
 
           <>
 
@@ -308,5 +283,6 @@ export default function App() {
         />
       )}
     </div>
+    </ErrorBoundary>
   );
 }

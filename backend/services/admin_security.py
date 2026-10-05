@@ -46,7 +46,11 @@ def get_identity(request: Request, acrn_demo_session: Optional[str] = Cookie(Non
         if session and session.expires_at > datetime.utcnow():
             user = db.get(PortalUser, session.user_id)
             if user and user.status == "ACTIVE":
-                if user.role not in ("ADMIN", "OWNER") or user.portal_role not in ADMIN_ROLES:
+                if user.role == "OWNER":
+                    # OWNER is always permitted in the admin portal with full permissions
+                    studies = tuple(filter(None, (user.study_scope or "*").split(",")))
+                    return Identity(user.email, "OWNER", studies, auth_source="SSO" if user.password_hash is None else "SESSION")
+                if user.role != "ADMIN" or (user.portal_role or "") not in ADMIN_ROLES:
                     raise HTTPException(403, "Admin Portal access denied for this role.")
                 studies = tuple(filter(None, (user.study_scope or "*").split(",")))
                 return Identity(user.email, user.portal_role, studies, auth_source="SSO" if user.password_hash is None else "SESSION")

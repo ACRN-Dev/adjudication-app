@@ -162,11 +162,28 @@ function AuditView() {
 }
 
 function MonitorIssuesView() {
-  const rows = [
-    ['Site 01', 'SUBJ-104-B', 'Missing Visit 2 Lab Result', 'High', 'Pending Monitor Review', '2 hours ago'],
-    ['Site 02', 'SUBJ-209-A', 'Protocol Deviation (Window Exceeded)', 'Medium', 'Pending Query Response', '1 day ago'],
-    ['Site 01', 'SUBJ-099-C', 'Missing Source Document', 'High', 'Pending Monitor Review', '2 days ago']
-  ];
+  const [rows, setRows] = useState([]);
+  
+  useEffect(() => {
+    const saved = JSON.parse(localStorage.getItem('data_queries') || '[]');
+    const queryRows = saved.map(q => [
+      'Blinded Site', 
+      q.caseId, 
+      q.queryCategory, 
+      'High', 
+      q.status, 
+      new Date(q.timestamp).toLocaleString()
+    ]);
+    
+    const defaultRows = [
+      ['Site 01', 'SUBJ-104-B', 'Missing Visit 2 Lab Result', 'High', 'Pending Monitor Review', '2 hours ago'],
+      ['Site 02', 'SUBJ-209-A', 'Protocol Deviation (Window Exceeded)', 'Medium', 'Pending Query Response', '1 day ago'],
+      ['Site 01', 'SUBJ-099-C', 'Missing Source Document', 'High', 'Pending Monitor Review', '2 days ago']
+    ];
+    
+    setRows([...queryRows, ...defaultRows]);
+  }, []);
+
   return (
     <Page title="Data Queries & Issues" desc="Live feed of data quality checks and source document queries.">
       <Toolbar />
@@ -236,13 +253,56 @@ export default function OwnerPortal({ user, onLogout }) {
   };
 
   const renderView = () => {
+    const ReadOnlyBanner = ({ portalName }) => (
+      <div style={{
+        background: 'linear-gradient(135deg, #1e3a5f 0%, #0f2444 100%)',
+        border: '1px solid #2d5986',
+        borderRadius: '8px',
+        padding: '10px 16px',
+        marginBottom: '16px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        fontSize: '13px',
+        color: '#93c5fd',
+      }}>
+        <Icon.Eye size={16} style={{ flexShrink: 0, color: '#60a5fa' }} />
+        <span>
+          <strong style={{ color: '#bfdbfe' }}>Observer Mode — {portalName}</strong>
+          {' '}You have read-only visibility into this portal. Actions that modify adjudication or clinical records are disabled for the Owner role here.
+        </span>
+      </div>
+    );
+
     if (path === '/' || path === '/owner') return <Dashboard stats={stats} />;
     if (path.startsWith('/admin')) return <AdminPortal user={user} onLogout={onLogout} isEmbedded={true} />;
-    if (path.startsWith('/monitor')) return <MonitorPortal user={user} onLogout={onLogout} isEmbedded={true} />;
-    if (path.startsWith('/chairperson')) return <ChairpersonPortal user={user} onLogout={onLogout} isEmbedded={true} />;
-    if (path.startsWith('/adjudicator')) return <DeterminationsView />;
+    if (path === '/monitor/issues') return (
+      <>
+        <ReadOnlyBanner portalName="Monitor / QC Portal" />
+        <MonitorIssuesView />
+      </>
+    );
+    if (path.startsWith('/monitor')) return (
+      <>
+        <ReadOnlyBanner portalName="Monitor / QC Portal" />
+        <MonitorPortal user={user} onLogout={onLogout} isEmbedded={true} readOnly={true} />
+      </>
+    );
+    if (path.startsWith('/chairperson')) return (
+      <>
+        <ReadOnlyBanner portalName="Chairperson Portal" />
+        <ChairpersonPortal user={user} onLogout={onLogout} isEmbedded={true} readOnly={true} />
+      </>
+    );
+    if (path.startsWith('/adjudicator')) return (
+      <>
+        <ReadOnlyBanner portalName="Adjudicator Workbench" />
+        <DeterminationsView />
+      </>
+    );
     return <Page title={TITLES[path] || 'Owner Portal'} desc="This section is currently in demonstration mode."><Notice kind="info" title="Global Stub">Standard views are unified under the Owner shell.</Notice></Page>;
   };
+
 
   return (
     <div className="admin-app">

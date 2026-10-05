@@ -78,7 +78,7 @@ body {
 }
 
 .rt-logo-card {
-  background: #ffffff;
+  background: transparent;
   border-radius: var(--radius-sm);
   padding: 3px 6px;
   display: flex;
