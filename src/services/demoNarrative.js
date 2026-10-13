@@ -17,7 +17,7 @@
  * Rule Version: FORM-ADJ-PROSE-v1.0
  */
 
-import templateConfig from '../../Prompts and workflow/narrative_template.json';
+import templateConfig from './narrative_template.json';
 
 export const NARRATIVE_VERSION = templateConfig.version;
 export const AI_ENGINE_MODEL  = templateConfig.engineModel;
