@@ -1,8 +1,8 @@
 """Synthetic RealTime-shaped privacy, mapping, reconstruction and temporal tests."""
-from services.realtime_mapping import classify,map_variable,parse_datetime,parse_numeric,parse_coded,visit_code
+from services.realtime_mapping import classify,map_variable,parse_datetime,parse_numeric,parse_coded,source_unit,visit_code
 from services.realtime_pipeline import pseudonym,_fernet
 from services.import_readiness import participant_import_readiness
-from api.realtime import _timeline_visit_number
+from api.realtime import _embedded_source_datetime, _resolved_visit_ga, _timeline_visit_number
 
 def row(label,page="Vital Signs / Weight Height",form="Visit 3",value="",field_type="numeric",export=""):
     return {"MRN":"TEST-MRN","Screening #":"ZWE999-0001","Randomization #":"R-TEST","Form Title":form,"Form Version":"1.0","Page Title":page,"Field type":field_type,"Field Label":label,"Data Input":value,"Data Value":value,"Audit Trails":"Synthetic User - 01/Jan/2026","Export Variable Name":export}
@@ -11,6 +11,18 @@ def test_composite_mapping_without_export_variable_name():
     assert map_variable(row("Systolic blood pressure"))=="bp_systolic"
     assert map_variable(row("Diastolic blood pressure recheck"))=="bp_diastolic_recheck"
     assert map_variable(row("Creatinine",page="Biochemistry Results"))=="creatinine"
+
+def test_sonography_context_maps_fields_from_form_and_field_labels():
+    assert map_variable(row("Presentation", page="Pregnancy Assessment", form="Obstetric Ultrasound")) == "fetal_presentation"
+    assert map_variable(row("Fetal heart rate", page="Pregnancy Assessment", form="Obstetric Ultrasound")) == "fetal_heart_rate"
+    assert map_variable(row("AFI", page="Pregnancy Assessment", form="Obstetric Ultrasound")) == "afi"
+
+def test_source_unit_is_preserved_once():
+    assert source_unit({"Unit of Measure": "mmHg"}) == "mmHg"
+    assert source_unit({"Data Value": "112 mmHg"}) is None
+
+def test_boolean_answers_are_not_mapped_as_medication_names():
+    assert parse_coded("Yes") == "YES"
 
 def test_rt_map_20_excludes_direct_identifiers():
     assert classify(row("Date of Birth", page="Demographics")) == "DIRECT_IDENTIFIER"
@@ -47,6 +59,53 @@ def test_scheduled_unscheduled_and_event_visits_remain_separate():
 def test_timeline_signature_status_uses_scheduled_visit_number():
     visit = type("Visit", (), {"scheduled_visit_code": "Visit 04"})()
     assert _timeline_visit_number(visit, 2) == 4
+
+
+def test_missing_visit_ga_is_derived_from_approved_edd_not_another_visit():
+    visit = type("Visit", (), {
+        "scheduled_visit_code": "V04",
+        "gestational_age_days": None,
+    })()
+    ga_days, provenance, discrepancy = _resolved_visit_ga(
+        visit,
+        parse_datetime("3/17/2026 09:45"),
+        parse_datetime("6/12/2026").date(),
+    )
+    assert ga_days == 193
+    assert (ga_days // 7, ga_days % 7) == (27, 4)
+    assert provenance == "DERIVED_FROM_APPROVED_EDD"
+    assert discrepancy is None
+
+
+def test_backward_source_ga_is_flagged_against_approved_edd():
+    visit = type("Visit", (), {
+        "scheduled_visit_code": "V04",
+        "gestational_age_days": 164,
+    })()
+    ga_days, provenance, discrepancy = _resolved_visit_ga(
+        visit,
+        parse_datetime("3/17/2026 09:45"),
+        parse_datetime("6/12/2026").date(),
+    )
+    assert ga_days == 164
+    assert provenance == "SOURCE_RECORDED"
+    assert discrepancy["type"] == "SOURCE_VS_DERIVED_GA"
+    assert discrepancy["derived_ga_days"] == 193
+
+
+def test_serialized_realtime_edd_is_parsed_for_dating():
+    parsed = _embedded_source_datetime('#1 - s:19:"6/12/2026 00:00:00 ";')
+    assert parsed.date().isoformat() == "2026-06-12"
+
+
+def test_eligibility_boolean_is_not_mapped_as_gestational_age():
+    eligibility = row(
+        "Gestational age between week 23+0 days and week 36+6 days established by USS at 22 weeks or sooner.",
+        page="Inclusion/Exclusion",
+        value="Yes",
+        field_type="yes_no",
+    )
+    assert map_variable(eligibility) is None
 
 def test_controlled_parsers_preserve_missing_semantics():
     assert parse_numeric("168 mmHg")==168

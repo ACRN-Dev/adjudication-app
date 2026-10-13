@@ -367,6 +367,12 @@ def list_completed_adjudications(
             else:
                 concordance = "PENDING_REVIEW"
 
+            signed_at_values = [
+                record.signed_at for record in (rec_a, rec_b, rec_c)
+                if record and record.signed_at
+            ]
+            latest_signed_at = max(signed_at_values) if signed_at_values else None
+
             if status_filter and status_filter.upper() != "ALL" and concordance != status_filter.upper():
                 continue
 
@@ -402,6 +408,7 @@ def list_completed_adjudications(
                 "participant_status": p.status.value if hasattr(p.status, "value") else str(p.status),
                 "visit_status": visit.status,
                 "resolution_type": visit.resolution_type,
+                "latest_signed_at": latest_signed_at.isoformat() if latest_signed_at else None,
                 "reviewer_a": reviewer_payload(rec_a),
                 "reviewer_b": reviewer_payload(rec_b),
                 "reviewer_c": reviewer_payload(rec_c, include_rationale=True),
@@ -418,15 +425,29 @@ def list_completed_adjudications(
                 } if adopted_record else None),
             })
 
+    latest_signature_by_subject = {}
+    for item in results:
+        latest_signature_by_subject[item["subject_id"]] = max(
+            latest_signature_by_subject.get(item["subject_id"], ""),
+            item["latest_signed_at"] or "",
+        )
+    results.sort(key=lambda item: item["visit_number"])
+    results.sort(
+        key=lambda item: latest_signature_by_subject[item["subject_id"]],
+        reverse=True,
+    )
+
     return {
         "items": results,
         "total": len(results),
         "summary": {
             "concordant": sum(1 for r in results if r["concordance"] in ["CONCORDANT_A_EQUALS_B", "CONCORDANT_ALL_THREE"]),
             "resolved_by_majority": sum(1 for r in results if r["concordance"] == "RESOLVED_BY_MAJORITY"),
-            "discordant": sum(1 for r in results if r["concordance"] in ["DISCORDANT_A_NEQ_B", "ESCALATED_TO_C", "THREE_WAY_DIVERGENT", "RESOLVED_BY_MAJORITY", "RESOLVED_BY_REVIEWER_C"]),
+            "discordant": sum(1 for r in results if r["concordance"] == "DISCORDANT_A_NEQ_B"),
+            "chair_actionable": sum(1 for r in results if r["concordance"] in ["DISCORDANT_A_NEQ_B", "ESCALATED_TO_C", "THREE_WAY_DIVERGENT"]),
             "three_way_divergent": sum(1 for r in results if r["concordance"] == "THREE_WAY_DIVERGENT"),
             "closed": sum(1 for r in results if r["concordance"] == "CLOSED"),
+            "awaiting_second_reviewer": sum(1 for r in results if r["concordance"] == "SINGLE_REVIEWER_COMPLETE"),
         }
     }
 
@@ -441,14 +462,30 @@ def generate_agenda_pack(batch_id: Optional[str] = "DEFAULT_BATCH", db: Session 
     items = completed_res["items"]
 
     discordant_items = [i for i in items if i["concordance"] in ["DISCORDANT_A_NEQ_B", "ESCALATED_TO_C", "THREE_WAY_DIVERGENT"]]
-    concordant_items = [i for i in items if i["concordance"] == "CONCORDANT_A_EQUALS_B"]
+    concordant_items = [i for i in items if i["concordance"] in ["CONCORDANT_A_EQUALS_B", "CONCORDANT_ALL_THREE"]]
+    paired_reviewer_items = [i for i in items if i["reviewer_a"] and i["reviewer_b"]]
+    cases_with_submissions = {item["subject_id"] for item in items if item["concordance"] != "PENDING_REVIEW"}
 
     agenda = {
         "pack_id": f"AGENDA-{datetime.utcnow().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}",
         "generated_at": datetime.utcnow().isoformat(),
         "batch_id": batch_id,
-        "total_cases": len(items),
-        "concordance_rate_pct": round((len(concordant_items) / len(items) * 100) if items else 100.0, 1),
+        "total_cases": len(cases_with_submissions),
+        "total_visits": len(items),
+        "discordant_count": len(discordant_items),
+        "concordant_count": len(concordant_items),
+        "awaiting_second_reviewer_count": sum(
+            1 for item in items if item["concordance"] == "SINGLE_REVIEWER_COMPLETE"
+        ),
+        "three_way_divergent_count": sum(
+            1 for item in items if item["concordance"] == "THREE_WAY_DIVERGENT"
+        ),
+        "concordance_rate_pct": round(
+            (len(concordant_items) / len(paired_reviewer_items) * 100)
+            if paired_reviewer_items else 0.0,
+            1,
+        ),
+        "items": discordant_items,
         "items_for_committee_arbitration": discordant_items,
         "concordant_cases_consent_calendar": concordant_items,
         "recommendation": f"Review and arbitrate {len(discordant_items)} discordant case(s). Formalize consent calendar for {len(concordant_items)} concordant case(s)."

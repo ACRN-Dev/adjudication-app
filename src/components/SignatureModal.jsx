@@ -18,21 +18,33 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
     }
     setIsSubmitting(true);
     setErrorMsg('');
-    const onset = submission?.onset?.includes('LOPE')
-      ? 'LOPE'
-      : submission?.onset?.includes('Postpartum')
-        ? 'POSTPARTUM'
-        : submission?.onset?.includes('not yet classifiable')
-          ? 'UNCLASSIFIABLE'
-          : 'EOPE';
+    const normalizeOnsetClass = (raw) => {
+      if (!raw) return 'UNCLASSIFIABLE';
+      const str = String(raw).toUpperCase();
+      if (str.includes('LOPE') || str.includes('LATE')) return 'LOPE';
+      if (str.includes('POST')) return 'POSTPARTUM';
+      if (str.includes('NOT YET') || str.includes('UNCLASSIFIABLE')) return 'UNCLASSIFIABLE';
+      return 'EOPE';
+    };
+    const onset = normalizeOnsetClass(submission?.onset);
     const diagnosis = submission?.diagnosis || 'PE';
+    const cleanPerVisitOnset = (submission?.per_visit_onset || []).map(o => ({
+      visit_number: Number(o.visit_number || 1),
+      meets_criteria: Boolean(o.meets_criteria),
+      diagnosis: o.meets_criteria ? (o.diagnosis || submission?.diagnosis || 'PE') : 'Not PE',
+      onset_class: o.meets_criteria ? normalizeOnsetClass(o.onset_class || submission?.onset) : 'UNCLASSIFIABLE',
+    }));
+
+    const rawSev = submission?.severity;
+    const cleanSeverity = rawSev === 'Eclampsia / severe SAE' ? 'Eclampsia / SAE' : (rawSev || 'Without severe features');
+
     fetch(`/api/adjudication/${encodeURIComponent(caseData.id)}/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({
         is_overall_first: submission?.is_overall_first || false,
-        per_visit_onset: submission?.per_visit_onset || [],
+        per_visit_onset: cleanPerVisitOnset,
         reviewer_role: submission?.reviewerRole || 'REVIEWER_A',
         reviewer_upn: user?.email,
         reviewer_name: submission?.reviewerName || user?.display_name || user?.email,
@@ -43,16 +55,16 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
         visit_date: submission?.visitDate,
         meets_criteria: submission?.meetsCriteria !== false,
         diagnosis,
-        date_of_diagnosis: submission?.dateOfDiagnosis,
+        date_of_diagnosis: submission?.dateOfDiagnosis || submission?.firstPeDate || (submission?.meetsCriteria !== false ? (submission?.visitDate || new Date().toISOString().slice(0, 10)) : null),
         onset_class: onset,
-        severity: submission?.severity === 'Eclampsia / severe SAE' ? 'Eclampsia / SAE' : submission?.severity,
+        severity: cleanSeverity,
         certainty: submission?.certainty || 'Probable',
         rationale: submission?.rationale || 'Adjudication completed after review of the available evidence.',
         comment: submission?.comment || null,
         differential_diagnosis: submission?.differentialDiagnosis || null,
         longitudinal_comment: submission?.longitudinalComment || null,
         first_pe_visit_number: submission?.firstPeVisitNumber || null,
-        first_pe_date: submission?.firstPeDate || null,
+        first_pe_date: submission?.firstPeDate || submission?.dateOfDiagnosis || null,
         other_rationale: submission?.otherRationale || null,
         fetal_neonatal_assessments: submission?.fetalNeonatalAssessments || [],
         gestational_age_at_delivery: submission?.gestationalAgeAtDelivery != null ? Number(submission.gestationalAgeAtDelivery) : null,
@@ -63,7 +75,12 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
     })
       .then(async response => {
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.detail || `Signature submission failed (${response.status})`);
+        if (!response.ok) {
+          const detailMsg = Array.isArray(data.detail)
+            ? data.detail.map(d => `${d.loc ? d.loc.filter(x => x !== 'body').join('.') + ': ' : ''}${d.msg}`).join('\n')
+            : (typeof data.detail === 'object' ? JSON.stringify(data.detail) : (data.detail || `Signature submission failed (${response.status})`));
+          throw new Error(detailMsg);
+        }
         onSignConfirm(data);
       })
       .catch(error => setErrorMsg(error.message))
@@ -93,7 +110,15 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
               <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--acrn-navy-base)' }}>
                 Case {caseData.caseNo} ({caseData.id})
               </div>
-              <div style={{ fontSize: '12px', color: 'var(--acrn-sky-blue)', marginTop: '4px', wordBreak: 'break-all' }}>
+              <div style={{ fontSize: '12.5px', marginTop: '6px', color: '#1e293b' }}>
+                Determination: <strong>{submission?.diagnosis || 'PE'}</strong> · Criteria Met: <strong>{submission?.meetsCriteria !== false ? 'Yes' : 'No'}</strong>
+                {submission?.meetsCriteria !== false && (
+                  <span style={{ display: 'block', marginTop: '4px', fontSize: '12px', color: '#0369a1' }}>
+                    Date of Diagnosis: <strong>{submission?.dateOfDiagnosis || submission?.firstPeDate || 'Today'}</strong> {submission?.firstPeVisitNumber ? `(Visit ${submission.firstPeVisitNumber})` : ''}
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--acrn-sky-blue)', marginTop: '6px', wordBreak: 'break-all' }}>
                 {caseHash}
               </div>
             </div>

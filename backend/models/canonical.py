@@ -89,12 +89,14 @@ class OnsetClass(str, enum.Enum):
     LOPE = "LOPE"   # >= 34+0 weeks
     POSTPARTUM = "POSTPARTUM"
     UNCLASSIFIABLE = "UNCLASSIFIABLE"
+    NOT_YET_CLASSIFIABLE = "UNCLASSIFIABLE"
 
 
 class SeverityGrade(str, enum.Enum):
     WITH_SEVERE = "With severe features"
     WITHOUT_SEVERE = "Without severe features"
     ECLAMPSIA_SAE = "Eclampsia / SAE"
+    REQUIRES_REVIEW = "Severity requires review"
 
 
 class CertaintyLevel(str, enum.Enum):
@@ -358,6 +360,15 @@ class Narrative(Base):
     """
     AI-generated clinical narrative with full version tracking.
     Human edits are stored separately — original is never overwritten.
+
+    Sections follow the 13-section FORM-ADJ-15A/15B structure:
+      1  Case metadata          8  Maternal clinical course
+      2  Endpoint/window        9  Fetal assessment (growth/Doppler)
+      3  Pregnancy dating      10  Delivery record
+      4  Clinical presentation 11  Maternal outcome
+      5  Blood pressure        12  Neonatal outcome
+      6  Proteinuria           13  Missing data / reviewer determination
+      7  Laboratory
     """
     __tablename__ = "narratives"
 
@@ -369,25 +380,48 @@ class Narrative(Base):
     model_used = Column(String(100))                     # e.g. "gpt-4o-2024-08-06"
     generated_at = Column(DateTime, default=datetime.utcnow)
 
-    # Original AI output (immutable after generation)
-    ai_section_1 = Column(Text)
-    ai_section_2 = Column(Text)
-    ai_section_3 = Column(Text)
-    ai_section_4 = Column(Text)
-    ai_section_5 = Column(Text)
-    ai_criteria_met = Column(JSON)          # List of criteria codes
-    ai_missing_evidence = Column(JSON)      # List of missing data items
-    ai_discrepancies = Column(JSON)         # List of EDC/eSource discrepancies flagged
+    # Original AI output — immutable after generation, all 13 sections
+    ai_section_1  = Column(Text)
+    ai_section_2  = Column(Text)
+    ai_section_3  = Column(Text)
+    ai_section_4  = Column(Text)
+    ai_section_5  = Column(Text)
+    ai_section_6  = Column(Text)
+    ai_section_7  = Column(Text)
+    ai_section_8  = Column(Text)
+    ai_section_9  = Column(Text)
+    ai_section_10 = Column(Text)
+    ai_section_11 = Column(Text)
+    ai_section_12 = Column(Text)
+    ai_section_13 = Column(Text)
+
+    ai_criteria_met      = Column(JSON)   # List of criteria codes met
+    ai_missing_evidence  = Column(JSON)   # List of missing data items
+    ai_discrepancies     = Column(JSON)   # List of EDC/eSource discrepancies flagged
+    # Per-section documentation-status summary (populated by the structured clinical record)
+    # Keys are section ids; values use the 7-value taxonomy:
+    # Documented | Not documented | Not assessed | Unable to assess |
+    # Not applicable | Conflicting | Pending verification
+    ai_documentation_status = Column(JSON)
 
     # Human-edited version (may differ from AI original)
-    edited_section_1 = Column(Text)
-    edited_section_2 = Column(Text)
-    edited_section_3 = Column(Text)
-    edited_section_4 = Column(Text)
-    edited_section_5 = Column(Text)
-    edited_by = Column(String(255))          # Entra ID UPN of editor
-    edited_at = Column(DateTime)
-    edit_rationale = Column(Text)
+    edited_section_1  = Column(Text)
+    edited_section_2  = Column(Text)
+    edited_section_3  = Column(Text)
+    edited_section_4  = Column(Text)
+    edited_section_5  = Column(Text)
+    edited_section_6  = Column(Text)
+    edited_section_7  = Column(Text)
+    edited_section_8  = Column(Text)
+    edited_section_9  = Column(Text)
+    edited_section_10 = Column(Text)
+    edited_section_11 = Column(Text)
+    edited_section_12 = Column(Text)
+    edited_section_13 = Column(Text)
+
+    edited_by       = Column(String(255))   # Entra ID UPN of editor
+    edited_at       = Column(DateTime)
+    edit_rationale  = Column(Text)
 
     participant = relationship("Participant", back_populates="narratives")
 

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import hashlib
 import os
 import random
@@ -66,11 +66,41 @@ def _audit(db: Session, event_type: str, participant_id, actor_upn: str,
     ))
 
 
+def _normalize_diagnosis_code(v: Optional[str]) -> DiagnosisCode:
+    if not v:
+        return DiagnosisCode.PE
+    s = str(v).strip()
+    if "Not PE" in s or "Does not meet" in s:
+        return DiagnosisCode.NOT_PE
+    if "Severe PE" in s:
+        return DiagnosisCode.SEVERE_PE
+    if "Eclampsia" in s:
+        return DiagnosisCode.ECLAMPSIA
+    if "HELLP" in s:
+        return DiagnosisCode.HELLP
+    if "Other" in s:
+        return DiagnosisCode.OTHER
+    return DiagnosisCode.PE
+
+
+def _normalize_onset_class(v: Optional[str]) -> OnsetClass:
+    if not v:
+        return OnsetClass.UNCLASSIFIABLE
+    s = str(v).upper()
+    if "LOPE" in s or "LATE" in s:
+        return OnsetClass.LOPE
+    if "POST" in s:
+        return OnsetClass.POSTPARTUM
+    if "UNCLASSIFIABLE" in s or "NOT YET" in s:
+        return OnsetClass.UNCLASSIFIABLE
+    return OnsetClass.EOPE
+
+
 class VisitOnset(BaseModel):
     visit_number: int
     meets_criteria: bool
-    diagnosis: Optional[DiagnosisCode] = None
-    onset_class: Optional[OnsetClass] = None
+    diagnosis: Optional[str] = None
+    onset_class: Optional[str] = None
 
 class ReviewerSubmission(BaseModel):
     reviewer_role: ReviewerRole
@@ -308,6 +338,20 @@ def _process_single_submission(subject_id: str, sub: ReviewerSubmission, db: Ses
     # ── 4. Visit-Level Completeness Gating & Mandatory date_of_diagnosis ─
     if sub.meets_criteria:
         if not sub.date_of_diagnosis:
+            if sub.first_pe_date:
+                sub.date_of_diagnosis = sub.first_pe_date
+            elif sub.visit_date:
+                sub.date_of_diagnosis = sub.visit_date
+            elif sub.measurement_dates:
+                for md in sub.measurement_dates:
+                    if md.get("date"):
+                        try:
+                            sub.date_of_diagnosis = datetime.fromisoformat(str(md["date"]).replace("Z", "+00:00"))
+                            break
+                        except Exception:
+                            pass
+
+        if not sub.date_of_diagnosis:
             raise HTTPException(
                 status_code=422,
                 detail=(
@@ -317,8 +361,8 @@ def _process_single_submission(subject_id: str, sub: ReviewerSubmission, db: Ses
             )
 
         now_utc = datetime.utcnow()
-        # Hardened check 1: Date cannot be in the future
-        if sub.date_of_diagnosis > now_utc:
+        # Hardened check 1: Date cannot be in the future (allow 1 day grace for local timezone / date-only conversions)
+        if sub.date_of_diagnosis > now_utc + timedelta(days=1):
             raise HTTPException(
                 status_code=422,
                 detail=(
@@ -672,11 +716,12 @@ def submit_adjudication(
             single_sub.visit_number = onset.visit_number
             single_sub.meets_criteria = onset.meets_criteria
             if onset.meets_criteria:
-                single_sub.diagnosis = onset.diagnosis or sub.diagnosis
-                single_sub.onset_class = onset.onset_class or sub.onset_class
+                single_sub.diagnosis = _normalize_diagnosis_code(onset.diagnosis or sub.diagnosis)
+                single_sub.onset_class = _normalize_onset_class(onset.onset_class or sub.onset_class)
             else:
                 single_sub.diagnosis = DiagnosisCode.NOT_PE
-                single_sub.onset_class = OnsetClass.NOT_YET_CLASSIFIABLE
+                single_sub.onset_class = OnsetClass.UNCLASSIFIABLE
+                single_sub.severity = SeverityGrade.WITHOUT_SEVERE
             if single_sub.visit_number != 5:
                 single_sub.fetal_neonatal_assessments = []
                 single_sub.gestational_age_at_delivery = None

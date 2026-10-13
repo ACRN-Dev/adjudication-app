@@ -26,14 +26,18 @@ function visitNumberOf(visit, fallbackIndex = 0) {
   return match ? Number(match[1]) : fallbackIndex + 1;
 }
 
-function toDateTimeLocal(value) {
+function toDateOnly(value) {
   if (!value) return '';
   const text = String(value);
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)) return text.slice(0, 16);
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   const pad = number => String(number).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function toDateTimeLocal(value) {
+  return toDateOnly(value);
 }
 
 function DropdownSection({ title, icon, children, defaultOpen = false, right = null }) {
@@ -69,6 +73,66 @@ function visitPages(caseData) {
     };
   });
 }
+
+export function getVisitGaWeeks(visit) {
+  if (!visit) return null;
+  const isPost = (
+    visit.visit_number === 6 ||
+    /eos|post|v06|visit\s*6/i.test(visit.name || visit.visit_code || '') ||
+    /postpartum/i.test(String(visit.gestationalLabel || ''))
+  );
+  if (isPost) return 'Postpartum';
+
+  const ev = visit.evidence || {};
+  for (const k of ['ega_weeks', 'EGA_WEEKS', 'ga_weeks', 'GA_WEEKS', 'ega_delivery', 'ga_at_delivery']) {
+    const rows = ev[k];
+    if (rows?.length) {
+      for (const r of rows) {
+        const v = r.numeric_value ?? r.raw_source_value ?? r.value;
+        const n = parseFloat(v);
+        if (!Number.isNaN(n) && n > 0 && n <= 45) return n;
+      }
+    }
+  }
+
+  const days = visit.ga_days ?? visit.gestational_age_days ?? visit.gaDays;
+  if (typeof days === 'number' && days > 0) return Math.round((days / 7) * 10) / 10;
+
+  for (const str of [visit.gestationalLabel, visit.ga, visit.gestational_age, visit.sonography?.ega].filter(Boolean)) {
+    const text = String(str);
+    if (/post/i.test(text)) return 'Postpartum';
+    const match = text.match(/(\d+(?:\.\d+)?)\s*(?:weeks?|w\b)/i) || text.match(/^(\d+(?:\.\d+)?)$/);
+    if (match) {
+      const n = parseFloat(match[1]);
+      if (!Number.isNaN(n) && n > 0 && n <= 45) return n;
+    }
+  }
+
+  return null;
+}
+
+export function deriveOnsetFromVisit(visit, caseData = null) {
+  if (!visit) return 'Onset not yet classifiable';
+  const ga = getVisitGaWeeks(visit);
+  if (ga === 'Postpartum') return 'Postpartum-only presentation';
+  if (typeof ga === 'number') {
+    return ga >= 34.0 ? 'Late-onset pre-eclampsia (LOPE)' : 'Early-onset pre-eclampsia (EOPE)';
+  }
+  if (caseData?.derivedSubtype === 'LOPE') return 'Late-onset pre-eclampsia (LOPE)';
+  if (caseData?.derivedSubtype === 'POSTPARTUM') return 'Postpartum-only presentation';
+  if (caseData?.derivedSubtype === 'EOPE') return 'Early-onset pre-eclampsia (EOPE)';
+  return 'Onset not yet classifiable';
+}
+
+export function normalizeOnsetClass(raw) {
+  if (!raw) return 'UNCLASSIFIABLE';
+  const str = String(raw).toUpperCase();
+  if (str.includes('LOPE') || str.includes('LATE')) return 'LOPE';
+  if (str.includes('POST')) return 'POSTPARTUM';
+  if (str.includes('NOT YET') || str.includes('UNCLASSIFIABLE')) return 'UNCLASSIFIABLE';
+  return 'EOPE';
+}
+
 
 export default function AdjudicatorWorkbench({ 
   currentStep, 
@@ -111,17 +175,63 @@ export default function AdjudicatorWorkbench({
   const [visit5ValidationWarning, setVisit5ValidationWarning] = useState('');
   const [showAiAssistant, setShowAiAssistant] = useState(false);
   const [caseProgress, setCaseProgress] = useState(null);
+  const [caseProgressError, setCaseProgressError] = useState('');
   const isSigned = activeCase?.status?.includes('Finalized');
   const isReviewerC = activeCase?.reviewerRole === 'REVIEWER_C';
+
+  const updateCurrentDecision = (patch) => {
+    setVisitDecisions(prev => {
+      const idx = selectedVisitIndex;
+      const id = selectedEvidenceVisit?.id;
+      const prevForVisit = prev[idx] || (id ? prev[id] : null) || {};
+      const nextDecision = { ...prevForVisit, ...patch };
+      const nextState = { ...prev, [idx]: nextDecision };
+      if (id) nextState[id] = nextDecision;
+      return nextState;
+    });
+  };
   const finalDiagnosis = selectedDiagnosis;
   const pages = visitPages(activeCase);
   const evidenceVisits = normalizeVisitEvidence({ ...(activeCase || {}), visits: pages }).slice(0, 6);
   const selectedVisit = pages[selectedVisitIndex] || pages[0] || null;
   const selectedEvidenceVisit = evidenceVisits[Math.min(selectedVisitIndex, evidenceVisits.length - 1)] || null;
+  const isSelectedVisitSigned = Boolean(selectedVisit && isReviewerVisitSigned(selectedVisit));
+  const isVisitLocked = isSigned || isSelectedVisitSigned;
   const isVisitFive = /V05|visit\s*5/i.test(selectedVisit?.name || selectedVisit?.visit_code || '') || selectedVisit?.visit_number === 5;
   const firstUnsignedVisitIndex = pages.findIndex((visit) => !isReviewerVisitSigned(visit));
   const allReviewerVisitsSigned = pages.length > 0 && firstUnsignedVisitIndex === -1;
   const allVisitsFinalized = pages.length > 0 && pages.every(isVisitComplete);
+
+  const detectedFirstPe = (() => {
+    for (let i = 0; i < evidenceVisits.length; i++) {
+      const v = evidenceVisits[i];
+      const dec = visitDecisions[i] || (v.id ? visitDecisions[v.id] : null);
+      if (dec && dec.meetsCriteria !== false && dec.selectedDiagnosis !== 'Not PE') {
+        const d = dec.diagnosisDateTime ? toDateOnly(dec.diagnosisDateTime) : toDateOnly(v.visit_date || v.date);
+        return {
+          visitNumber: v.visit_number || (i + 1),
+          visitName: v.name || `Visit ${i + 1}`,
+          date: d || '',
+        };
+      }
+    }
+    for (let i = 0; i < evidenceVisits.length; i++) {
+      const v = evidenceVisits[i];
+      const d = toDateOnly(v?.visit_date || v?.date);
+      if (d) {
+        return {
+          visitNumber: v.visit_number || (i + 1),
+          visitName: v.name || `Visit ${i + 1}`,
+          date: d,
+        };
+      }
+    }
+    return {
+      visitNumber: 1,
+      visitName: 'Visit 1',
+      date: toDateOnly(new Date()),
+    };
+  })();
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -130,12 +240,18 @@ export default function AdjudicatorWorkbench({
   useEffect(() => {
     if (currentStep !== 1) return;
     let cancelled = false;
+    setCaseProgressError('');
     fetch('/api/realtime/progress', { credentials: 'include' })
-      .then(response => response.ok ? response.json() : null)
+      .then(async response => {
+        if (!response.ok) throw new Error(`Progress request failed (${response.status})`);
+        return response.json();
+      })
       .then(payload => {
         if (!cancelled && payload) setCaseProgress(payload);
       })
-      .catch(() => {});
+      .catch(error => {
+        if (!cancelled) setCaseProgressError(error.message || 'Progress is unavailable.');
+      });
     return () => { cancelled = true; };
   }, [currentStep, user?.email]);
 
@@ -170,15 +286,22 @@ export default function AdjudicatorWorkbench({
   const handleVisitSelect = (nextIndex) => {
     if (nextIndex === selectedVisitIndex) return;
     if (selectedVisitIndex < pages.length) {
-      setVisitDecisions(current => ({ ...current, [selectedVisitIndex]: decisionSnapshot() }));
+      const snap = decisionSnapshot();
+      setVisitDecisions(current => {
+        const nextState = { ...current, [selectedVisitIndex]: snap };
+        if (selectedEvidenceVisit?.id) {
+          nextState[selectedEvidenceVisit.id] = snap;
+        }
+        return nextState;
+      });
     }
-    const saved = visitDecisions[nextIndex];
+    const saved = visitDecisions[nextIndex] || (pages[nextIndex]?.id ? visitDecisions[pages[nextIndex]?.id] : null);
     if (saved) {
       setSelectedDiagnosis(saved.selectedDiagnosis);
       setMeetsCriteria(saved.meetsCriteria);
       setOtherDiagnosis(saved.otherDiagnosis);
       setDifferentialDiagnosis(saved.differentialDiagnosis);
-      setSelectedOnset(saved.selectedOnset);
+      setSelectedOnset(saved.selectedOnset || deriveOnsetFromVisit(evidenceVisits[nextIndex] || pages[nextIndex], activeCase));
       setSelectedSeverity(saved.selectedSeverity);
       setSelectedCertainty(saved.selectedCertainty);
       setNarrativeText(saved.narrativeText);
@@ -190,11 +313,13 @@ export default function AdjudicatorWorkbench({
         setFetalProvenance(saved.fetalProvenance || {});
       }
     } else if (nextIndex < pages.length) {
+      const nextVisit = evidenceVisits[nextIndex] || pages[nextIndex];
+      const autoOnset = deriveOnsetFromVisit(nextVisit, activeCase);
       setSelectedDiagnosis('PE');
       setMeetsCriteria(true);
       setOtherDiagnosis('');
       setDifferentialDiagnosis('');
-      setSelectedOnset('Early-onset pre-eclampsia (EOPE)');
+      setSelectedOnset(autoOnset);
       setSelectedSeverity('With severe features');
       setSelectedCertainty('Probable');
       setNarrativeText('');
@@ -209,7 +334,7 @@ export default function AdjudicatorWorkbench({
   };
 
   const handleToggleAssessment = (code) => {
-    if (isSigned) return;
+    if (isVisitLocked) return;
     setFetalNeonatalAssessments(prev => {
       const next = new Set(prev);
       if (next.has(code)) {
@@ -314,7 +439,7 @@ export default function AdjudicatorWorkbench({
     : (dvResults ? dvResults.evidenceScore : (activeCase?.pktScore || 0));
   const missingAnchors = selectedEvidenceVisit?.interpretation?.missing || dvResults?.missingAnchors || [];
   const certaintyGatePassed = selectedEvidenceVisit
-    ? selectedEvidenceVisit.interpretation.missing.length === 0
+    ? (selectedEvidenceVisit.interpretation?.missing?.length === 0)
     : (dvResults?.certaintyGate?.inputs?.gate_open ?? evidenceScore === 1.0);
   const maxCertaintyAllowed = certaintyGatePassed ? 'Definite' : 'Probable';
 
@@ -333,13 +458,8 @@ export default function AdjudicatorWorkbench({
       setDifferentialDiagnosis('');
       setDiagnosisDateTime(toDateTimeLocal(activeCase.visits?.[0]?.date || activeCase.visits?.[0]?.visit_date));
 
-      if (activeCase.derivedSubtype === 'LOPE') {
-        setSelectedOnset('Late-onset pre-eclampsia (LOPE)');
-      } else if (activeCase.derivedSubtype === 'POSTPARTUM') {
-        setSelectedOnset('Postpartum-only presentation');
-      } else {
-        setSelectedOnset('Early-onset pre-eclampsia (EOPE)');
-      }
+      const firstVisit = evidenceVisits[0] || pages[0] || activeCase.visits?.[0];
+      setSelectedOnset(deriveOnsetFromVisit(firstVisit, activeCase));
 
       if (activeCase.derivedSeverity === 'SEVERE_FEATURES') {
         setSelectedSeverity('With severe features');
@@ -379,10 +499,15 @@ export default function AdjudicatorWorkbench({
   }, [activeCase?.id, selectedVisitIndex]);
 
   useEffect(() => {
-    if (selectedVisitIndex < pages.length && selectedVisit && !visitDecisions[selectedVisitIndex]) {
-      setDiagnosisDateTime(toDateTimeLocal(selectedVisit.visit_date || selectedVisit.date));
+    if (selectedVisitIndex < pages.length && selectedVisit) {
+      if (!visitDecisions[selectedVisitIndex]?.diagnosisDateTime) {
+        setDiagnosisDateTime(toDateTimeLocal(selectedVisit.visit_date || selectedVisit.date));
+      }
+      if (!visitDecisions[selectedVisitIndex]?.selectedOnset) {
+        setSelectedOnset(deriveOnsetFromVisit(selectedEvidenceVisit || selectedVisit, activeCase));
+      }
     }
-  }, [selectedVisitIndex, activeCase?.id, visitDecisions]);
+  }, [selectedVisitIndex, activeCase?.id, visitDecisions, selectedEvidenceVisit, selectedVisit]);
 
   useEffect(() => {
     if (Number.isInteger(advanceToVisitIndex)) {
@@ -422,13 +547,18 @@ export default function AdjudicatorWorkbench({
           <div className="a-panel" style={{ margin: '0 0 16px', padding: '16px' }}>
             <strong>My adjudication progress</strong>
             <div className="monitor-metrics" style={{ marginTop: '12px' }}>
-              <div><b>{caseProgress?.summary?.unique_cases ?? 0}</b><span>Assigned unique cases</span></div>
-              <div><b>{caseProgress?.by_case_status?.PENDING ?? 0}</b><span>Pending</span></div>
-              <div><b>{caseProgress?.by_case_status?.IN_PROGRESS ?? 0}</b><span>In progress</span></div>
-              <div><b>{caseProgress?.summary?.completed_cases ?? 0}</b><span>Completed cases</span></div>
-              <div><b>{caseProgress?.summary?.adjudicated_visits ?? 0}</b><span>Adjudicated visits</span></div>
-              <div><b>{caseProgress?.summary?.completion_pct ?? 0}%</b><span>Completion rate</span></div>
+              <div><b>{caseProgress?.summary?.reviewer_progress ? caseProgress.summary.unique_cases : '—'}</b><span>Assigned unique cases</span></div>
+              <div><b>{caseProgress?.summary?.reviewer_progress?.pending_cases ?? '—'}</b><span>Pending cases</span></div>
+              <div><b>{caseProgress?.summary?.reviewer_progress?.in_progress_cases ?? '—'}</b><span>In progress</span></div>
+              <div><b>{caseProgress?.summary?.reviewer_progress?.completed_cases ?? '—'}</b><span>My completed cases</span></div>
+              <div><b>{caseProgress?.summary?.reviewer_progress?.signed_visits ?? '—'}</b><span>My signed visits</span></div>
+              <div><b>{caseProgress?.summary?.reviewer_progress?.completion_pct ?? '—'}%</b><span>My visit completion</span></div>
             </div>
+            {caseProgressError && (
+              <div role="alert" style={{ marginTop: '10px', color: '#b91c1c', fontSize: '12px' }}>
+                Unable to load your adjudication progress: {caseProgressError}
+              </div>
+            )}
             {(caseProgress?.summary?.duplicate_source_records ?? 0) > 0 && (
               <div style={{ marginTop: '10px', color: '#92400e', fontSize: '12px' }}>
                 Duplicate source uploads detected and consolidated into unique case progress.
@@ -447,7 +577,7 @@ export default function AdjudicatorWorkbench({
           <div className="rt-roster-group-bar">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <ChevronDown size={14} />
-              <span>Enrolled / Pending Endpoint Adjudication</span>
+              <span>Assigned Cases — Adjudication Workflow</span>
             </div>
             <span className="rt-roster-group-badge">{cases.length}</span>
           </div>
@@ -467,13 +597,16 @@ export default function AdjudicatorWorkbench({
                   {cases.map(c => {
                     const isSelected = activeCase && c.id === activeCase.id;
                     const isCaseSigned = c.status?.includes('Finalized');
+                    const signedVisitCount = (c.visits || []).filter(isReviewerVisitSigned).length;
+                    const allReviewerVisitsSigned = (c.visits || []).length > 0
+                      && signedVisitCount === c.visits.length;
 
                     return (
                       <tr
                         key={c.id}
                         className={isSelected ? 'selected' : ''}
                         style={{ cursor: 'pointer' }}
-                        onClick={() => { onSelectCase(c.id); setCurrentStep(2); }}
+                        onClick={() => { onSelectCase(c.id); setCurrentStep(allReviewerVisitsSigned ? 4 : 2); }}
                       >
                         <td>
                           <span className="rt-subject-link">
@@ -490,6 +623,14 @@ export default function AdjudicatorWorkbench({
                           {isCaseSigned ? (
                             <span className="rt-status-badge signed">
                               <CheckCircle2 size={11} /> Finalized &amp; Signed
+                            </span>
+                          ) : allReviewerVisitsSigned ? (
+                            <span className="rt-status-badge signed">
+                              <CheckCircle2 size={11} /> Your visits signed — awaiting concordance
+                            </span>
+                          ) : signedVisitCount > 0 ? (
+                            <span className="rt-status-badge enrolled">
+                              {signedVisitCount} of {c.visits.length} visits signed
                             </span>
                           ) : (
                             <span className="rt-status-badge enrolled">
@@ -529,7 +670,7 @@ export default function AdjudicatorWorkbench({
   }
 
   // Review evidence and system derivation
-  if (currentStep === 2) {
+  if (currentStep === 2 || currentStep === 3) {
     return (
       <div>
         <div className="wizard-card">
@@ -570,12 +711,116 @@ export default function AdjudicatorWorkbench({
             selectedIndex={selectedVisitIndex}
             onSelectVisit={handleVisitSelect}
           />
+          {isSelectedVisitSigned && (
+            <div role="status" style={{ marginBottom: '16px', padding: '10px 12px', border: '1px solid #86efac', borderRadius: '6px', background: '#f0fdf4', color: '#166534', fontSize: '12px' }}>
+              This visit is already signed by you and is immutable. It cannot be edited or signed again.
+            </div>
+          )}
 
           {/* Active Visit Clinical Evidence or Overall Case Summary */}
           {selectedVisitIndex === evidenceVisits.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <OverallSummary visits={evidenceVisits} caseData={activeCase} />
 
+              {/* Grid of all visit adjudications V1 - V6 */}
+              <DropdownSection title="Summary of Visit Determinations (Visits 1–6)" icon={<Calendar size={16} />} defaultOpen>
+                <div style={{ marginBottom: '12px', fontSize: '12px', color: '#64748b' }}>
+                  Review your determinations for each study visit below. You can click <strong>Edit Visit</strong> on any row to return to that visit and adjust findings.
+                </div>
+                <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569', fontWeight: 700 }}>
+                        <th style={{ padding: '10px 12px' }}>Visit</th>
+                        <th style={{ padding: '10px 12px' }}>Date</th>
+                        <th style={{ padding: '10px 12px' }}>GA</th>
+                        <th style={{ padding: '10px 12px' }}>Criteria Met?</th>
+                        <th style={{ padding: '10px 12px' }}>Diagnosis</th>
+                        <th style={{ padding: '10px 12px' }}>Severity</th>
+                        <th style={{ padding: '10px 12px' }}>Onset</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'center' }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {evidenceVisits.map((v, idx) => {
+                        const dec = visitDecisions[idx] || (v.id ? visitDecisions[v.id] : null);
+                        const vDate = dec?.diagnosisDateTime ? toDateOnly(dec.diagnosisDateTime) : toDateOnly(v.visit_date || v.date);
+                        const ga = getVisitGaWeeks(v);
+                        const gaText = ga != null ? (typeof ga === 'number' ? `${ga}w` : ga) : '—';
+                        const defaultOnset = deriveOnsetFromVisit(v, activeCase);
+
+                        const hasDecision = Boolean(dec);
+                        const isMet = hasDecision ? (dec.meetsCriteria !== false && dec.selectedDiagnosis !== 'Not PE') : false;
+                        const isVisitSigned = isReviewerVisitSigned(v);
+                        const diag = hasDecision ? (dec.selectedDiagnosis || (isMet ? 'PE' : 'Not PE')) : (isVisitSigned ? 'Signed' : (isSigned ? 'Completed' : 'Pending review'));
+                        const sev = isMet ? (dec.selectedSeverity || 'Without severe features') : '🔒 Locked (Not PE)';
+                        const onset = isMet ? (dec.selectedOnset || defaultOnset) : '—';
+
+                        return (
+                          <tr key={v.id || idx} style={{ borderBottom: idx < evidenceVisits.length - 1 ? '1px solid #f1f5f9' : 'none', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
+                            <td style={{ padding: '10px 12px', fontWeight: 600, color: '#1e293b' }}>
+                              {v.name || `Visit ${idx + 1}`}
+                              {v.visit_code && <span style={{ marginLeft: '6px', fontSize: '10px', color: '#64748b', background: '#f1f5f9', padding: '1px 5px', borderRadius: '3px' }}>{v.visit_code}</span>}
+                            </td>
+                            <td style={{ padding: '10px 12px', color: '#475569' }}>
+                              {vDate || '—'}
+                            </td>
+                            <td style={{ padding: '10px 12px', color: '#475569', fontWeight: 500 }}>
+                              {gaText}
+                            </td>
+                            <td style={{ padding: '10px 12px' }}>
+                              {hasDecision ? (
+                                isMet ? (
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600, background: '#dcfce7', color: '#15803d' }}>
+                                    ✓ Yes
+                                  </span>
+                                ) : (
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600, background: '#f1f5f9', color: '#64748b' }}>
+                                    ✕ No
+                                  </span>
+                                )
+                              ) : (
+                                <span style={{ fontSize: '11px', color: '#94a3b8' }}>—</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '10px 12px' }}>
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                background: isMet ? (/severe|eclampsia|hellp/i.test(diag) ? '#fee2e2' : '#fef3c7') : '#f1f5f9',
+                                color: isMet ? (/severe|eclampsia|hellp/i.test(diag) ? '#991b1b' : '#92400e') : '#475569'
+                              }}>
+                                {diag}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 12px', color: isMet ? '#334155' : '#94a3b8', fontSize: '11px' }}>
+                              {sev}
+                            </td>
+                            <td style={{ padding: '10px 12px', color: isMet ? '#334155' : '#94a3b8', fontSize: '11px' }}>
+                              {onset}
+                            </td>
+                            <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                style={{ padding: '3px 8px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+                                onClick={() => handleVisitSelect(idx)}
+                                disabled={isVisitSigned}
+                                title={`Jump to ${v.name || `Visit ${idx + 1}`}`}
+                              >
+                                {isVisitSigned ? 'Signed' : `Edit Visit ${idx + 1}`} <ChevronRight size={12} />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </DropdownSection>
 
               <DropdownSection title="Overall Case Determination" icon={<ShieldCheck size={16} />} defaultOpen>
                 <div className="summary-card-grid" style={{ marginBottom: '16px' }}>
@@ -583,10 +828,10 @@ export default function AdjudicatorWorkbench({
                     <label style={{ fontWeight: 700, fontSize: '15px' }}>Does this participant meet criteria for pre-eclampsia?</label>
                     <div style={{ display: 'flex', gap: '16px', marginTop: '8px' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                        <input type="radio" name="meetsCriteria" checked={meetsCriteria === true} onChange={() => { setMeetsCriteria(true); setSelectedDiagnosis('PE'); }} disabled={isSigned} /> Yes
+                        <input type="radio" name="meetsCriteria" checked={meetsCriteria === true} onChange={() => { setMeetsCriteria(true); setSelectedDiagnosis('PE'); }} disabled={isVisitLocked} /> Yes
                       </label>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                        <input type="radio" name="meetsCriteria" checked={meetsCriteria === false} onChange={() => { setMeetsCriteria(false); setSelectedDiagnosis('Not PE'); }} disabled={isSigned} /> No
+                        <input type="radio" name="meetsCriteria" checked={meetsCriteria === false} onChange={() => { setMeetsCriteria(false); setSelectedDiagnosis('Not PE'); setSelectedSeverity('Without severe features'); }} disabled={isVisitLocked} /> No
                       </label>
                     </div>
                   </div>
@@ -595,7 +840,7 @@ export default function AdjudicatorWorkbench({
                     <>
                       <div className="form-group">
                         <label style={{ fontWeight: 700 }}>Overall Classification</label>
-                        <select className="form-select" value={selectedDiagnosis} onChange={(e) => setSelectedDiagnosis(e.target.value)} disabled={isSigned}>
+                        <select className="form-select" value={selectedDiagnosis} onChange={(e) => setSelectedDiagnosis(e.target.value)} disabled={isVisitLocked}>
                           <option value="PE">PE</option>
                           <option value="Severe PE">Severe PE</option>
                           <option value="Eclampsia">Eclampsia</option>
@@ -606,26 +851,88 @@ export default function AdjudicatorWorkbench({
                       
                       <div className="form-group">
                         <label style={{ fontWeight: 700 }}>Overall Severity</label>
-                        <select className="form-select" value={selectedSeverity} onChange={(e) => setSelectedSeverity(e.target.value)} disabled={isSigned}>
+                        <select className="form-select" value={selectedSeverity} onChange={(e) => setSelectedSeverity(e.target.value)} disabled={isVisitLocked}>
                           <option value="With severe features">With severe features</option>
                           <option value="Without severe features">Without severe features</option>
                           <option value="Eclampsia / severe SAE">Eclampsia / severe SAE</option>
                         </select>
                       </div>
+
+                      <div className="form-group">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+                          <label style={{ fontWeight: 700 }}>
+                            Date of Diagnosis <span style={{ color: 'red' }}>*</span>
+                          </label>
+                          <span style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: 600 }}>
+                            {`Auto: from ${detectedFirstPe.visitName}`}
+                          </span>
+                        </div>
+                        <input
+                          className="form-input"
+                          type="date"
+                          value={firstPeDate || detectedFirstPe.date || ''}
+                          onChange={(e) => setFirstPeDate(e.target.value)}
+                          disabled={isVisitLocked}
+                          required
+                        />
+                        <small style={{ color: '#64748b' }}>
+                          Mandatory exact date of diagnosis linked with biomarker assay collection dates (SOP-ADJ-002 §5).
+                        </small>
+                      </div>
+
+                      <div className="form-group">
+                        <label style={{ fontWeight: 700 }}>
+                          Index PE Visit Number <span style={{ color: 'red' }}>*</span>
+                        </label>
+                        <select
+                          className="form-select"
+                          value={firstPeVisitNumber || detectedFirstPe.visitNumber || 1}
+                          onChange={(e) => setFirstPeVisitNumber(Number(e.target.value))}
+                          disabled={isVisitLocked}
+                        >
+                          {evidenceVisits.map((v, i) => (
+                            <option key={v.id || i} value={v.visit_number || (i + 1)}>
+                              {v.name || `Visit ${i + 1}`} ({v.visit_code || `V0${i + 1}`})
+                            </option>
+                          ))}
+                        </select>
+                        <small style={{ color: '#64748b' }}>
+                          First protocol study visit meeting diagnostic criteria for pre-eclampsia.
+                        </small>
+                      </div>
                     </>
                   )}
 
                   {!meetsCriteria && (
-                    <div className="form-group">
-                      <label style={{ fontWeight: 700 }}>Non-PE Determination / Clinical Finding</label>
-                      <select className="form-select" value={selectedDiagnosis} onChange={(e) => setSelectedDiagnosis(e.target.value)} disabled={isSigned}>
-                        <option value="Chronic Hypertension (Superimposed PE Excluded)">Chronic Hypertension (Superimposed PE Excluded)</option>
-                        <option value="Gestational Hypertension">Gestational Hypertension</option>
-                        <option value="Normotensive / Normal Pregnancy">Normotensive / Normal Pregnancy</option>
-                        <option value="Transient Gestational Proteinuria (Resolved)">Transient Gestational Proteinuria (Resolved)</option>
-                        <option value="Unclassifiable">Unclassifiable</option>
-                      </select>
-                    </div>
+                    <>
+                      <div className="form-group">
+                        <label style={{ fontWeight: 700 }}>Non-PE Determination / Clinical Finding</label>
+                        <select className="form-select" value={selectedDiagnosis} onChange={(e) => setSelectedDiagnosis(e.target.value)} disabled={isVisitLocked}>
+                          <option value="Chronic Hypertension (Superimposed PE Excluded)">Chronic Hypertension (Superimposed PE Excluded)</option>
+                          <option value="Gestational Hypertension">Gestational Hypertension</option>
+                          <option value="Normotensive / Normal Pregnancy">Normotensive / Normal Pregnancy</option>
+                          <option value="Transient Gestational Proteinuria (Resolved)">Transient Gestational Proteinuria (Resolved)</option>
+                          <option value="Unclassifiable">Unclassifiable</option>
+                        </select>
+                      </div>
+
+                      <div className="form-group">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+                          <label style={{ fontWeight: 700 }}>Overall Severity</label>
+                          <span style={{ fontSize: '10.5px', color: '#64748b', fontWeight: 600 }}>
+                            🔒 Auto-Locked (Not PE)
+                          </span>
+                        </div>
+                        <input
+                          className="form-input"
+                          type="text"
+                          value="Without severe features (Not applicable for non-PE)"
+                          disabled
+                          style={{ backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' }}
+                        />
+                        <small style={{ color: '#64748b' }}>Severity features cannot be assigned when participant does not meet pre-eclampsia criteria.</small>
+                      </div>
+                    </>
                   )}
                   
                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
@@ -636,7 +943,7 @@ export default function AdjudicatorWorkbench({
                       value={differentialDiagnosis}
                       onChange={(e) => setDifferentialDiagnosis(e.target.value)}
                       placeholder="Record important alternatives considered or why none applied"
-                      disabled={isSigned}
+                      disabled={isVisitLocked}
                       required
                     />
                     <small>This field is mandatory.</small>
@@ -648,16 +955,23 @@ export default function AdjudicatorWorkbench({
                 <button className="btn-large btn-back" onClick={() => setCurrentStep(1)}>
                   <ArrowLeft size={16} /> Back to Queue
                 </button>
-                <button className="btn-large btn-next" onClick={() => {
-                  const perVisitOnset = evidenceVisits.map(v => {
-                    const dec = visitDecisions[v.id] || { meetsCriteria: false, onset: null };
+                <button className="btn-large btn-next" disabled={allReviewerVisitsSigned || isSigned} onClick={() => {
+                  const perVisitOnset = evidenceVisits.filter(v => !isReviewerVisitSigned(v)).map((v) => {
+                    const idx = evidenceVisits.indexOf(v);
+                    const dec = visitDecisions[idx] || (v.id ? visitDecisions[v.id] : null);
+                    const isMet = dec ? (dec.meetsCriteria !== false && dec.selectedDiagnosis !== 'Not PE') : (meetsCriteria && idx === 0);
+                    const visitDiag = dec ? (dec.selectedDiagnosis || (isMet ? 'PE' : 'Not PE')) : (isMet ? selectedDiagnosis : 'Not PE');
+                    const visitOnset = dec ? (isMet ? (dec.selectedOnset || deriveOnsetFromVisit(v, activeCase)) : 'Onset not yet classifiable') : deriveOnsetFromVisit(v, activeCase);
                     return {
-                        visit_number: v.visit_number || parseInt((v.visit_code || '').replace('V', '') || (v.name || '').replace('Visit ', '')) || 1,
-                        meets_criteria: dec.meetsCriteria,
-                        diagnosis: dec.meetsCriteria ? selectedDiagnosis : 'Not PE',
-                        onset_class: dec.meetsCriteria ? (dec.onset || selectedOnset) : null
+                      visit_number: v.visit_number || parseInt((v.visit_code || '').replace('V', '') || (v.name || '').replace('Visit ', '')) || (idx + 1),
+                      meets_criteria: isMet,
+                      diagnosis: isMet ? visitDiag : 'Not PE',
+                      onset_class: isMet ? normalizeOnsetClass(visitOnset) : 'UNCLASSIFIABLE'
                     };
                   });
+
+                  const effectivePeDate = meetsCriteria ? (firstPeDate || detectedFirstPe.date || toDateOnly(new Date())) : null;
+                  const effectivePeVisit = meetsCriteria ? Number(firstPeVisitNumber || detectedFirstPe.visitNumber || 1) : 1;
 
                   onOpenSignature({
                     is_overall_first: true,
@@ -666,18 +980,22 @@ export default function AdjudicatorWorkbench({
                     reviewerName: user?.display_name || user?.name || user?.email,
                     diagnosis: meetsCriteria ? selectedDiagnosis : 'Not PE',
                     meetsCriteria,
-                    onset: selectedOnset,
-                    severity: selectedSeverity,
+                    onset: meetsCriteria ? normalizeOnsetClass(selectedOnset) : 'UNCLASSIFIABLE',
+                    severity: meetsCriteria ? selectedSeverity : 'Without severe features',
                     certainty: selectedCertainty,
+                    dateOfDiagnosis: effectivePeDate,
+                    firstPeDate: effectivePeDate,
+                    firstPeVisitNumber: effectivePeVisit,
+                    visitDate: effectivePeDate,
                     rationale: "Overall case determination signature.", 
                     differentialDiagnosis: differentialDiagnosis.trim() || null,
-                    visitNumber: 1, 
+                    visitNumber: effectivePeVisit,
                     fetalNeonatalAssessments: fetalNeonatalAssessments,
                     gestationalAgeAtDelivery: gestationalAgeAtDelivery !== '' ? Number(gestationalAgeAtDelivery) : null,
                     pregnancyOutcome: pregnancyOutcome,
                   });
                 }}>
-                  <Lock size={15} /> Sign &amp; Submit Adjudication
+                  <Lock size={15} /> {allReviewerVisitsSigned ? 'All assigned visits are already signed' : 'Sign & Submit Remaining Visits'}
                 </button>
               </div>
 
@@ -694,46 +1012,221 @@ export default function AdjudicatorWorkbench({
               />
 
               <div style={{ marginTop: '16px' }}>
-                <DropdownSection title={`Adjudicate ${selectedEvidenceVisit.name || selectedEvidenceVisit.visit_code || 'this Visit'}`} icon={<ShieldCheck size={16} />} defaultOpen>
-                  {(() => {
-                    const dec = visitDecisions[selectedEvidenceVisit.id] || { meetsCriteria: false, onset: 'Onset not yet classifiable' };
-                    return (
-                      <div className="summary-card-grid" style={{ marginBottom: '0' }}>
+                <DropdownSection title="Final Adjudication Controls" icon={<ShieldCheck size={16} />} defaultOpen>
+                  <div className="summary-card-grid" style={{ marginBottom: '16px' }}>
+                    <div className="form-group">
+                      <label style={{ fontWeight: 700, fontSize: '11px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                        Final Adjudication Diagnosis
+                      </label>
+                      <select
+                        className="form-select"
+                        value={selectedDiagnosis}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setSelectedDiagnosis(value);
+                          let newMeets = meetsCriteria;
+                          if (value === 'Not PE') {
+                            newMeets = false;
+                            setMeetsCriteria(false);
+                            setSelectedSeverity('Without severe features');
+                            setSelectedOnset('Onset not yet classifiable');
+                            updateCurrentDecision({
+                              selectedDiagnosis: value,
+                              meetsCriteria: false,
+                              selectedSeverity: 'Without severe features',
+                              selectedOnset: 'Onset not yet classifiable'
+                            });
+                          } else {
+                            if (!meetsCriteria) {
+                              newMeets = true;
+                              setMeetsCriteria(true);
+                            }
+                            updateCurrentDecision({ selectedDiagnosis: value, meetsCriteria: newMeets });
+                          }
+                        }}
+                        disabled={isVisitLocked}
+                      >
+                        <option value="PE">PE</option>
+                        <option value="Severe PE">Severe PE</option>
+                        <option value="Eclampsia">Eclampsia</option>
+                        <option value="HELLP">HELLP</option>
+                        <option value="Not PE">Not PE (Does not meet criteria)</option>
+                        {isReviewerC && <option value="Other">Other</option>}
+                      </select>
+                      {selectedDiagnosis === 'Other' && (
+                        <input
+                          type="text"
+                          className="form-input"
+                          style={{ marginTop: '8px' }}
+                          value={otherDiagnosis}
+                          onChange={(e) => {
+                            setOtherDiagnosis(e.target.value);
+                            updateCurrentDecision({ otherDiagnosis: e.target.value });
+                          }}
+                          placeholder="Mandatory rationale for Other"
+                          aria-label="Rationale for Other diagnosis"
+                          disabled={isVisitLocked}
+                          required
+                        />
+                      )}
+                    </div>
+
+                    <div className="form-group">
+                      <label style={{ fontWeight: 700, fontSize: '11px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                        PE Diagnostic Criteria Met
+                      </label>
+                      <select
+                        className="form-select"
+                        value={meetsCriteria ? 'Yes' : 'No'}
+                        onChange={(e) => {
+                          const value = e.target.value === 'Yes';
+                          setMeetsCriteria(value);
+                          let nextDiag = selectedDiagnosis;
+                          if (!value && selectedDiagnosis !== 'Other') {
+                            nextDiag = 'Not PE';
+                            setSelectedDiagnosis('Not PE');
+                            setSelectedSeverity('Without severe features');
+                            setSelectedOnset('Onset not yet classifiable');
+                            updateCurrentDecision({
+                              meetsCriteria: false,
+                              selectedDiagnosis: 'Not PE',
+                              selectedSeverity: 'Without severe features',
+                              selectedOnset: 'Onset not yet classifiable'
+                            });
+                          } else if (value && selectedDiagnosis === 'Not PE') {
+                            nextDiag = 'PE';
+                            setSelectedDiagnosis('PE');
+                            updateCurrentDecision({ meetsCriteria: true, selectedDiagnosis: 'PE' });
+                          } else {
+                            updateCurrentDecision({ meetsCriteria: value });
+                          }
+                        }}
+                        disabled={isVisitLocked}
+                      >
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+                        <label style={{ fontWeight: 700, fontSize: '11px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                          Severity &amp; Phenotype
+                        </label>
+                        {(!meetsCriteria || selectedDiagnosis === 'Not PE') && (
+                          <span style={{ fontSize: '10.5px', color: '#64748b', fontWeight: 600 }}>
+                            🔒 Locked (Not PE)
+                          </span>
+                        )}
+                      </div>
+                      <select
+                        className="form-select"
+                        value={(!meetsCriteria || selectedDiagnosis === 'Not PE') ? 'Without severe features' : selectedSeverity}
+                        onChange={(e) => {
+                          setSelectedSeverity(e.target.value);
+                          updateCurrentDecision({ selectedSeverity: e.target.value });
+                        }}
+                        disabled={isSigned || !meetsCriteria || selectedDiagnosis === 'Not PE'}
+                        style={(!meetsCriteria || selectedDiagnosis === 'Not PE') ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {}}
+                      >
+                        <option value="With severe features">With severe features</option>
+                        <option value="Without severe features">Without severe features</option>
+                        <option value="Eclampsia / severe SAE">Eclampsia / severe SAE</option>
+                        <option value="Severity requires review">Severity requires review</option>
+                      </select>
+                    </div>
+
+                    {(() => {
+                      const curGa = getVisitGaWeeks(selectedEvidenceVisit || selectedVisit);
+                      const isNotPe = !meetsCriteria || selectedDiagnosis === 'Not PE';
+                      return (
                         <div className="form-group">
-                          <label style={{ fontWeight: 700 }}>PE Criteria Met at this Visit?</label>
-                          <select 
-                            className="form-select" 
-                            value={dec.meetsCriteria ? 'Yes' : 'No'}
-                            onChange={e => {
-                              const val = e.target.value === 'Yes';
-                              setVisitDecisions(prev => ({...prev, [selectedEvidenceVisit.id]: {...(prev[selectedEvidenceVisit.id]||{}), meetsCriteria: val}}));
-                              if (val) setMeetsCriteria(true);
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+                            <label style={{ fontWeight: 700, fontSize: '11px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                              Onset Classification
+                            </label>
+                            {isNotPe ? (
+                              <span style={{ fontSize: '10.5px', color: '#64748b', fontWeight: 600 }}>
+                                🔒 Locked (Not PE)
+                              </span>
+                            ) : (curGa != null && (
+                              <span style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: 600 }}>
+                                {typeof curGa === 'number' ? `Auto: ${curGa}w (${curGa >= 34 ? '≥34w LOPE' : '<34w EOPE'})` : `Auto: ${curGa}`}
+                              </span>
+                            ))}
+                          </div>
+                          <select
+                            className="form-select"
+                            value={isNotPe ? 'Onset not yet classifiable' : selectedOnset}
+                            onChange={(e) => {
+                              setSelectedOnset(e.target.value);
+                              updateCurrentDecision({ selectedOnset: e.target.value });
                             }}
-                            disabled={isSigned}
+                            disabled={isSigned || isNotPe}
+                            style={isNotPe ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {}}
                           >
-                            <option value="No">No</option>
-                            <option value="Yes">Yes</option>
-                          </select>
-                        </div>
-                        <div className="form-group">
-                          <label style={{ fontWeight: 700 }}>Onset Classification (if Yes)</label>
-                          <select 
-                            className="form-select" 
-                            value={dec.onset || 'Onset not yet classifiable'}
-                            onChange={e => {
-                               setVisitDecisions(prev => ({...prev, [selectedEvidenceVisit.id]: {...(prev[selectedEvidenceVisit.id]||{}), onset: e.target.value}}));
-                            }}
-                            disabled={!dec.meetsCriteria || isSigned}
-                          >
-                            <option value="Early-onset pre-eclampsia (EOPE)">Early-onset (EOPE) &lt; 34 weeks</option>
-                            <option value="Late-onset pre-eclampsia (LOPE)">Late-onset (LOPE) ≥ 34 weeks</option>
+                            <option value="Early-onset pre-eclampsia (EOPE)">Early-onset pre-eclampsia (EOPE)</option>
+                            <option value="Late-onset pre-eclampsia (LOPE)">Late-onset pre-eclampsia (LOPE)</option>
                             <option value="Postpartum-only presentation">Postpartum-only presentation</option>
                             <option value="Onset not yet classifiable">Onset not yet classifiable</option>
                           </select>
                         </div>
-                      </div>
-                    );
-                  })()}
+                      );
+                    })()}
+
+                    <div className="form-group">
+                      <label style={{ fontWeight: 700, fontSize: '11px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                        Date and time of diagnosis
+                      </label>
+                      <input
+                        className="form-input"
+                        type="date"
+                        value={diagnosisDateTime ? String(diagnosisDateTime).slice(0, 10) : ''}
+                        onChange={(e) => {
+                          setDiagnosisDateTime(e.target.value);
+                          updateCurrentDecision({ diagnosisDateTime: e.target.value });
+                        }}
+                        disabled={isVisitLocked}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                      <label style={{ fontWeight: 700, fontSize: '11px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                        Differential diagnosis / alternative explanation
+                      </label>
+                      <input
+                        className="form-input"
+                        type="text"
+                        value={differentialDiagnosis}
+                        onChange={(e) => {
+                          setDifferentialDiagnosis(e.target.value);
+                          updateCurrentDecision({ differentialDiagnosis: e.target.value });
+                        }}
+                        placeholder="Record important alternatives considered or why none applied"
+                        disabled={isVisitLocked}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label style={{ fontWeight: 700, fontSize: '11px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                        Diagnostic Certainty
+                      </label>
+                      <select
+                        className="form-select"
+                        value={selectedCertainty}
+                        onChange={(e) => {
+                          setSelectedCertainty(e.target.value);
+                          updateCurrentDecision({ selectedCertainty: e.target.value });
+                        }}
+                        disabled={isVisitLocked}
+                      >
+                        <option value="Definite">Definite — All criteria met</option>
+                        <option value="Probable">Probable — Criteria met, evidence partial</option>
+                        <option value="Possible">Possible — Clinical judgment required</option>
+                        <option value="Not PE">Not PE — Does not meet diagnostic criteria</option>
+                      </select>
+                    </div>
+                  </div>
                 </DropdownSection>
               </div>
 
@@ -810,7 +1303,7 @@ export default function AdjudicatorWorkbench({
                     </label>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '8px', marginBottom: '12px' }}>
                       {VISIT5_ASSESSMENT_OPTIONS.map((opt) => {
-                        const isChecked = fetalNeonatalAssessments.includes(opt.code) || (opt.code === 'DELIVERY_GE_37W' && !isSigned && fetalNeonatalAssessments.length === 0) || (opt.code === 'NORMAL_OUTCOME' && !isSigned && fetalNeonatalAssessments.length === 0);
+                        const isChecked = fetalNeonatalAssessments.includes(opt.code) || (opt.code === 'DELIVERY_GE_37W' && !isVisitLocked && fetalNeonatalAssessments.length === 0) || (opt.code === 'NORMAL_OUTCOME' && !isVisitLocked && fetalNeonatalAssessments.length === 0);
                         return (
                           <label
                             key={opt.code}
@@ -819,7 +1312,7 @@ export default function AdjudicatorWorkbench({
                               background: isChecked ? '#f0f9ff' : '#ffffff',
                               borderRadius: '6px',
                               padding: '10px 12px',
-                              cursor: isSigned ? 'default' : 'pointer',
+                              cursor: isVisitLocked ? 'default' : 'pointer',
                               display: 'flex',
                               alignItems: 'center',
                               gap: '8px',
@@ -830,7 +1323,7 @@ export default function AdjudicatorWorkbench({
                               type="checkbox"
                               checked={isChecked}
                               onChange={() => handleToggleAssessment(opt.code)}
-                              disabled={isSigned}
+                              disabled={isVisitLocked}
                               style={{ cursor: 'pointer' }}
                             />
                             <div style={{ flex: 1 }}>
@@ -872,12 +1365,7 @@ export default function AdjudicatorWorkbench({
   // Completed and signed record view
   if (currentStep === 4 || isSigned) {
     const isConsensusFinal = isSigned || allVisitsFinalized;
-    const sig = activeCase.signature || {
-      signer: "Dr. Tinotenda Chibongore",
-      email: "tinotenda.chibongore@acrnhealth.com",
-      timestamp: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString(),
-      hash: "SHA256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    };
+    const sig = activeCase.signature || {};
 
     return (
       <div>
@@ -901,7 +1389,7 @@ export default function AdjudicatorWorkbench({
               <CheckCircle2 size={24}/>
               <div>
                 <strong>Submitted for concordance checking</strong>
-                <p>Your six visit records are locked. Matching reviewer decisions will finalize automatically; discordant decisions will be routed to Reviewer C and the Chairperson workflow.</p>
+                <p>Your {(activeCase.visits || []).filter(isReviewerVisitSigned).length} of {(activeCase.visits || []).length} visit records are locked. Matching reviewer decisions can finalize automatically; discordant decisions are routed to Reviewer C and the Chairperson workflow.</p>
               </div>
             </div>
           )}
@@ -913,11 +1401,11 @@ export default function AdjudicatorWorkbench({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '12px' }}>
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>Signed By:</span>
-                <div style={{ fontWeight: 600 }}>{sig.signer} ({sig.email})</div>
+                <div style={{ fontWeight: 600 }}>{sig.signer || '—'}{sig.email ? ` (${sig.email})` : ''}</div>
               </div>
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>Timestamp:</span>
-                <div style={{ fontWeight: 600 }}>{sig.timestamp}</div>
+                <div style={{ fontWeight: 600 }}>{sig.timestamp || '—'}</div>
               </div>
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>Final Diagnosis:</span>
@@ -927,7 +1415,7 @@ export default function AdjudicatorWorkbench({
               </div>
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>Cryptographic Hash:</span>
-                <div style={{ fontWeight: 600, fontSize: '11px', color: 'var(--acrn-sky-blue)', wordBreak: 'break-all' }}>{sig.hash}</div>
+                <div style={{ fontWeight: 600, fontSize: '11px', color: 'var(--acrn-sky-blue)', wordBreak: 'break-all' }}>{sig.hash || '—'}</div>
               </div>
             </div>
           </div>

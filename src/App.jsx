@@ -19,6 +19,7 @@ import OwnerPortal from './owner/OwnerPortal';
 
 import { listAssigned, getAssigned, asWorkbenchCase } from './services/realtimeApi';
 import { me, logout as logoutApi } from './services/authApi';
+import { isReviewerVisitSigned } from './services/visitEvidence';
 import './styles/acrn-theme.css';
 
 export default function App() {
@@ -101,35 +102,66 @@ export default function App() {
 
   const handleSignatureSuccess = (sigData) => {
     setShowSignatureModal(false);
-    const signedVisit=Number(sigData.visit_number||signatureSubmission?.visitNumber||1);
-    const updatedActiveVisits=(activeCase?.visits||[]).map((visit,index)=>index+1===signedVisit?{...visit,status:sigData.visit_status||'SIGNED',signed:true,filing_status:sigData.filing_status,signature:sigData}:visit);
-    const visitCount = Math.max(6, updatedActiveVisits.length || 0);
+    const results = Array.isArray(sigData.results) ? sigData.results : [sigData];
+    const resultsByVisit = new Map(results.map(result => [
+      Number(result.visit_number || signatureSubmission?.visitNumber || 1),
+      result,
+    ]));
+    const updatedActiveVisits = (activeCase?.visits || []).map((visit, index) => {
+      const visitNumber = Number(visit.visit_number || index + 1);
+      const result = resultsByVisit.get(visitNumber);
+      return result ? {
+        ...visit,
+        status: result.visit_status || 'SIGNED',
+        signed: true,
+        filing_status: result.filing_status,
+        signature: {
+          signer: user?.display_name || user?.name || user?.email,
+          email: user?.email,
+          timestamp: result.signed_at,
+          hash: result.signature_hash,
+          visit_number: visitNumber,
+        },
+      } : visit;
+    });
     const finalVisitStates = ['CONCORDANT', 'RESOLVED_BY_MAJORITY', 'FINALIZED', 'CLOSED'];
-    const allVisitsComplete = Array.from({ length: visitCount }, (_, index) => {
-      const visit = updatedActiveVisits[index];
-      return Boolean(
-        visit
-        && (finalVisitStates.includes(String(visit.resolution_status || visit.final_status || visit.status).toUpperCase())
-          || visit.final_record
-          || visit.finalized
-          )
-      );
-    }).every(Boolean);
-    const nextVisitIndex = Math.min(Math.max(signedVisit, 0), visitCount);
+    const allVisitsFinalized = updatedActiveVisits.length > 0 && updatedActiveVisits.every(visit =>
+      finalVisitStates.includes(String(visit.resolution_status || visit.final_status || visit.status).toUpperCase())
+      || visit.final_record
+      || visit.finalized
+    );
+    const allReviewerVisitsSigned = updatedActiveVisits.length > 0
+      && updatedActiveVisits.every(isReviewerVisitSigned);
+    const firstUnsignedVisitIndex = updatedActiveVisits.findIndex(visit => !isReviewerVisitSigned(visit));
+    const nextVisitIndex = firstUnsignedVisitIndex === -1 ? updatedActiveVisits.length : firstUnsignedVisitIndex;
+    const latestResult = results[results.length - 1] || sigData;
+    const caseSignature = latestResult.signature_hash ? {
+      signer: user?.display_name || user?.name || user?.email,
+      email: user?.email,
+      timestamp: latestResult.signed_at,
+      hash: latestResult.signature_hash,
+    } : sigData;
     setCases(prev => prev.map(c => {
       if (c && c.id === activeCaseId) {
-        const visits=(c.visits||[]).map((visit,index)=>index+1===signedVisit?{...visit,status:sigData.visit_status||'SIGNED',signed:true,filing_status:sigData.filing_status,signature:sigData}:visit);
+        const visits = (c.visits || []).map((visit, index) => {
+          const visitNumber = Number(visit.visit_number || index + 1);
+          return resultsByVisit.has(visitNumber) ? updatedActiveVisits[index] : visit;
+        });
         return {
           ...c,
           visits,
-          status: allVisitsComplete ? 'Finalized & Signed' : 'Adjudication In Progress',
-          signature: sigData,
+          status: allVisitsFinalized
+            ? 'Finalized & Signed'
+            : allReviewerVisitsSigned
+              ? 'Reviewer Adjudications Signed'
+              : 'Adjudication In Progress',
+          signature: caseSignature,
         };
       }
       return c;
     }));
-    setAdvanceToVisitIndex(allVisitsComplete ? null : nextVisitIndex);
-    setCurrentStep(allVisitsComplete ? 4 : 3);
+    setAdvanceToVisitIndex(allReviewerVisitsSigned ? null : nextVisitIndex);
+    setCurrentStep(allReviewerVisitsSigned || allVisitsFinalized ? 4 : 2);
     // Start each newly loaded adjudication state at the top of the workbench.
     requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'smooth' }));
   };

@@ -12,7 +12,7 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [adjudications, setAdjudications] = useState([]);
-  const [summary, setSummary] = useState({ concordant: 0, discordant: 0, three_way_divergent: 0, closed: 0 });
+  const [summary, setSummary] = useState({ concordant: 0, discordant: 0, chair_actionable: 0, three_way_divergent: 0, closed: 0, awaiting_second_reviewer: 0 });
   const [agendaPack, setAgendaPack] = useState(null);
   const [meetings, setMeetings] = useState([]);
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
@@ -78,7 +78,7 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
         const data = await res.json();
         const items = Array.isArray(data.items) ? data.items : [];
         setAdjudications(items);
-        setSummary(data.summary || { concordant: 0, discordant: 0, three_way_divergent: 0, closed: 0 });
+        setSummary(data.summary || { concordant: 0, discordant: 0, chair_actionable: 0, three_way_divergent: 0, closed: 0, awaiting_second_reviewer: 0 });
         setSelectedCaseIds([...new Set(items.map(i => i.subject_id))]);
       } else {
         const data = await res.json().catch(() => ({}));
@@ -88,7 +88,7 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
       console.error('Failed to fetch adjudications:', e);
       setErrorMsg(e.message);
       setAdjudications([]);
-      setSummary({ concordant: 0, discordant: 0, three_way_divergent: 0, closed: 0 });
+      setSummary({ concordant: 0, discordant: 0, chair_actionable: 0, three_way_divergent: 0, closed: 0, awaiting_second_reviewer: 0 });
       setSelectedCaseIds([]);
     } finally {
       setLoading(false);
@@ -290,7 +290,7 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
   };
 
   const NAV_ITEMS = [
-    { key: 'concordance', label: 'Concordance Tracker', icon: <Scale size={15} /> },
+    { key: 'concordance', label: 'Reviewer Submissions', icon: <Scale size={15} /> },
     { key: 'agenda',      label: 'Meeting Agenda Pack', icon: <FileText size={15} /> },
     { key: 'minutes',     label: 'Record Minutes & Sign-Off', icon: <ShieldCheck size={15} /> },
     { key: 'archive',     label: `Meeting Archive (${meetings.length})`, icon: <Calendar size={15} /> },
@@ -303,8 +303,8 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
   };
 
   const TAB_DESCS = {
-    concordance: 'Live batch monitoring of primary (A) and secondary (B) reviewer submissions and Reviewer C escalations.',
-    agenda: 'Auto-generated committee agenda pack summarising all outstanding discordant and pending cases.',
+    concordance: 'Live reviewer submissions, concordance outcomes, and cases awaiting committee action.',
+    agenda: 'Auto-generated chair-arbitration queue and consent calendar for completed concordant reviews.',
     minutes: 'Record official committee deliberations and apply a 21 CFR Part 11 electronic signature to close the batch.',
     archive: 'Scheduled upcoming meetings and signed, archived session minutes.',
   };
@@ -324,22 +324,30 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
       )}
 
       {/* KPI metrics strip */}
-      <div className="a-metrics" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '14px' }}>
+      <div className="a-metrics" style={{ gridTemplateColumns: 'repeat(6, 1fr)', marginBottom: '14px' }}>
         <div style={{ borderLeft: '3px solid #10b981' }}>
           <strong style={{ color: '#047857' }}>{summary.concordant}</strong>
           <span>Concordant (A = B)</span>
         </div>
         <div style={{ borderLeft: '3px solid #ef4444' }}>
           <strong style={{ color: '#b91c1c' }}>{summary.discordant}</strong>
-          <span>Discordant (A ≠ B)</span>
+          <span>Unresolved A/B discordant visits</span>
         </div>
         <div style={{ borderLeft: '3px solid #f59e0b' }}>
           <strong style={{ color: '#b45309' }}>{summary.three_way_divergent}</strong>
-          <span>3-Way Divergent</span>
+          <span>3-Way divergent visits</span>
         </div>
         <div style={{ borderLeft: '3px solid #64748b' }}>
           <strong style={{ color: '#334155' }}>{summary.closed}</strong>
-          <span>Closed &amp; Archived</span>
+          <span>Closed visits</span>
+        </div>
+        <div style={{ borderLeft: '3px solid #dc2626' }}>
+          <strong style={{ color: '#b91c1c' }}>{summary.chair_actionable ?? 0}</strong>
+          <span>Chair action-needed visits</span>
+        </div>
+        <div style={{ borderLeft: '3px solid #f59e0b' }}>
+          <strong style={{ color: '#b45309' }}>{summary.awaiting_second_reviewer ?? 0}</strong>
+          <span>Awaiting second reviewer (visits)</span>
         </div>
       </div>
 
@@ -378,9 +386,14 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
 
       {/* ── TAB 1: Concordance tracker ── */}
       {activeTab === 'concordance' && (
+        <>
+        <div className="a-notice" style={{ marginBottom: '10px' }}>
+          <Scale size={14} />
+          <span>Newly signed visits appear first. A single reviewer signature is visible here but is not ready for committee arbitration; both A and B must sign, and disagree, before chair action is available.</span>
+        </div>
         <div className="a-table-wrap">
           <table className="a-table">
-            <caption>Completed Adjudications Roster — {Object.keys(groupedAdjudications).length} subject{Object.keys(groupedAdjudications).length !== 1 ? 's' : ''}</caption>
+            <caption>Reviewer Submissions — {Object.keys(groupedAdjudications).length} subject{Object.keys(groupedAdjudications).length !== 1 ? 's' : ''}</caption>
             <thead>
               <tr>
                 <th>Subject ID</th>
@@ -390,16 +403,19 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
                 <th>Reviewer B</th>
                 <th>Reviewer C</th>
                 <th>Concordance</th>
+                <th>Latest signature</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {Object.entries(groupedAdjudications).length === 0 ? (
-                <tr><td colSpan="8" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>No adjudication records yet.</td></tr>
+                <tr><td colSpan="9" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>No adjudication records yet.</td></tr>
               ) : (
                 Object.entries(groupedAdjudications).map(([subjectId, items]) =>
                   items.map((adj, adjIndex) => {
                     const rawStatus = String(adj.concordance || adj.status || '').toUpperCase();
+                    const canChairFinalize = rawStatus.includes('DISCORDANT')
+                      || rawStatus === 'THREE_WAY_DIVERGENT';
                     const renderRev = (reviewer, isC = false) => reviewer ? (
                       <div>
                         <div style={{ fontWeight: 600, fontSize: '9px' }}>{reviewer.diagnosis || 'Pending'}</div>
@@ -412,6 +428,7 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
                       if (rawStatus.includes('THREE_WAY') || rawStatus.includes('DIVERGENT')) return <span className="a-badge" style={{ background: '#fef3c7', color: '#92400e' }}>3-Way Divergent</span>;
                       if (rawStatus.includes('DISCORDANT')) return <span className="a-badge bad">Discordant</span>;
                       if (rawStatus.includes('CLOSED')) return <span className="a-badge" style={{ background: '#e2e8f0', color: '#334155' }}>Closed</span>;
+                      if (rawStatus === 'SINGLE_REVIEWER_COMPLETE') return <span className="a-badge warn">Awaiting second reviewer</span>;
                       return <span className="a-badge">{adj.concordance || 'Pending'}</span>;
                     };
                     return (
@@ -423,10 +440,11 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
                         <td>{renderRev(adj.reviewer_b)}</td>
                         <td>{renderRev(adj.reviewer_c, true)}</td>
                         <td>{renderBadge()}</td>
+                        <td style={{ whiteSpace: 'nowrap', fontSize: '9px' }}>{formatDate(adj.latest_signed_at)}</td>
                         <td>
                           <div className="a-actions">
                             <button onClick={() => setInspectionItem(adj)}>Inspect</button>
-                            {!readOnly && (rawStatus.includes('DISCORDANT') || rawStatus.includes('DIVERGENT') || rawStatus.includes('REVIEWER_C')) && (
+                            {!readOnly && canChairFinalize && (
                               <button onClick={() => openFinalizeCase(adj)} style={{ color: '#b45309' }}>Finalize</button>
                             )}
                           </div>
@@ -439,6 +457,7 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* ── TAB 2: Agenda Pack ── */}
@@ -452,9 +471,10 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
                 {[
                   ['Batch', agendaPack.batch_id],
                   ['Total Cases', agendaPack.total_cases],
-                  ['Discordant', agendaPack.discordant_count],
-                  ['Concordant', agendaPack.concordant_count],
-                  ['Three-Way Divergent', agendaPack.three_way_divergent_count],
+                  ['Awaiting second reviewer (visits)', agendaPack.awaiting_second_reviewer_count],
+                  ['Discordant visits', agendaPack.discordant_count],
+                  ['Concordant visits', agendaPack.concordant_count],
+                  ['Three-Way divergent visits', agendaPack.three_way_divergent_count],
                 ].map(([label, value]) => (
                   <div key={label} className="a-panel" style={{ padding: '6px 10px', marginBottom: 0 }}>
                     <dt style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase' }}>{label}</dt>
@@ -462,11 +482,28 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
                   </div>
                 ))}
               </dl>
-              {(agendaPack.items || []).map((item, i) => (
+              {(agendaPack.items_for_committee_arbitration || agendaPack.items || []).length === 0 ? (
+                <div className="a-empty"><p>No discordant, chair-actionable visits are awaiting arbitration. Single-reviewer submissions are shown in the Reviewer Submissions tracker until the second reviewer signs.</p></div>
+              ) : (agendaPack.items_for_committee_arbitration || agendaPack.items || []).map((item, i) => (
                 <div key={i} className="a-panel" style={{ marginBottom: '8px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <strong style={{ fontSize: '11px' }}>{item.subject_id} — Visit {item.visit_number}</strong>
                     <span className={`a-badge ${item.concordance?.includes('DISCORDANT') ? 'bad' : item.concordance?.includes('THREE_WAY') ? 'warn' : 'ok'}`}>{item.concordance}</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '9.5px' }}>
+                    <div><strong>Reviewer A:</strong> {item.reviewer_a?.diagnosis || '—'}</div>
+                    <div><strong>Reviewer B:</strong> {item.reviewer_b?.diagnosis || '—'}</div>
+                  </div>
+                </div>
+              ))}
+              <h2 style={{ margin: '18px 0 8px', fontSize: '11px', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Concordant cases — consent calendar</h2>
+              {(agendaPack.concordant_cases_consent_calendar || []).length === 0 ? (
+                <div className="a-empty"><p>No concordant A/B visits are on the consent calendar yet.</p></div>
+              ) : (agendaPack.concordant_cases_consent_calendar || []).map((item, i) => (
+                <div key={`${item.subject_id}-${item.visit_number}-${i}`} className="a-panel" style={{ marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <strong style={{ fontSize: '11px' }}>{item.subject_id} — Visit {item.visit_number}</strong>
+                    <span className="a-badge ok">{item.concordance}</span>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '9.5px' }}>
                     <div><strong>Reviewer A:</strong> {item.reviewer_a?.diagnosis || '—'}</div>
@@ -757,4 +794,3 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
     </div>
   );
 }
-

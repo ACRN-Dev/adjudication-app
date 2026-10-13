@@ -23,6 +23,19 @@ export const NARRATIVE_VERSION = templateConfig.version;
 export const AI_ENGINE_MODEL  = templateConfig.engineModel;
 
 // Helpers
+
+/**
+ * Strip a unit suffix from a value string if it is already present,
+ * preventing doubling such as "112/64 mmHg mmHg" or "36.5°C°C".
+ */
+function stripUnit(v, unit) {
+  if (v == null) return v;
+  var s = String(v).trim();
+  // Escape the unit for regex use
+  var escaped = unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return s.replace(new RegExp('\\s*' + escaped + '\\s*$', 'i'), '').trim();
+}
+
 function safe(v, fallback) {
   var fb = fallback !== undefined ? fallback : 'not documented';
   if (v == null || (typeof v === 'string' && !v.trim())) return fb;
@@ -62,7 +75,10 @@ function formatBpList(bpLog) {
              :                                   ' \u2014 within normal limits';
     var when = b.date ? ' on ' + b.date : '';
     var ga   = b.ga   ? ' (GA ' + b.ga + ')' : '';
-    return b.sbp + '/' + b.dbp + ' mmHg' + when + ga + flag;
+    // Strip any unit already embedded in the raw sbp/dbp strings before appending mmHg
+    var sbpVal = stripUnit(b.sbp, 'mmHg');
+    var dbpVal = stripUnit(b.dbp, 'mmHg');
+    return sbpVal + '/' + dbpVal + '\u00a0mmHg' + when + ga + flag;
   }).join('; ');
 }
 
@@ -264,24 +280,37 @@ export function generateNarrative(caseData, formCodeOverride) {
     ? 'The following evidence classes are absent from this packet and limit the completeness of the adjudication assessment: ' + missingItems.join(', ') + '. These gaps should be noted when selecting a certainty level.'
     : 'The core evidence domains \u2014 blood pressure, proteinuria, platelet count, transaminases, and creatinine \u2014 are all represented in this packet.';
 
-  // --- SECTION 8: Synthesis ---
+  // --- SECTION 8: Evidence summary (neutral — does NOT name a diagnosis) ---
+  // Per SOP-ADJ-002: the narrative must present documented facts without drawing
+  // a clinical conclusion. The synthesis describes the evidence state only.
   var hasSevereBp = peak && (peak.sbp >= 160 || peak.dbp >= 110);
   var hasHtn      = peak && (peak.sbp >= 140 || peak.dbp >= 90);
   var hasProt     = upcr >= 0.3 || /^(2\+|3\+|4\+|positive)/i.test(String(dipstick || '').trim());
   var hasOrganDys = (plt != null && plt < 100) || (ast != null && ast > 40) || (alt != null && alt > 40) || (ldh != null && ldh > 250);
-  var contextClue;
-  if (hasSevereBp && hasProt && hasOrganDys) contextClue = 'pre-eclampsia with severe features, including severe-range hypertension, significant proteinuria, and laboratory evidence of end-organ dysfunction';
-  else if (hasSevereBp && hasOrganDys)       contextClue = 'severe hypertensive disease with evidence of end-organ involvement';
-  else if (hasHtn && hasProt && confirmedHtn) contextClue = 'confirmed hypertension with significant proteinuria, raising the possibility of pre-eclampsia without severe features';
-  else if (hasHtn && confirmedHtn)            contextClue = 'confirmed hypertension without clearly documented end-organ dysfunction or significant proteinuria';
-  else if (hasHtn)                            contextClue = 'hypertension documented on the available readings, though confirmation on a second occasion and an assessment of proteinuria and organ function are required';
-  else if (hasProt)                           contextClue = 'significant proteinuria documented, though the hypertensive criterion requires independent assessment';
-  else if (missingItems.length > 2)           contextClue = 'an incomplete evidence package, limiting determination';
-  else                                        contextClue = 'borderline clinical findings that require careful review of the source documentation';
 
-  var synthesisSection = 'In summary, this is a case of ' + contextClue + '. '
-    + 'The adjudicating physician is asked to review the source evidence above, taking into account the complete clinical trajectory and the protocol-defined diagnostic criteria for the ACRN PROTECT-Africa / LOPE-Nigeria programme, and to record an independent determination with a supporting rationale. '
-    + 'No automated classification should be taken as a clinical conclusion \u2014 the determination rests entirely with the reviewing adjudicator.';
+  // Build a factual, non-interpretive evidence summary
+  var evidenceParts = [];
+  if (hasSevereBp)  evidenceParts.push('severe-range blood pressure documented (\u2265160/110\u00a0mmHg)');
+  else if (hasHtn)  evidenceParts.push('hypertensive-range blood pressure documented (\u2265140/90\u00a0mmHg)');
+  else if (peak)    evidenceParts.push('blood pressure within normal limits on all recorded readings');
+  else              evidenceParts.push('no blood pressure readings available in this packet');
+
+  if (hasProt)               evidenceParts.push('significant proteinuria documented');
+  else if (upcr != null || dipstick) evidenceParts.push('proteinuria below significant threshold on available testing');
+  else                       evidenceParts.push('proteinuria not assessed in this packet');
+
+  if (hasOrganDys)           evidenceParts.push('laboratory markers consistent with end-organ involvement are present');
+  else if (plt != null || ast != null) evidenceParts.push('available laboratory markers do not meet end-organ dysfunction thresholds');
+  else                       evidenceParts.push('end-organ laboratory assessment not available');
+
+  if (confirmedHtn)          evidenceParts.push('hypertension confirmed on two or more separate occasions');
+  else if (hasHtn)           evidenceParts.push('hypertension documented on fewer than two separate occasions');
+
+  var evidenceSummary = evidenceParts.join('; ') + '.';
+
+  var synthesisSection = 'Evidence summary: ' + evidenceSummary
+    + ' The adjudicating physician is asked to review the complete source evidence above, apply the protocol-defined criteria for the ACRN PROTECT-Africa / LOPE-Nigeria programme, and record an independent clinical determination with a supporting rationale.'
+    + ' No automated classification represents a clinical conclusion \u2014 the determination rests entirely with the reviewing adjudicator.';
 
   var reviewerBlock = '\u2500'.repeat(60) + '\nADJUDICATOR DETERMINATION\n[To be completed by the reviewing physician. This section must not be pre-populated by any automated system.]\n' + '\u2500'.repeat(60);
 
@@ -299,7 +328,7 @@ export function generateNarrative(caseData, formCodeOverride) {
     id: id, ageStr: ageStr, obs: obs, comorStr: comorStr, gaContext: gaContext, enrollStr: enrollStr, formCode: formCode,
     bpCount: bpLog.length, bpNarr: bpNarr, peakStr: peakStr, confStr: confStr, sevStr: sevStr,
     protSection: protSection, labSection: labSection, fetalSection: fetalSection, courseSection: courseSection,
-    missingSection: missingSection, contextClue: contextClue
+    missingSection: missingSection, synthesisSection: synthesisSection
   };
 
   var sections = {};

@@ -292,6 +292,7 @@ class TestStage2Assignment:
                 "onset_class": OnsetClass.EOPE.value,
                 "severity": SeverityGrade.WITH_SEVERE.value,
                 "certainty": CertaintyLevel.DEFINITE.value,
+                "differential_diagnosis": "Attempting alternative diagnoses were considered.",
                 "rationale": "Attempting unassigned cross-visit submission.",
             },
         )
@@ -322,6 +323,7 @@ class TestStage3AdjudicatorFlow:
                 "severity": SeverityGrade.WITH_SEVERE.value,
                 "certainty": certainty.value,
                 "rationale": "Visit-level adjudication rationale with explicit clinical findings.",
+                "differential_diagnosis": "Alternative diagnoses considered against the documented evidence.",
             },
         )
 
@@ -420,6 +422,12 @@ class TestStage3AdjudicatorFlow:
     def test_S3_16_signed_record_immutable(self, packet):
         """A16: Re-submitting an already-signed visit record returns HTTP 409 Conflict."""
         p = packet["participants"][0]
+        first = self._submit(
+            p["case_number"], "REVIEWER_A", "adj_a@test.acrn",
+            TEST_PASSWORD_PLAIN, DiagnosisCode.PREECLAMPSIA, CertaintyLevel.DEFINITE,
+            visit=2, date_of_diagnosis="2026-08-01T10:00:00",
+        )
+        assert first.status_code in (200, 409), first.text
         r = self._submit(
             p["case_number"], "REVIEWER_A", "adj_a@test.acrn",
             TEST_PASSWORD_PLAIN, DiagnosisCode.PREECLAMPSIA, CertaintyLevel.DEFINITE,
@@ -469,6 +477,7 @@ class TestStage3AdjudicatorFlow:
                 "onset_class": OnsetClass.EOPE.value,
                 "severity": SeverityGrade.WITH_SEVERE.value,
                 "certainty": CertaintyLevel.DEFINITE.value,  # Incompatible with meets_criteria=False
+                "differential_diagnosis": "Alternative diagnoses were considered.",
                 "rationale": "Short note",
             },
         )
@@ -529,6 +538,7 @@ class TestStage3AdjudicatorFlow:
                     "severity": SeverityGrade.WITH_SEVERE.value if diag == DiagnosisCode.PREECLAMPSIA else SeverityGrade.WITHOUT_SEVERE.value,
                     "certainty": cert.value,
                     "rationale": rat,
+                    "differential_diagnosis": "Alternative diagnoses considered against the documented evidence.",
                 },
             )
             assert r.status_code == 200, f"Visit {v_num} submission failed: {r.text}"
@@ -1072,6 +1082,7 @@ class TestBatchSimulationAndDistribution:
                     "diagnosis": diag_a.value, "date_of_diagnosis": dod_str,
                     "onset_class": OnsetClass.EOPE.value, "severity": SeverityGrade.WITH_SEVERE.value,
                     "certainty": cert_a.value, "rationale": f"Batch determination Reviewer A for case {n}",
+                    "differential_diagnosis": "Alternative diagnoses considered against the evidence.",
                 },
             )
             assert sub_a.status_code == 200, f"Reviewer A submission failed on case {n}: {sub_a.text}"
@@ -1086,6 +1097,7 @@ class TestBatchSimulationAndDistribution:
                     "diagnosis": diag_b.value, "date_of_diagnosis": dod_str,
                     "onset_class": OnsetClass.EOPE.value, "severity": SeverityGrade.WITH_SEVERE.value,
                     "certainty": cert_b.value, "rationale": f"Batch determination Reviewer B for case {n}",
+                    "differential_diagnosis": "Alternative diagnoses considered against the evidence.",
                 },
             )
             assert sub_b.status_code == 200, f"Reviewer B submission failed on case {n}: {sub_b.text}"

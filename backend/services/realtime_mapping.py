@@ -2,7 +2,7 @@
 import re
 from datetime import datetime, timezone
 
-MAPPING_VERSION = "RT-MAP-3.0"
+MAPPING_VERSION = "RT-MAP-3.2"
 DIRECT_ALIASES = {
     "event_dt":"visit_date", "visit_date":"visit_date", "ga_event":"ega_weeks",
     "sbp":"bp_systolic", "dbp":"bp_diastolic", "platelets":"platelets", "plt":"platelets",
@@ -187,11 +187,18 @@ def map_variable(row):
     if any(pattern.search(field_text) for pattern in NON_RESULT_PATTERNS):
         return None
     page_text = norm(row.get("Page Title"))
+    form_text = norm(row.get("Form Title"))
+    export_name = norm(row.get("Export Variable Name")).replace(" ", "_")
     if any(pattern.search(page_text) for pattern in NON_RESULT_PATTERNS):
         return None
-    export_name = norm(row.get("Export Variable Name")).replace(" ", "_")
     if export_name in DIRECT_ALIASES:
         return DIRECT_ALIASES[export_name]
+
+    # Eligibility statements may contain phrases such as "gestational age ...
+    # weeks/days" but their values are boolean answers, not GA measurements.
+    # They must never populate ega_weeks/ega_days.
+    if ("inclusion" in page_text or "exclusion" in page_text) and "gestational age" in field_text:
+        return None
 
     # Specific context overrides for newborn/neonatal pages
     if "newborn" in page_text or "neonatal" in page_text:
@@ -201,6 +208,60 @@ def map_variable(row):
             return "newborn_weight_g"
         if field_text in {"gestational age", "gestational age at delivery"}:
             return "ega_delivery"
+        if field_text == "heart":
+            return "neonatal_cardiac_exam"
+        if field_text in {"heart examination description", "heart description"}:
+            return "neonatal_cardiac_exam_desc"
+        if field_text in {"respiration", "respiratory"}:
+            return "neonatal_respiratory_exam"
+        if field_text in {"physical examination", "physical exam"}:
+            return "newborn_physical_exam"
+
+    # Specific context overrides for obstetric ultrasound / sonography pages
+    # These prevent maternal vitals rules from capturing fetal measurements.
+    _US_PAGE_KEYWORDS = ("ultrasound", "sonograph", "obstetric us", "fetal biometry",
+                         "fetal assessment", "fetal wellbeing", "anomaly scan",
+                         "growth scan", "doppler", "amniotic")
+    # RealTime exports distribute ultrasound context between Form Title,
+    # Page Title, Field Label and export variable name. Use all of them so a
+    # fetal field is not lost merely because its page title is generic.
+    ultrasound_context = " | ".join((form_text, page_text, field_text, export_name))
+    if any(kw in ultrasound_context for kw in _US_PAGE_KEYWORDS):
+        if re.search(r"\bfhr\b|fetal heart rate|foetal heart rate", field_text):
+            return "fetal_heart_rate"
+        if re.search(r"\bheart rate\b|\bpulse\b", field_text):
+            # On an ultrasound page "heart rate" refers to the fetus, not the mother
+            return "fetal_heart_rate"
+        if re.search(r"\bpresentation\b|fetal presentation|lie\b", field_text):
+            return "fetal_presentation"
+        if re.search(r"\bbpd\b|biparietal diameter", field_text):
+            return "us_bpd"
+        if re.search(r"\bhc\b|head circumference", field_text):
+            return "us_hc"
+        if re.search(r"\bac\b|abdominal circumference", field_text):
+            return "us_ac"
+        if re.search(r"\bfl\b|femur length", field_text):
+            return "us_fl"
+        if re.search(r"\bdvp\b|deepest vertical pocket|single deepest pocket", field_text):
+            return "us_dvp"
+        if re.search(r"\bafi\b|amniotic fluid index", field_text):
+            return "afi"
+        if re.search(r"\befw\b|estimated fetal weight|fetal weight|\bweight\b", field_text):
+            return "efw"
+        if re.search(r"\bplacenta\b|placental", field_text):
+            return "us_placenta"
+        if re.search(r"\bviability\b|viable|fetal movements?", field_text):
+            return "us_viability"
+        if re.search(r"\banatomy\b|anomaly|structural", field_text):
+            return "us_anatomy"
+        if re.search(r"\bimpression\b|conclusion|overall assessment", field_text):
+            return "us_impression"
+        if re.search(r"\blimitation\b|technical|suboptimal|quality", field_text):
+            return "us_limitations"
+        if re.search(r"\bscan date\b", field_text):
+            return "us_date"
+        if re.search(r"\bsonographer\b|reporting clinician|reported by", field_text):
+            return None  # operational metadata — do not map
 
     for canonical, patterns in RULES:
         if any(p.search(field_text) or (export_name and p.search(export_name)) for p in patterns):
@@ -212,7 +273,16 @@ def map_variable(row):
         if any(p.search(text) for p in patterns):
             return canonical
     return None
+
 def source_value(row): return (row.get("Data Value") or row.get("Data Input") or "").strip()
+
+def source_unit(row):
+    """Return the source unit without duplicating a unit embedded in the value."""
+    explicit = row.get("Unit") or row.get("Unit of Measure") or row.get("Units")
+    unit = str(explicit or "").strip()
+    if not unit:
+        return None
+    return unit
 def parse_datetime(value):
     v=(value or "").strip().split("|")[0].strip()
     if not v: return None

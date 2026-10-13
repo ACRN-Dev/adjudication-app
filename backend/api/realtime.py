@@ -12,6 +12,7 @@ from services.realtime_pipeline import checksum_file,process_batch,audit
 from services.auth_service import current_user, audit_auth
 from services.lab_reference import evaluate_participant_labs, LAB_ANALYTES
 from services.import_readiness import participant_import_readiness
+from services.realtime_mapping import parse_datetime
 from models.auth import PortalUser
 from models.admin import AdjudicatorStudyContract
 from models.canonical import AdjudicationRecord, AdjudicationVisit, Participant
@@ -377,6 +378,76 @@ def _timeline_visit_number(visit, fallback):
     return int(match.group(1)) if match else fallback
 
 
+def _embedded_source_datetime(value):
+    """Parse plain or serialized RealTime date values without mutating source data."""
+    parsed = parse_datetime(str(value or ""))
+    if parsed:
+        return parsed
+    for candidate in re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', str(value or "")):
+        parsed = parse_datetime(candidate.replace('\\"', '"').strip())
+        if parsed:
+            return parsed
+    return None
+
+
+def _participant_approved_edd(participant):
+    """Return one consistent source EDD, or no anchor when source EDDs conflict."""
+    dated = []
+    for visit in participant.visits:
+        for observation in visit.observations:
+            if str(observation.canonical_variable or "").lower() != "edd":
+                continue
+            parsed = (
+                observation.datetime_value
+                or _embedded_source_datetime(observation.raw_source_value)
+                or _embedded_source_datetime(observation.parsed_text_value)
+            )
+            if parsed:
+                dated.append(parsed.date())
+    unique = sorted(set(dated))
+    return (unique[0], unique) if len(unique) == 1 else (None, unique)
+
+
+def _resolved_visit_ga(visit, resolved_date, approved_edd, conflicting_edds=None):
+    """Resolve GA per visit; never borrow a gestational age from another visit."""
+    code = str(visit.scheduled_visit_code or "").upper()
+    if code == "V06":
+        return None, "POSTPARTUM", None
+
+    source_days = visit.gestational_age_days if visit.gestational_age_days and visit.gestational_age_days >= 45 else None
+    derived_days = None
+    if approved_edd and resolved_date:
+        derived_days = 280 - (approved_edd - resolved_date.date()).days
+        if not 45 <= derived_days <= 315:
+            derived_days = None
+
+    discrepancy = None
+    if conflicting_edds:
+        discrepancy = {
+            "is_conflicting": True,
+            "type": "CONFLICTING_DATING_ANCHORS",
+            "message": "Multiple source EDD values prevent deterministic gestational-age calculation.",
+            "source_edds": [value.isoformat() for value in conflicting_edds],
+        }
+    elif source_days is not None and derived_days is not None and abs(source_days - derived_days) > 1:
+        discrepancy = {
+            "is_conflicting": True,
+            "type": "SOURCE_VS_DERIVED_GA",
+            "message": (
+                f"Source GA {source_days // 7}w{source_days % 7}d conflicts with "
+                f"EDD-derived GA {derived_days // 7}w{derived_days % 7}d."
+            ),
+            "source_ga_days": source_days,
+            "derived_ga_days": derived_days,
+        }
+
+    if source_days is not None:
+        return source_days, "SOURCE_RECORDED", discrepancy
+    if derived_days is not None:
+        return derived_days, "DERIVED_FROM_APPROVED_EDD", discrepancy
+    return None, "UNAVAILABLE", discrepancy
+
+
 def timeline(p,db, reviewer_upn=None):
     canonical_participant = db.query(Participant).filter(
         (Participant.case_number == p.blinded_subject_id)
@@ -399,6 +470,7 @@ def timeline(p,db, reviewer_upn=None):
                 ).all()
             }
     visits=[]
+    approved_edd, source_edds = _participant_approved_edd(p)
     ordered_visits = sorted(
         [visit for visit in p.visits if re.fullmatch(r"V0[1-6]", str(visit.scheduled_visit_code or ""), re.IGNORECASE)],
         key=lambda x:(x.visit_sequence or 99, x.visit_datetime is None, x.visit_datetime or datetime.max),
@@ -422,10 +494,19 @@ def timeline(p,db, reviewer_upn=None):
             })
         canonical_visit = canonical_visits.get(visit_number)
         reviewer_record = reviewer_records.get(visit_number)
-        ga_label = f"{v.gestational_age_days // 7} weeks, {v.gestational_age_days % 7} days" if (v.gestational_age_days and v.gestational_age_days >= 45) else None
-
         obs_dts = [o.observation_datetime for o in v.observations if o.observation_datetime]
         resolved_date = v.visit_datetime or (min(obs_dts) if obs_dts else None)
+        resolved_ga_days, ga_provenance, ga_discrepancy = _resolved_visit_ga(
+            v,
+            resolved_date,
+            approved_edd,
+            source_edds if len(source_edds) > 1 else None,
+        )
+        ga_label = (
+            f"{resolved_ga_days // 7} weeks, {resolved_ga_days % 7} days"
+            if resolved_ga_days and resolved_ga_days >= 45
+            else None
+        )
 
         not_performed_reason = None
         for o in v.observations:
@@ -437,7 +518,10 @@ def timeline(p,db, reviewer_upn=None):
 
         visits.append({
             "id":str(v.id),"name":v.scheduled_visit_code,"visit_number":visit_number,"occurrence":v.visit_occurrence,
-            "date":resolved_date,"ga_days":v.gestational_age_days,"ga":ga_label,"gestationalLabel":ga_label,"form":v.form_title,
+            "date":resolved_date,"ga_days":resolved_ga_days,"source_ga_days":v.gestational_age_days,
+            "ga":ga_label,"gestationalLabel":ga_label,"ga_provenance":ga_provenance,
+            "ga_discrepancy":ga_discrepancy,"approved_edd":approved_edd.isoformat() if approved_edd else None,
+            "form":v.form_title,
             "form_version":v.form_version,
             "not_performed_reason": not_performed_reason,
             "reconstruction":{"method":v.reconstruction_method,"confidence":v.reconstruction_confidence,"qc_status":v.qc_status},
@@ -495,6 +579,15 @@ class MonitorApprovalRequest(BaseModel):
 def approve(participant_id:uuid.UUID, req: MonitorApprovalRequest | None = Body(default=None), i=Depends(monitor),db:Session=Depends(get_db)):
     p=db.get(LongitudinalParticipant,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
+    approved_edd, source_edds = _participant_approved_edd(p)
+    if len(source_edds) > 1:
+        raise HTTPException(409,"Monitor/QC review is required to resolve conflicting source EDDs.")
+    for visit in p.visits:
+        observation_dates = [o.observation_datetime for o in visit.observations if o.observation_datetime]
+        resolved_date = visit.visit_datetime or (min(observation_dates) if observation_dates else None)
+        _, _, discrepancy = _resolved_visit_ga(visit, resolved_date, approved_edd)
+        if discrepancy:
+            raise HTTPException(409,"Monitor/QC review is required to resolve conflicting gestational-age evidence.")
     readiness = participant_import_readiness(p)
     if readiness["status"] == "REJECTED":
         raise HTTPException(409, {"message": "Hard import-readiness rejection cannot be overridden.", "readiness": readiness})
@@ -558,7 +651,7 @@ def assigned(i=Depends(actor),db:Session=Depends(get_db)):
 
 @router.get("/progress")
 def progress(i=Depends(actor), db:Session=Depends(get_db)):
-    """Return deduplicated case/visit progress for monitors and assigned adjudicators."""
+    """Return case-level resolution progress and identity-scoped reviewer signature progress."""
     query = db.query(LongitudinalParticipant)
     if not i[2]:
         assigned_ids = [row.participant_id for row in db.query(ReviewerAssignment).filter_by(
@@ -576,6 +669,13 @@ def progress(i=Depends(actor), db:Session=Depends(get_db)):
     total_visits = 0
     completed_visits = 0
     duplicate_source_records = 0
+    reviewer_progress = {
+        "signed_visits": 0,
+        "pending_visits": 0,
+        "completed_cases": 0,
+        "in_progress_cases": 0,
+        "pending_cases": 0,
+    }
     for subject_id, participants in grouped.items():
         canonical = db.query(Participant).filter(
             (Participant.subject_id == subject_id) | (Participant.case_number == subject_id)
@@ -600,19 +700,59 @@ def progress(i=Depends(actor), db:Session=Depends(get_db)):
                         "status": "PENDING",
                     })
         case_completed = sum(1 for visit in visit_rows if visit["status"] in adjudicated_statuses)
+        participant_ids = [participant.id for participant in participants]
+        assigned_roles = {
+            assignment.reviewer_role
+            for assignment in db.query(ReviewerAssignment).filter(
+                ReviewerAssignment.participant_id.in_(participant_ids),
+                ReviewerAssignment.status == "ASSIGNED",
+            ).all()
+            if assignment.reviewer_upn.strip().lower() == i[0].strip().lower()
+        }
+        reviewer_signed_visits = set()
+        if canonical and assigned_roles:
+            reviewer_signed_visits = {
+                record.visit_number
+                for record in db.query(AdjudicationRecord).filter(
+                    AdjudicationRecord.participant_id == canonical.id,
+                    AdjudicationRecord.signed.is_(True),
+                ).all()
+                if record.reviewer_role.value in assigned_roles
+                and record.reviewer_upn.strip().lower() == i[0].strip().lower()
+            }
+        my_signed_count = sum(
+            1 for visit in visit_rows
+            if visit["visit_number"] in reviewer_signed_visits
+        )
+        my_total_visits = len(visit_rows)
+        my_status = (
+            "COMPLETED" if my_total_visits and my_signed_count == my_total_visits else
+            "IN_PROGRESS" if my_signed_count else
+            "PENDING"
+        )
         total_visits += len(visit_rows)
         completed_visits += case_completed
         duplicate_source_records += max(0, len(participants) - 1)
         case_status = "ADJUDICATED_CLOSED" if visit_rows and case_completed == len(visit_rows) else (
             "IN_PROGRESS" if case_completed else "PENDING"
         )
+        reviewer_progress["signed_visits"] += my_signed_count
+        reviewer_progress["pending_visits"] += my_total_visits - my_signed_count
+        reviewer_progress[{
+            "COMPLETED": "completed_cases",
+            "IN_PROGRESS": "in_progress_cases",
+            "PENDING": "pending_cases",
+        }[my_status]] += 1
         assignments = db.query(ReviewerAssignment).filter(
-            ReviewerAssignment.participant_id.in_([participant.id for participant in participants])
+            ReviewerAssignment.participant_id.in_(participant_ids)
         ).all()
         items.append({
             "subject_id": subject_id,
             "case_number": canonical.case_number if canonical else None,
             "status": case_status,
+            "reviewer_status": my_status,
+            "reviewer_signed_visits": my_signed_count,
+            "reviewer_pending_visits": my_total_visits - my_signed_count,
             "total_visits": len(visit_rows),
             "completed_visits": case_completed,
             "pending_visits": len(visit_rows) - case_completed,
@@ -638,6 +778,15 @@ def progress(i=Depends(actor), db:Session=Depends(get_db)):
             "completed_cases": sum(1 for item in items if item["status"] == "ADJUDICATED_CLOSED"),
             "completion_pct": round(completed_visits / total_visits * 100, 1) if total_visits else 0,
             "duplicate_source_records": duplicate_source_records,
+            "reviewer_progress": {
+                **reviewer_progress,
+                "completion_pct": round(
+                    reviewer_progress["signed_visits"]
+                    / (reviewer_progress["signed_visits"] + reviewer_progress["pending_visits"])
+                    * 100,
+                    1,
+                ) if reviewer_progress["signed_visits"] + reviewer_progress["pending_visits"] else 0,
+            },
         },
         "by_case_status": by_case_status,
     }

@@ -30,10 +30,13 @@ const stateIcon = {
 };
 
 export function EvidenceStatusBadge({ state = 'available', label }) {
-  const Icon = stateIcon[state] || I.CheckCircle2;
-  const isNorm = state === 'normal' || state === 'available';
-  const isWarn = state === 'abnormal';
+  const isHigh = label === 'High';
+  const isLow = label === 'Low';
+  const isNorm = state === 'normal' || state === 'available' || label === 'Normal';
+  const isWarn = state === 'abnormal' && !isHigh && !isLow;
   const isSevere = state === 'severe';
+
+  const Icon = isHigh || isSevere ? I.AlertOctagon : (isLow || isWarn ? I.AlertTriangle : (stateIcon[state] || I.CheckCircle2));
   
   let bg = '#f1f5f9';
   let color = '#475569';
@@ -43,14 +46,18 @@ export function EvidenceStatusBadge({ state = 'available', label }) {
     bg = '#f0fdf4';
     color = '#15803d';
     border = '#bbf7d0';
+  } else if (isLow) {
+    bg = '#eff6ff';
+    color = '#1d4ed8';
+    border = '#bfdbfe';
+  } else if (isHigh || isSevere) {
+    bg = '#fef2f2';
+    color = '#b91c1c';
+    border = '#fca5a5';
   } else if (isWarn) {
     bg = '#fffbeb';
     color = '#b45309';
     border = '#fde68a';
-  } else if (isSevere) {
-    bg = '#fef2f2';
-    color = '#b91c1c';
-    border = '#fca5a5';
   }
 
   return (
@@ -155,6 +162,20 @@ export function VisitRibbon({ visits = [], selectedIndex = 0, onSelectVisit, sho
                   ? visit.gestationalLabel
                   : (visit.ga && !/unclassifiable|null|undefined/i.test(String(visit.ga)) ? visit.ga : 'Age not available')}
               </div>
+              {visit.ga_discrepancy?.is_conflicting ? (
+                <div style={{ fontSize: '9.5px', fontWeight: 700, color: '#b91c1c' }}>
+                  GA CONFLICT - review source
+                </div>
+              ) : visit.ga_provenance === 'DERIVED_FROM_APPROVED_EDD' ? (
+                <div style={{ fontSize: '9.5px', color: '#64748b' }}>
+                  Derived from approved EDD
+                </div>
+              ) : null}
+              {isReviewerVisitSigned(visit) && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '9.5px', fontWeight: 700, color: '#15803d' }}>
+                  <I.CheckCircle2 size={11} /> SIGNED BY YOU
+                </div>
+              )}
             </button>
           );
         })}
@@ -1094,8 +1115,33 @@ function _legacyBuildVisitNarrative(visit, visitNum, caseData) {
   // Sonography
   if (visit?.sonography) {
     const s = visit.sonography;
+    const documentedDetails = [];
+    if (s.presentation && s.presentation !== 'unknown') documentedDetails.push(`in ${s.presentation} presentation`);
+    if (s.fhr && s.fhr !== 'not documented') documentedDetails.push(`with a foetal heart rate of ${s.fhr}`);
+    if (s.efwRaw && s.efwRaw !== 'not documented') documentedDetails.push(`an estimated foetal weight of ${s.efwRaw}`);
+    const missingDetails = [];
+    if (!s.presentation || s.presentation === 'unknown') missingDetails.push('fetal presentation');
+    if (!s.fhr || s.fhr === 'not documented') missingDetails.push('fetal heart rate');
+    if (!s.efwRaw || s.efwRaw === 'not documented') missingDetails.push('estimated fetal weight');
+    const joinDetails = (items) => items.length === 1 ? items[0] : `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
+    const documentedText = documentedDetails.length ? ` ${joinDetails(documentedDetails)}.` : '.';
+    const missingText = missingDetails.length ? ` ${joinDetails(missingDetails).replace(/^./, c => c.toUpperCase())} ${missingDetails.length === 1 ? 'was' : 'were'} not documented.` : '';
+    const usFindings = [];
+    if (s.afiRaw) {
+      if (/normal/i.test(s.afiRaw)) {
+        usFindings.push('normal amniotic fluid volume');
+      } else if (/cm/i.test(s.afiRaw)) {
+        usFindings.push(`an amniotic fluid index (AFI) of ${s.afiRaw}`);
+      } else {
+        usFindings.push(`amniotic fluid volume noted as ${s.afiRaw}`);
+      }
+    }
+    if (s.cervicalLength && s.cervicalLength !== 'not documented') {
+      usFindings.push(`a cervical length of ${s.cervicalLength}`);
+    }
+    const usFindingsText = usFindings.length ? ` Ultrasound findings included ${usFindings.join(' and ')}.` : '';
     paragraphs.push(
-      `Obstetric ultrasound at ${s.ega} gestation demonstrated a single viable foetus in ${s.presentation} presentation with a foetal heart rate of ${s.fhr} and an estimated foetal weight of ${s.efwRaw}. Environmental findings included: cervical length ${s.cervicalLength}. ${s.anomalies}. Sonographer notes: ${s.notes}`
+      `Obstetric ultrasound at ${s.ega} gestation demonstrated a single viable foetus${documentedText}${missingText}${usFindingsText}${s.anomalies ? ` ${s.anomalies}.` : ''}${s.notes && s.notes !== 'None documented.' ? ` Sonographer notes: ${s.notes}.` : ''}`
     );
   }
 
@@ -1331,19 +1377,40 @@ export function VisitEvidencePanel({ visit, selectedIndex, visitCount, onSelectV
 export function OverallSummary({ visits = [], caseData }) {
   const clinicalCourseText = generateOverallNarrative(visits, caseData);
 
+  const hdrCellStyle = {
+    padding: '8px 12px',
+    fontWeight: 600,
+    fontSize: '12px',
+    color: 'var(--acrn-navy-dark, #162035)',
+    borderBottom: '1px solid #e2e8f0',
+    whiteSpace: 'nowrap',
+  };
+
+  const cellStyle = {
+    padding: '8px 12px',
+    fontSize: '12px',
+    borderBottom: '1px solid #f1f5f9',
+    whiteSpace: 'nowrap',
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', paddingBottom: '24px' }}>
       {/* ── Narrative Synthesis ───────────────────────────────────────────── */}
       <div style={{
         background: '#ffffff',
-        border: '1px solid var(--border-strong, #cbd5e1)',
-        borderLeft: '4px solid var(--acrn-sky-blue, #4771AD)',
+        border: '1px solid var(--acrn-orange-primary, #F07E26)',
+        borderLeft: '6px solid var(--acrn-orange-primary, #F07E26)',
         borderRadius: '8px',
         padding: '16px 20px',
       }}>
-        <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'var(--acrn-navy-dark, #162035)' }}>
-          Combined Longitudinal Narrative
-        </h4>
+        <div style={{ marginBottom: '12px' }}>
+          <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--acrn-navy-dark, #162035)' }}>
+            FDA Submission-Style Clinical Narrative
+          </h4>
+          <div style={{ marginTop: '4px', fontSize: '11.5px', color: '#64748b' }}>
+            Source-supported chronological synthesis. This narrative presents evidence and does not make the adjudication.
+          </div>
+        </div>
         <pre style={{
           margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
           fontSize: '13.5px', lineHeight: '1.75', fontFamily: 'inherit',

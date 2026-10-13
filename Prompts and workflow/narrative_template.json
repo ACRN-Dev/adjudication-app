@@ -40,7 +40,7 @@
     {
       "id": "sec8",
       "title": "SYNTHESIS FOR ADJUDICATION",
-      "template": "In summary, this is a case of {{contextClue}}. The adjudicating physician is asked to review the source evidence above, taking into account the complete clinical trajectory and the protocol-defined diagnostic criteria for the ACRN PROTECT-Africa / LOPE-Nigeria programme, and to record an independent determination with a supporting rationale. No automated classification should be taken as a clinical conclusion \u2014 the determination rests entirely with the reviewing adjudicator."
+      "template": "{{synthesisSection}}"
     }
   ]
 }

@@ -5,6 +5,7 @@ Tests for Chairperson workspace, completed adjudications, agenda pack, and meeti
 import os
 import sys
 import uuid
+from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -40,7 +41,7 @@ def use_db_override():
         app.dependency_overrides[get_db] = previous
 
 
-def _seed_completed_case(concordant=True):
+def _seed_completed_case(concordant=True, signed_at=None):
     db = TestingSession()
     p = Participant(
         study=StudyCode.EOPE,
@@ -72,6 +73,7 @@ def _seed_completed_case(concordant=True):
         certainty=CertaintyLevel.DEFINITE,
         rationale="Criteria met",
         signed=True,
+        signed_at=signed_at,
     )
     rec_b = AdjudicationRecord(
         participant_id=p.id,
@@ -86,8 +88,48 @@ def _seed_completed_case(concordant=True):
         certainty=CertaintyLevel.DEFINITE if concordant else CertaintyLevel.NOT_PE,
         rationale="Criteria met" if concordant else "Normotensive profile",
         signed=True,
+        signed_at=signed_at,
     )
     db.add_all([rec_a, rec_b])
+    db.commit()
+    subject_id = p.subject_id
+    db.close()
+    return subject_id
+
+
+def _seed_single_reviewer_case():
+    db = TestingSession()
+    p = Participant(
+        study=StudyCode.EOPE,
+        site_code="HARARE_02",
+        subject_id=f"CHAIR-TEST-{uuid.uuid4().hex[:6].upper()}",
+        status=AdjudicationStatus.IN_REVIEW,
+    )
+    db.add(p)
+    db.flush()
+    visit = AdjudicationVisit(
+        participant_id=p.id,
+        visit_number=1,
+        visit_code="VISIT-1",
+        status=AdjudicationStatus.IN_REVIEW.value,
+    )
+    db.add(visit)
+    db.flush()
+    db.add(AdjudicationRecord(
+        participant_id=p.id,
+        visit_id=visit.id,
+        visit_number=1,
+        reviewer_role=ReviewerRole.REVIEWER_A,
+        reviewer_upn="adjudicatora@acrnhealth.com",
+        reviewer_name="Reviewer A",
+        diagnosis=DiagnosisCode.PREECLAMPSIA,
+        onset_class=OnsetClass.EOPE,
+        severity=SeverityGrade.WITH_SEVERE,
+        certainty=CertaintyLevel.DEFINITE,
+        rationale="Criteria met",
+        signed=True,
+        signed_at=datetime.utcnow(),
+    ))
     db.commit()
     subject_id = p.subject_id
     db.close()
@@ -219,6 +261,53 @@ def test_chairperson_lists_each_visit_with_its_own_concordance():
         (2, "DISCORDANT_A_NEQ_B"),
     ]
     assert len({row["id"] for row in rows}) == 2
+
+
+def test_chairperson_roster_puts_recent_submissions_first():
+    older_time = datetime.utcnow() - timedelta(days=1)
+    newer_subject = _seed_completed_case(signed_at=datetime.utcnow())
+    older_subject = _seed_completed_case(signed_at=older_time)
+
+    user = _chairperson_user_with_assignment()
+    previous = app.dependency_overrides.get(current_user)
+    app.dependency_overrides[current_user] = lambda: user
+    try:
+        response = client.get("/api/chairperson/completed-adjudications")
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(current_user, None)
+        else:
+            app.dependency_overrides[current_user] = previous
+
+    assert response.status_code == 200
+    subjects = [item["subject_id"] for item in response.json()["items"]]
+    assert subjects.index(newer_subject) < subjects.index(older_subject)
+
+
+def test_chairperson_agenda_exposes_only_actionable_discordant_rows():
+    concordant_subject = _seed_completed_case(concordant=True)
+    discordant_subject = _seed_completed_case(concordant=False)
+    single_reviewer_subject = _seed_single_reviewer_case()
+
+    user = _chairperson_user_with_assignment()
+    previous = app.dependency_overrides.get(current_user)
+    app.dependency_overrides[current_user] = lambda: user
+    try:
+        response = client.get("/api/chairperson/agenda-pack")
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(current_user, None)
+        else:
+            app.dependency_overrides[current_user] = previous
+
+    assert response.status_code == 200
+    pack = response.json()
+    assert pack["items"] == pack["items_for_committee_arbitration"]
+    assert pack["discordant_count"] == len(pack["items"])
+    assert discordant_subject in {item["subject_id"] for item in pack["items"]}
+    assert concordant_subject not in {item["subject_id"] for item in pack["items"]}
+    assert single_reviewer_subject not in {item["subject_id"] for item in pack["items"]}
+    assert pack["total_cases"] >= 3
 
 
 def test_chairperson_requires_active_assignment():

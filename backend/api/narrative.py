@@ -293,11 +293,11 @@ def generate_narrative(subject_id: str, db: Session = Depends(get_db)):
     narrative = existing or Narrative(participant_id=participant.id)
     narrative.prompt_version = 'v2.0'
     narrative.model_used = model_used
-    narrative.ai_section_1  = sections['section_1']
-    narrative.ai_section_2  = sections.get('section_2', '')
-    narrative.ai_section_3  = sections.get('section_3', '')
-    narrative.ai_section_4  = sections.get('section_4', '')
-    narrative.ai_section_5  = sections.get('section_5', '')
+    # Persist all 13 sections; was previously only storing 5 (sections 6-13 were lost)
+    for i in range(1, 14):
+        key = f'section_{i}'
+        val = sections.get(key, '')
+        setattr(narrative, f'ai_section_{i}', val)
 
     if not existing:
         db.add(narrative)
@@ -337,11 +337,10 @@ def edit_narrative(
     narrative = participant.narratives[0]
 
     # Apply edits — only update non-None sections
-    if edit_req.section_1  is not None: narrative.edited_section_1 = edit_req.section_1
-    if edit_req.section_2  is not None: narrative.edited_section_2 = edit_req.section_2
-    if edit_req.section_3  is not None: narrative.edited_section_3 = edit_req.section_3
-    if edit_req.section_4  is not None: narrative.edited_section_4 = edit_req.section_4
-    if edit_req.section_5  is not None: narrative.edited_section_5 = edit_req.section_5
+    for i in range(1, 14):
+        val = getattr(edit_req, f'section_{i}', None)
+        if val is not None:
+            setattr(narrative, f'edited_section_{i}', val)
 
     narrative.edited_by = edit_req.edited_by
     narrative.edit_rationale = edit_req.edit_rationale
@@ -383,11 +382,11 @@ def get_narrative(subject_id: str, db: Session = Depends(get_db)):
         'form_code': form_code,
         'model_used': narrative.model_used,
         'sections': {
-            'section_1': narrative.edited_section_1 or narrative.ai_section_1 or '',
-            'section_2': narrative.edited_section_2 or narrative.ai_section_2 or '',
-            'section_3': narrative.edited_section_3 or narrative.ai_section_3 or '',
-            'section_4': narrative.edited_section_4 or narrative.ai_section_4 or '',
-            'section_5': narrative.edited_section_5 or narrative.ai_section_5 or '',
+            f'section_{i}':
+                (getattr(narrative, f'edited_section_{i}', None)
+                 or getattr(narrative, f'ai_section_{i}', None)
+                 or '')
+            for i in range(1, 14)
         },
         'is_edited': bool(narrative.edited_at),
         'edited_by': narrative.edited_by,

@@ -141,7 +141,84 @@ const LAB_RANGES = {
  * clinician's narrative and proteinuria section carry the nuance.
  */
 export function inferLabInterpretation(key, numericValue, rawValue) {
-  return { state: 'available', label: 'Source recorded' };
+  const k = String(key || '').trim().toUpperCase();
+  const rawStr = String(rawValue ?? numericValue ?? '').trim();
+
+  // 1. Qualitative / Urinalysis interpretation
+  if (k.includes('PROTEIN') || k.includes('DIPSTICK') || k.includes('UA_') || k.includes('URINE') || k.includes('LEUK') || k.includes('BLOOD') || k.includes('NITRITE') || k.includes('KETONE')) {
+    if (/^(negative|neg|normal|0|nil|none)$/i.test(rawStr)) {
+      return { state: 'normal', label: 'Normal' };
+    }
+    if (/^trace$/i.test(rawStr)) {
+      return { state: 'normal', label: 'Normal' };
+    }
+    if (/^(\d\+|positive|pos|\+{1,4})$/i.test(rawStr)) {
+      return { state: 'abnormal', label: 'High' };
+    }
+    const numVal = typeof numericValue === 'number' ? numericValue : parseFloat(rawStr);
+    if (!Number.isNaN(numVal)) {
+      if (numVal === 0) return { state: 'normal', label: 'Normal' };
+      if (numVal >= 1) return { state: 'abnormal', label: 'High' };
+    }
+  }
+
+  // 2. Direct qualitative text indications
+  if (/^normal$/i.test(rawStr) || /normal\s*\(ncs\)/i.test(rawStr)) {
+    return { state: 'normal', label: 'Normal' };
+  }
+  if (/^high$/i.test(rawStr)) {
+    return { state: 'abnormal', label: 'High' };
+  }
+  if (/^low$/i.test(rawStr)) {
+    return { state: 'abnormal', label: 'Low' };
+  }
+  if (/abnormal\s*\(cs\)/i.test(rawStr) || /^abnormal$/i.test(rawStr)) {
+    return { state: 'abnormal', label: 'Abnormal' };
+  }
+
+  // 3. Quantitative comparison against reference ranges
+  const match = String(rawStr).replace(',', '.').match(/-?\d+(\.\d+)?/);
+  const num = typeof numericValue === 'number'
+    ? numericValue
+    : (match ? Number(match[0]) : null);
+
+  const synonyms = {
+    HEMOGLOBIN: 'HAEMOGLOBIN',
+    HEMATOCRIT: 'HAEMATOCRIT',
+    PLATELET: 'PLATELETS',
+    PLATELET_COUNT: 'PLATELETS',
+    WHITE_BLOOD_CELLS: 'WBC',
+    WHITE_BLOOD_COUNT: 'WBC',
+    RED_BLOOD_CELLS: 'RBC',
+  };
+  const lookupKey = synonyms[k] || Object.keys(LAB_RANGES).find(rk => rk === k || rk === k.replace(/^UA_/, '')) || k;
+
+  if (lookupKey === 'UPCR' && num != null) {
+    return num >= 0.3 ? { state: 'abnormal', label: 'High' } : { state: 'normal', label: 'Normal' };
+  }
+
+  const range = LAB_RANGES[lookupKey];
+  if (range && num != null && !Number.isNaN(num)) {
+    let lowCut = range.low;
+    let highCut = range.high;
+    if (lookupKey === 'CREATININE' && num < 5.0) {
+      lowCut = 0.5;
+      highCut = 1.0;
+    }
+    if (lowCut != null && num < lowCut) {
+      return { state: 'abnormal', label: 'Low' };
+    }
+    if (highCut != null && num > highCut) {
+      return { state: 'abnormal', label: 'High' };
+    }
+    return { state: 'normal', label: 'Normal' };
+  }
+
+  if (rawStr && !/^(not\s*done|not\s*available|missing|n\/a)$/i.test(rawStr)) {
+    return { state: 'normal', label: 'Normal' };
+  }
+
+  return { state: 'not_available', label: 'Not documented' };
 }
 
 /**
@@ -251,7 +328,7 @@ function sourceLabel(row) {
 function fromEvidence(visit, canonicalNames) {
   const evidence = visit?.evidence || {};
   const wanted = new Set(canonicalNames.map(n => String(n).toLowerCase()));
-  const displayValue = (row) => row.numeric_value ?? row.raw_source_value ?? row.result ?? row.value ?? row.parsed_text_value ?? row.coded_value;
+  const displayValue = (row) => preferredEvidenceValue(row);
   return Object.entries(evidence).filter(([name]) => wanted.has(String(name).toLowerCase())).flatMap(([name, list]) => (list || []).map((row, index) => ({
     ...row,
     canonical: name,
@@ -541,17 +618,23 @@ function normalizeVitalsFromEvidence(visit, bpRows) {
   const hrNum = toNumber(hrRaw);
   const cleanHr = (hrNum != null && hrNum >= 30 && hrNum <= 220) ? String(hrNum) : null;
 
+  const tempNum = toNumber(tempRaw);
+  const cleanTemp = (tempNum != null && tempNum >= 25 && tempNum <= 45) ? String(tempNum) : null;
+
   const wtNum = toNumber(weightVal);
   const cleanWeight = (wtNum != null && wtNum >= 20 && wtNum <= 250) ? String(wtNum) : null;
 
-  if (!bpInitial && !cleanHr && !tempRaw && !cleanWeight) return null;
+  const htNum = toNumber(heightRaw);
+  const cleanHeight = (htNum != null && htNum >= 50 && htNum <= 250) ? String(htNum) : null;
+
+  if (!bpInitial && !cleanHr && !cleanTemp && !cleanWeight) return null;
   return {
     bp: bpInitial ? `${bpInitial.sbp}/${bpInitial.dbp} mmHg` : null,
     recheck: bpRecheck ? `${bpRecheck.sbp}/${bpRecheck.dbp} mmHg` : null,
     hr: cleanHr != null ? `${cleanHr} bpm` : null,
-    temp: tempRaw != null ? `${tempRaw}°C` : null,
+    temp: cleanTemp != null ? `${cleanTemp}°C` : null,
     weight: cleanWeight != null ? `${cleanWeight} kg` : null,
-    height: heightRaw != null ? `${heightRaw} cm` : null,
+    height: cleanHeight != null ? `${cleanHeight} cm` : null,
     bmi: bmiRaw != null ? String(bmiRaw) : null,
     bpInterpretation: bpInitial
       ? (bpInitial.sbp >= 160 || bpInitial.dbp >= 110 ? 'Severe-range hypertension'
@@ -571,7 +654,29 @@ function cleanPhpString(str) {
   return s.replace(/[;,]+$/, '').trim();
 }
 
-// Derive a structured sonography object from raw visit evidence (EFW, FHR, AFI)
+function preferredEvidenceValue(row) {
+  if (!row) return null;
+  const raw = row.raw_source_value ?? row.parsed_text_value ?? row.value ?? row.coded_value ?? null;
+  // RealTime repeated fields are PHP-serialised. Their parser also exposes the
+  // repetition index as numeric_value (for example 1 instead of an FHR of
+  // 161), so the serialised source value must win for those rows.
+  if (raw != null && /(?:^|\s)#?\d*\s*-\s*s:\d+:"/i.test(String(raw))) return raw;
+  // Preserve qualitative dipstick grades exactly. A numeric parser may expose
+  // 1 for a source result of 1+, which changes the clinical meaning.
+  if (raw != null && /^(?:trace|negative|positive|\d\+|\+{1,4})$/i.test(String(raw).trim())) return raw;
+  return row.numeric_value ?? raw;
+}
+
+function withUnit(value, unit) {
+  if (value == null || String(value).trim() === '') return null;
+  const text = String(value).trim();
+  const escapedUnit = unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\s*${escapedUnit}$`, 'i').test(text)
+    ? text
+    : `${text} ${unit}`;
+}
+
+// Derive a structured sonography object from raw visit evidence.
 function normalizeSonographyFromEvidence(visit) {
   const evidence = visit?.evidence || {};
   const observations = visit?.observations || [];
@@ -580,11 +685,12 @@ function normalizeSonographyFromEvidence(visit) {
     for (const k of keys) {
       const rows = evidence[k];
       if (rows?.length) {
-        const r = rows[0];
-        const v = r.numeric_value ?? r.raw_source_value ?? r.parsed_text_value ?? r.coded_value ?? null;
-        if (v != null && String(v).trim() !== '') {
-          const cleaned = cleanPhpString(String(v).trim());
-          if (cleaned && !/^(yes|no|not done|not assessed|not evaluated|n\/a)$/i.test(cleaned)) return cleaned;
+        for (const r of rows) {
+          const v = preferredEvidenceValue(r);
+          if (v != null && String(v).trim() !== '') {
+            const cleaned = cleanPhpString(String(v).trim());
+            if (cleaned && !/^(yes|no|not done|not assessed|not evaluated|not applicable|not documented|n\/a)$/i.test(cleaned)) return cleaned;
+          }
         }
       }
     }
@@ -592,12 +698,18 @@ function normalizeSonographyFromEvidence(visit) {
   };
 
   const getObsVal = (pattern) => {
-    const obs = observations.find(o => pattern.test(String(o.source_field || '')));
+    const obs = observations.find(o => pattern.test([
+      o.source_field,
+      o.source_field_label,
+      o.field_label,
+      o.canonical_variable,
+      o.source?.field,
+    ].filter(Boolean).join(' | ')));
     if (!obs) return null;
-    const v = obs.numeric_value ?? obs.raw_source_value ?? obs.value ?? obs.coded_value ?? null;
+    const v = preferredEvidenceValue(obs);
     if (v != null && String(v).trim() !== '') {
       const cleaned = cleanPhpString(String(v).trim());
-      if (cleaned && !/^(yes|no|not done|not assessed|not evaluated|n\/a)$/i.test(cleaned)) return cleaned;
+      if (cleaned && !/^(yes|no|not done|not assessed|not evaluated|not applicable|not documented|n\/a)$/i.test(cleaned)) return cleaned;
     }
     return null;
   };
@@ -607,23 +719,61 @@ function normalizeSonographyFromEvidence(visit) {
   const afiRaw = firstVal(['afi', 'AFI']) || getObsVal(/AMNIO/i);
   const cervRaw = firstVal(['cervical_length', 'CERVICAL_LENGTH']) || getObsVal(/CERVIX/i);
   const ega = getObsVal(/ULTRASNDEGADESCR_OLD/i) || visit?.gestationalLabel || '';
-  const presentation = getObsVal(/ULTRASNDPRESDESCR/i);
-  const anomalies = getObsVal(/ULTRASNDANOMALDESC/i) || 'No gross foetal anomalies were appreciated';
+  const presentation = getObsVal(/ULTRASNDPRESDESCR|presentation|lie/i);
+  const anomalies = getObsVal(/ULTRASNDANOMALDESC|anomal|structural/i);
   const notes = getObsVal(/ULTRASNDCOMM/i);
+  const movement = firstVal(['us_viability', 'US_VIABILITY']);
+  const placenta = firstVal(['us_placenta', 'US_PLACENTA']);
+  const scanDate = firstVal(['dating_anchor_date', 'us_date', 'US_DATE']);
+  const edd = firstVal(['edd', 'EDD']);
 
-  if (!efwRaw && !fhrRaw && !afiRaw && !presentation && !notes && !cervRaw) return null;
+  let cleanAfi = null;
+  if (afiRaw != null) {
+    const rawStr = String(afiRaw).trim();
+    if (/^normal$/i.test(rawStr) || rawStr === '1' || rawStr === '0') {
+      cleanAfi = 'normal';
+    } else if (/oligohydramnios/i.test(rawStr)) {
+      cleanAfi = 'oligohydramnios';
+    } else if (/polyhydramnios/i.test(rawStr)) {
+      cleanAfi = 'polyhydramnios';
+    } else if (!isNaN(rawStr)) {
+      const num = parseFloat(rawStr);
+      // Valid numeric AFI measurement in cm is typically > 2.0 (normal 5 - 25 cm).
+      // A raw 0 or 1 from radio options represents option index / normal, not 1 cm!
+      if (num <= 1) {
+        cleanAfi = 'normal';
+      } else {
+        cleanAfi = withUnit(rawStr, 'cm');
+      }
+    } else {
+      cleanAfi = rawStr;
+    }
+  }
+
+  let cleanCervical = null;
+  if (cervRaw != null) {
+    const cervStr = String(cervRaw).trim();
+    if (!/^(not documented|not assessed|not done|none|n\/a|0)$/i.test(cervStr)) {
+      cleanCervical = isNaN(cervStr) ? cervStr : withUnit(cervStr, 'cm');
+    }
+  }
+
+  if (!efwRaw && !fhrRaw && !cleanAfi && !presentation && !notes && !cleanCervical && !movement && !placenta && !scanDate) return null;
 
   return {
-    efwRaw: efwRaw != null ? (isNaN(efwRaw) ? efwRaw : `${efwRaw}g`) : 'not documented',
-    fhr: fhrRaw != null ? (isNaN(fhrRaw) ? fhrRaw : `${fhrRaw} bpm`) : 'not documented',
-    afiRaw: afiRaw != null ? (isNaN(afiRaw) ? afiRaw : `${afiRaw} cm`) : null,
-    cervicalLength: cervRaw != null ? (isNaN(cervRaw) ? cervRaw : `${cervRaw} cm`) : 'not documented',
+    efwRaw: efwRaw != null ? (isNaN(efwRaw) ? efwRaw : withUnit(efwRaw, 'g')) : 'not documented',
+    fhr: fhrRaw != null ? (isNaN(fhrRaw) ? fhrRaw : withUnit(fhrRaw, 'bpm')) : 'not documented',
+    afiRaw: cleanAfi,
+    cervicalLength: cleanCervical,
     ega: ega || 'unknown',
     presentation: presentation || 'unknown',
-    anomalies: anomalies,
+    anomalies: anomalies || null,
     notes: notes || 'None documented.',
-    placentaFluid: null,
-    scanDate: null,
+    movement: movement || null,
+    placenta: placenta || null,
+    placentaFluid: placenta || null,
+    scanDate: scanDate || null,
+    edd: edd || null,
   };
 }
 
@@ -778,10 +928,7 @@ export function normalizeVisitEvidence(caseData = {}) {
         if (days && days >= 45) {
           return `${Math.floor(days / 7)} weeks, ${days % 7} days`;
         }
-        if (caseData.gaAtEvent && !/unclassifiable|null|undefined/i.test(String(caseData.gaAtEvent))) {
-          return String(caseData.gaAtEvent);
-        }
-        return 'Antenatal';
+        return 'Gestational age unavailable';
       })(),
       bp,
       labs,
@@ -1052,14 +1199,10 @@ export function buildDemographicString(age, gravida, para_live, para_misc, condi
     }
   }
 
-  let med_string = '';
   if (!cleanCondStr || bad_conditions.has(cleanCondStr.toLowerCase())) {
-    med_string = 'with no known prior medical history or chronic conditions.';
-  } else {
-    med_string = `Her medical history is significant for ${cleanCondStr}.`;
+    return `${base}, ${obs_string}, presents for routine clinical trial screening with no known prior medical history or chronic conditions.`;
   }
-
-  return `Presenting ${base.replace(/^A /i, 'a ')} (${obs_string}) for clinical trial screening. ${med_string}`;
+  return `${base}, ${obs_string}, presents for clinical trial screening. Her medical history is significant for ${cleanCondStr}.`;
 }
 
 

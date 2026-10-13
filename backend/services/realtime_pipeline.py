@@ -6,7 +6,7 @@ from cryptography.fernet import Fernet
 from database import SessionLocal
 from models.history import PatientHistory, PatientHistoryField, PatientRiskSummary
 from models.longitudinal import RTImportBatch,LongitudinalParticipant,RestrictedIdentityCrosswalk,VisitInstance,CanonicalObservation,ImportIssue,LongitudinalAuditEvent,LongitudinalCaseDerivation
-from services.realtime_mapping import classify,map_variable,source_value,parse_datetime,parse_numeric,parse_coded,visit_code,MAPPING_VERSION,is_clinical_candidate
+from services.realtime_mapping import classify,map_variable,source_value,source_unit,parse_datetime,parse_numeric,parse_coded,visit_code,MAPPING_VERSION,is_clinical_candidate
 from services.longitudinal_derivation import derive_participant
 from services.history_parser import is_history_form, process_history_row, finalize_history
 from services.import_readiness import participant_import_readiness
@@ -212,7 +212,7 @@ def process_batch(batch_id, reset=False):
                     else:
                         weeks = (visit.gestational_age_days or 0) // 7
                         visit.gestational_age_days = weeks * 7 + round(val)
-                obs=CanonicalObservation(participant_id=p.id,visit_id=visit.id,source_batch_id=batch.id,canonical_variable=canonical,raw_source_value=value,parsed_text_value=value or None,numeric_value=parse_numeric(value),datetime_value=dt,coded_value=parse_coded(value),observation_datetime=dt or visit.visit_datetime,date_confidence="EXACT" if dt else ("INFERRED" if visit.visit_datetime else "MISSING"),source_form=form,source_page=row.get("Page Title"),source_field_label=row.get("Field Label"),source_row_number=row_no,mapping_version=MAPPING_VERSION,quality_status="VALID" if value else "MISSING",provenance_type="SOURCE_RECORDED",prohibited_flag=False,source_fingerprint=fp)
+                obs=CanonicalObservation(participant_id=p.id,visit_id=visit.id,source_batch_id=batch.id,canonical_variable=canonical,raw_source_value=value,parsed_text_value=value or None,numeric_value=parse_numeric(value),datetime_value=dt,coded_value=parse_coded(value),unit=source_unit(row),observation_datetime=dt or visit.visit_datetime,date_confidence="EXACT" if dt else ("INFERRED" if visit.visit_datetime else "MISSING"),source_form=form,source_page=row.get("Page Title"),source_field_label=row.get("Field Label"),source_row_number=row_no,mapping_version=MAPPING_VERSION,quality_status="VALID" if value else "MISSING",documentation_status="Documented",provenance_type="SOURCE_RECORDED",prohibited_flag=False,source_fingerprint=fp)
                 db.add(obs); batch.rows_processed=row_no-1
                 reconciliation["successfully_mapped_clinical_rows"] += 1
                 if row_no%5000==0: db.commit()

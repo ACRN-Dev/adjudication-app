@@ -84,7 +84,12 @@ class CanonicalObservation(Base):
     parsed_text_value = Column(Text); numeric_value = Column(Float); datetime_value = Column(DateTime); coded_value = Column(String(100)); unit = Column(String(40))
     observation_datetime = Column(DateTime, index=True); date_confidence = Column(String(20), default="MISSING")
     source_form = Column(String(255)); source_page = Column(String(255)); source_field_label = Column(String(500)); source_row_number = Column(Integer)
-    mapping_version = Column(String(40)); quality_status = Column(String(40), default="VALID"); provenance_type = Column(String(30), default="SOURCE_RECORDED")
+    mapping_version = Column(String(40)); quality_status = Column(String(40), default="VALID")
+    # 7-value documentation-status taxonomy (Phase 5 validation populates this):
+    #   Documented | Not documented | Not assessed | Unable to assess |
+    #   Not applicable | Conflicting | Pending verification
+    documentation_status = Column(String(40), nullable=True)
+    provenance_type = Column(String(30), default="SOURCE_RECORDED")
     prohibited_flag = Column(Boolean, default=False); superseded = Column(Boolean, default=False); source_fingerprint = Column(String(64), index=True)
     visit = relationship("VisitInstance", back_populates="observations")
     __table_args__ = (Index("ix_obs_participant_variable_date","participant_id","canonical_variable","observation_datetime"),)
@@ -157,3 +162,59 @@ class LabReferenceRange(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     __table_args__ = (UniqueConstraint("analyte", "site_code", "lab_code", name="uq_lab_reference_scope"),)
+
+
+class UltrasoundReport(Base):
+    """
+    Three-layer canonical ultrasound data model per Dr. Makadzange & Codex plan:
+      Layer 1: Raw text & metadata (traceable source evidence)
+      Layer 2: Structured biometric measurements & Doppler observations
+      Layer 3: Controlled clinical prose presentation
+    """
+    __tablename__ = "ultrasound_reports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    participant_id = Column(UUID(as_uuid=True), ForeignKey("longitudinal_participants.id"), nullable=False, index=True)
+    visit_id = Column(UUID(as_uuid=True), ForeignKey("visit_instances.id"), nullable=True, index=True)
+    source_batch_id = Column(UUID(as_uuid=True), ForeignKey("rt_import_batches.id"), nullable=False)
+
+    # Layer 1: Raw report text & scan metadata
+    scan_date = Column(DateTime, nullable=True, index=True)
+    gestational_age_weeks = Column(Float, nullable=True)
+    gestational_age_days = Column(Integer, nullable=True)
+    fetal_number = Column(Integer, default=1)  # 1 for singleton, 2 for twin A, etc.
+    raw_report_text = Column(Text, nullable=True)
+    sonographer_notes = Column(Text, nullable=True)
+    technical_limitations = Column(Text, nullable=True)
+
+    # Layer 2: Normalized structured biometric & clinical observations
+    viability = Column(String(30), nullable=True)               # e.g. "VIABLE", "NON_VIABLE"
+    fetal_heart_rate = Column(Float, nullable=True)            # bpm
+    fetal_presentation = Column(String(50), nullable=True)      # e.g. "CEPHALIC", "BREECH", "TRANSVERSE"
+    placenta_position = Column(String(100), nullable=True)      # e.g. "ANTERIOR", "POSTERIOR", "PREVIA"
+    bpd_mm = Column(Float, nullable=True)                       # biparietal diameter
+    hc_mm = Column(Float, nullable=True)                        # head circumference
+    ac_mm = Column(Float, nullable=True)                        # abdominal circumference
+    fl_mm = Column(Float, nullable=True)                        # femur length
+    efw_g = Column(Float, nullable=True)                        # estimated fetal weight (grams)
+    efw_centile = Column(Float, nullable=True)                  # percentile rank
+    afi_cm = Column(Float, nullable=True)                       # amniotic fluid index
+    dvp_cm = Column(Float, nullable=True)                       # deepest vertical pocket
+    cervical_length_mm = Column(Float, nullable=True)           # cervical length
+    ua_doppler_flow = Column(String(50), nullable=True)         # "NORMAL", "AEDF", "REDF"
+    structural_anomalies = Column(Text, nullable=True)
+
+    # Status & quality flags (7-value documentation status taxonomy)
+    documentation_status = Column(String(40), default="Documented")
+    quality_status = Column(String(40), default="VALID")
+    review_flag = Column(Boolean, default=False)
+    review_note = Column(Text, nullable=True)
+
+    # Layer 3: Controlled clinical prose narrative
+    generated_narrative = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    participant = relationship("LongitudinalParticipant", backref="ultrasound_reports")
+    visit = relationship("VisitInstance", backref="ultrasound_reports")

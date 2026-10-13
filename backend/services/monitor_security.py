@@ -38,9 +38,9 @@ def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get
             user=db.get(PortalUser,session.user_id)
             if user and user.status=="ACTIVE":
                 if user.role in {"MONITOR", "MEDICAL_OFFICER", "MEDICAL_MONITOR"}:
-                    pr = user.portal_role or user.role
+                    pr = user.portal_role
                     if pr not in ROLES:
-                        # Provisioning gap, not a permission denial — see backend/api/realtime.py actor().
+                        # A missing portal role is an unprovisioned account, not monitor access.
                         raise HTTPException(403,"Monitor Portal access denied")
                     studies=tuple(filter(None,(user.study_scope or "*").split(",")))
                     return MonitorIdentity(user.email,pr,studies)
@@ -79,4 +79,3 @@ def release_gate(final_qc,committee_locked=True):
 def audit(db,i,action,entity,eid,study,reason,details=None,outcome="SUCCESS"):
     raw=f"{datetime.now(timezone.utc).isoformat()}|{i.upn}|{action}|{eid}"
     db.add(MonitorAuditEvent(actor_upn=i.upn,actor_role=i.role,action=action,entity_type=entity,entity_id=eid,study_code=study,reason=reason,outcome=outcome,details=details or {},record_hash=hashlib.sha256(raw.encode()).hexdigest(),is_demo=True))
-

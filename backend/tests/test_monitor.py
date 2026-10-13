@@ -8,7 +8,8 @@ from main import app
 from services.monitor_security import scan_blinding,validate_import,qc_gate,assignment_gate,release_gate
 from services.workflow_policy import check_reviewer_isolation,check_committee_quorum,evaluate_concordance
 from conftest import TestingSession
-from models.longitudinal import RTImportBatch, LongitudinalParticipant, VisitInstance
+from models.longitudinal import CanonicalObservation, RTImportBatch, LongitudinalParticipant, ReviewerAssignment, VisitInstance
+from models.canonical import AdjudicationRecord, AdjudicationVisit, Participant, ReviewerRole, StudyCode
 
 client = TestClient(app)
 
@@ -62,9 +63,10 @@ def test_monitor_session_grants_access_using_portal_role(monkeypatch):
     ))
     db.commit()
     db.close()
-    login = client.post("/api/auth/login", json={"email": "sso.monitor@acrnhealth.com", "password": "Whatever123!"})
+    session_client = TestClient(app)
+    login = session_client.post("/api/auth/login", json={"email": "sso.monitor@acrnhealth.com", "password": "Whatever123!"})
     assert login.status_code == 200
-    r = client.get("/api/monitor/me", cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]})
+    r = session_client.get("/api/monitor/me", cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]})
     assert r.status_code == 200
     assert r.json()["role"] == "MONITOR_QC_REVIEWER"
 
@@ -80,9 +82,10 @@ def test_monitor_session_without_portal_role_denied(monkeypatch):
     ))
     db.commit()
     db.close()
-    login = client.post("/api/auth/login", json={"email": "no.portal.role.monitor@acrnhealth.com", "password": "Whatever123!"})
+    session_client = TestClient(app)
+    login = session_client.post("/api/auth/login", json={"email": "no.portal.role.monitor@acrnhealth.com", "password": "Whatever123!"})
     assert login.status_code == 200
-    r = client.get("/api/monitor/me", cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]})
+    r = session_client.get("/api/monitor/me", cookies={"acrn_demo_session": login.cookies["acrn_demo_session"]})
     assert r.status_code == 403
 
 
@@ -137,11 +140,101 @@ def test_monitor_progress_collapses_duplicate_source_batches(monkeypatch):
     db.commit()
     db.close()
 
-    response = client.get("/api/realtime/progress", headers={"X-Demo-User": "monitor1@acrnhealth.com", "X-Demo-Role": "MONITOR_QC_REVIEWER"})
+    response = TestClient(app).get("/api/realtime/progress", headers={"X-Demo-User": "monitor1@acrnhealth.com", "X-Demo-Role": "MONITOR_QC_REVIEWER"})
     assert response.status_code == 200, response.text
     item = next(row for row in response.json()["items"] if row["subject_id"] == subject_id)
     assert item["total_visits"] == 1
     assert item["duplicate_source_count"] == 1
+
+
+def test_reviewer_progress_counts_only_the_requesting_reviewers_signed_visits(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "true")
+    db = TestingSession()
+    subject_id = f"REVIEWER-PROGRESS-{uuid.uuid4().hex[:8].upper()}"
+    batch = RTImportBatch(
+        filename="reviewer-progress.csv",
+        checksum=uuid.uuid4().hex,
+        file_size=10,
+        uploaded_by="monitor1@acrnhealth.com",
+    )
+    db.add(batch)
+    db.flush()
+    rt_participant = LongitudinalParticipant(
+        blinded_subject_id=subject_id,
+        source_batch_id=batch.id,
+        study="PROTECT-Africa",
+        workflow_status="ASSIGNED",
+    )
+    canonical = Participant(subject_id=subject_id, study=StudyCode.EOPE)
+    db.add_all([rt_participant, canonical])
+    db.flush()
+    visits = [
+        AdjudicationVisit(
+            participant_id=canonical.id,
+            visit_number=visit_number,
+            visit_code=f"V{visit_number:02d}",
+            status="IN_REVIEW",
+        )
+        for visit_number in (1, 2)
+    ]
+    db.add_all(visits)
+    db.flush()
+    db.add_all([
+        ReviewerAssignment(
+            participant_id=rt_participant.id,
+            reviewer_upn="adjudicatora@acrnhealth.com",
+            reviewer_role="REVIEWER_A",
+            status="ASSIGNED",
+        ),
+        ReviewerAssignment(
+            participant_id=rt_participant.id,
+            reviewer_upn="adjudicatorb@acrnhealth.com",
+            reviewer_role="REVIEWER_B",
+            status="ASSIGNED",
+        ),
+        AdjudicationRecord(
+            participant_id=canonical.id,
+            visit_id=visits[0].id,
+            visit_number=1,
+            reviewer_role=ReviewerRole.REVIEWER_A,
+            reviewer_upn="adjudicatora@acrnhealth.com",
+            signed=True,
+        ),
+        *[
+            AdjudicationRecord(
+                participant_id=canonical.id,
+                visit_id=visit.id,
+                visit_number=visit.visit_number,
+                reviewer_role=ReviewerRole.REVIEWER_B,
+                reviewer_upn="adjudicatorb@acrnhealth.com",
+                signed=True,
+            )
+            for visit in visits
+        ],
+    ])
+    db.commit()
+    db.close()
+
+    progress_client = TestClient(app)
+    reviewer_a = progress_client.get(
+        "/api/realtime/progress",
+        headers={"X-Demo-User": "adjudicatora@acrnhealth.com", "X-Demo-Role": "ADJUDICATOR"},
+    )
+    reviewer_b = progress_client.get(
+        "/api/realtime/progress",
+        headers={"X-Demo-User": "adjudicatorb@acrnhealth.com", "X-Demo-Role": "ADJUDICATOR"},
+    )
+    assert reviewer_a.status_code == 200, reviewer_a.text
+    assert reviewer_b.status_code == 200, reviewer_b.text
+    item_a = next(item for item in reviewer_a.json()["items"] if item["subject_id"] == subject_id)
+    item_b = next(item for item in reviewer_b.json()["items"] if item["subject_id"] == subject_id)
+    assert item_a["status"] == "PENDING"
+    assert item_a["reviewer_status"] == "IN_PROGRESS"
+    assert item_a["reviewer_signed_visits"] == 1
+    assert item_a["reviewer_pending_visits"] == 1
+    assert item_b["reviewer_status"] == "COMPLETED"
+    assert item_b["reviewer_signed_visits"] == 2
+    assert item_b["reviewer_pending_visits"] == 0
 
 
 def test_conflicting_dates_block_qc_approval_without_date_label(monkeypatch):
@@ -166,14 +259,31 @@ def test_conflicting_dates_block_qc_approval_without_date_label(monkeypatch):
         reconstruction_confidence="HIGH",
         qc_status="MONITOR_QC_REQUIRED",
     ))
+    db.flush()
+    visit = db.query(VisitInstance).filter_by(participant_id=participant.id).one()
+    db.add_all([
+        CanonicalObservation(
+            participant_id=participant.id,
+            visit_id=visit.id,
+            source_batch_id=participant.source_batch_id,
+            canonical_variable="EDD",
+            datetime_value=datetime(2026, 1, 1),
+        ),
+        CanonicalObservation(
+            participant_id=participant.id,
+            visit_id=visit.id,
+            source_batch_id=participant.source_batch_id,
+            canonical_variable="EDD",
+            datetime_value=datetime(2026, 2, 1),
+        ),
+    ])
     db.commit()
     participant_id = str(participant.id)
     db.close()
 
-    response = client.post(
+    response = TestClient(app).post(
         f"/api/realtime/patients/{participant_id}/approve",
         headers={"X-Demo-User": "monitor1@acrnhealth.com", "X-Demo-Role": "MONITOR_QC_REVIEWER"},
     )
     assert response.status_code == 409, response.text
     assert "Monitor/QC review" in response.json()["detail"]
-
