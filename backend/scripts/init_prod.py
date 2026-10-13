@@ -5,8 +5,9 @@ Run inside the application container against the external production Postgres:
     docker compose -f docker-compose.yml -f docker-compose.prod.yml \
         run --rm app python backend/scripts/init_prod.py
 
-Pass --schema-only during routine deployment to apply migrations and verify model
-columns without purging demo data or changing accounts.
+Pass --schema-only only when schema verification is needed without removing marked
+demo data or reconciling bootstrap administrators. Production deployment scripts run
+the full initializer so demo fixtures and demo accounts are removed before startup.
 
 Every step is idempotent, so this is safe to re-run on each deployment. Unlike the
 application itself, this script never falls back to SQLite: if the production Postgres
@@ -444,6 +445,8 @@ if remaining_demo:
     problems.append(f"{remaining_demo} demo row(s) still present")
 if os.getenv("ENABLE_DEMO_ACCOUNTS", "false").lower() == "true":
     problems.append("ENABLE_DEMO_ACCOUNTS is true -- demo seeding is active in this environment")
+if os.getenv("ENABLE_DEMO_DATA", "false").lower() == "true":
+    problems.append("ENABLE_DEMO_DATA is true -- synthetic Admin Portal fixtures are enabled")
 
 if problems:
     fail("Post-initialisation verification failed:\n       - " + "\n       - ".join(problems))

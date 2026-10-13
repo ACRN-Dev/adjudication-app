@@ -186,9 +186,12 @@ CREATE DATABASE "acrn_adjudication" OWNER "<DB_USER>";
 
 Bootstrap administrators are defined in `BOOTSTRAP_ADMINS` at the top of [backend/scripts/init_prod.py](backend/scripts/init_prod.py). They sign in through Microsoft SSO with no local password, and hold the full `ADMIN` permission set so they can provision everyone else from the Admin Portal. Edit that list to change who gets bootstrap access.
 
-`./scripts/deploy-prod.sh` remains available for a plain rebuild-and-restart with no database work.
+`./scripts/deploy-prod.sh` also applies migrations, removes only explicitly marked demo rows
+and demo accounts, verifies the production database, and then rebuilds and restarts the app.
+Use `./scripts/init-prod.sh --dry-run` first to preview the records that would be removed.
+Real clinical records and administrator-provisioned accounts are not removed by this cleanup.
 
-**No test data reaches production by default.** `ENABLE_DEMO_ACCOUNTS` is pinned to `false` by `docker-compose.prod.yml`, so demo credentials and header-based authentication are never available there. A dedicated hosted demonstration environment may set `ENABLE_DEMO_DATA=true` to enable resettable synthetic Admin Portal fixtures; authentication remains SSO-only and uses administrator-provisioned users. Leave `ENABLE_DEMO_DATA=false` for live clinical production. Real account management is unaffected — it lives on the separate `/api/auth/users` endpoints.
+**No test data reaches production by default.** The production Compose overlay builds without the demo login panel and demo Admin Portal fixtures, and pins `ENABLE_DEMO_DATA` and `ENABLE_DEMO_ACCOUNTS` to `false`, so demo credentials, demo resets and header-based authentication are unavailable. In production the Admin Portal is limited to live user-account management and environment health; the synthetic-data Owner Portal and demo-only admin sections are disabled. The separate demo Compose overlay opts demo features and fixtures back in for hosted demonstrations. Keep the production overlay for live clinical data; its database initialization removes only records explicitly marked synthetic and demo accounts. Real account management is unaffected — it lives on the separate `/api/auth/users` endpoints.
 
 ### Local development with a bundled Postgres (no external DB access)
 

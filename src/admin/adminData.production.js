@@ -1,0 +1,17 @@
+export const demoUsers = [];
+export const studies = [];
+export const sites = [];
+export const rules = [];
+export const mappings = [];
+export const forms = [];
+export const integrations = [];
+export const audits = [];
+export const workflow = [];
+export const training = [];
+export const endpoints = [];
+export const visitWindows = [];
+export const terminology = [];
+export const dictionaries = [];
+export const prohibitedWords = [];
+export const importContracts = [];
+export const sops = [];

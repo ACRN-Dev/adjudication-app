@@ -12,8 +12,8 @@ COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 echo "Building application image..."
 $COMPOSE build
 
-echo "Applying and verifying database migrations (no data purge)..."
-$COMPOSE run --rm --no-deps app python backend/scripts/init_prod.py --schema-only
+echo "Applying and verifying database migrations; removing marked demo records and accounts..."
+$COMPOSE run --rm --no-deps app python backend/scripts/init_prod.py
 
 echo "Starting application..."
 $COMPOSE up -d

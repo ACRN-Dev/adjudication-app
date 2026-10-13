@@ -8,7 +8,6 @@ import HelpModal from './components/HelpModal';
 import SopLibraryModal from './components/SopLibraryModal';
 import RecusalModal from './components/RecusalModal';
 import DataQueryModal from './components/DataQueryModal';
-import CommitteeDashboard from './components/CommitteeDashboard';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoginPage from './components/LoginPage';
 import ForceChangePassword from './components/ForceChangePassword';
@@ -16,6 +15,7 @@ import AdminPortal from './admin/AdminPortal';
 import MonitorPortal from './monitor/MonitorPortal';
 import ChairpersonPortal from './chairperson/ChairpersonPortal';
 import OwnerPortal from './owner/OwnerPortal';
+import { DEMO_UI_BUILD_ENABLED } from './config/featureFlags';
 
 import { listAssigned, getAssigned, asWorkbenchCase } from './services/realtimeApi';
 import { me, logout as logoutApi } from './services/authApi';
@@ -208,6 +208,26 @@ export default function App() {
   }
 
   if (user?.portal === 'owner' || currentPath.startsWith('/owner')) {
+    if (!DEMO_UI_BUILD_ENABLED) {
+      return (
+        <div role="status" style={{ padding: 40, fontFamily: 'Poppins, sans-serif' }}>
+          <h1>Owner portal unavailable</h1>
+          <p>The owner portal is disabled in this deployment while its demonstration data is being replaced with live operational data.</p>
+          {user?.roleCode === 'OWNER' && (
+            <button
+              className="btn-primary"
+              onClick={() => {
+                history.pushState({}, '', '/admin/users');
+                setCurrentPath('/admin/users');
+              }}
+            >
+              Open user administration
+            </button>
+          )}
+          <button className="btn-primary" onClick={handleLogout}>Sign out</button>
+        </div>
+      );
+    }
     return <OwnerPortal user={user} onLogout={handleLogout} />;
   }
   if (currentPath.startsWith('/admin')) {
@@ -260,7 +280,14 @@ export default function App() {
           <>
 
             {activeView === 'committee' && isCommitteeCase ? (
-              <CommitteeDashboard caseData={activeCase} onAdoptOutcome={() => setActiveView('workbench')} />
+              <div className="wizard-card" role="status">
+                <h2>Committee arbitration</h2>
+                <p>
+                  The legacy committee review screen has been disabled because it displayed
+                  synthetic sample determinations. Committee cases must be reviewed in the
+                  Chairperson Portal using the persisted adjudication record.
+                </p>
+              </div>
             ) : (
             <AdjudicatorWorkbench
               currentStep={currentStep}

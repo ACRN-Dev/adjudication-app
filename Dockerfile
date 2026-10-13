@@ -8,6 +8,8 @@ RUN npm ci
 COPY index.html vite.config.js ./
 COPY public ./public
 COPY src ./src
+ARG VITE_ENABLE_DEMO_UI=false
+ENV VITE_ENABLE_DEMO_UI=${VITE_ENABLE_DEMO_UI}
 RUN npm run build
 
 # ---- Stage 2: Python runtime serving the API + built SPA ----

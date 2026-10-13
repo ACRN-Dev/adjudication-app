@@ -13,6 +13,9 @@
 
 services:
   app:
+    build:
+      args:
+        VITE_ENABLE_DEMO_UI: "true"
     environment:
       # Enable resettable synthetic data in the deployed demonstration environment.
       ENABLE_DEMO_DATA: "true"

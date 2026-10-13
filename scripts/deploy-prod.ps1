@@ -17,9 +17,9 @@ Write-Host "Building application image..."
 docker compose @composeFiles build
 if ($LASTEXITCODE -ne 0) { throw "Docker build failed." }
 
-Write-Host "Applying and verifying database migrations (no data purge)..."
-docker compose @composeFiles run --rm --no-deps app python backend/scripts/init_prod.py --schema-only
-if ($LASTEXITCODE -ne 0) { throw "Database migration failed; the existing app was not replaced." }
+Write-Host "Applying and verifying database migrations; removing marked demo records and accounts..."
+docker compose @composeFiles run --rm --no-deps app python backend/scripts/init_prod.py
+if ($LASTEXITCODE -ne 0) { throw "Production database preparation failed; the existing app was not replaced." }
 
 Write-Host "Starting application..."
 docker compose @composeFiles up -d

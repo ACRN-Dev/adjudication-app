@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { SSO_LOGIN_URL, getAuthConfig, login } from '../services/authApi';
+import { DEMO_UI_BUILD_ENABLED } from '../config/featureFlags';
 
 const DEMO_ACCOUNTS = [
   { label: 'Admin', email: 'admin@acrnhealth.com', badge: '🔑', desc: 'System Administration' },
@@ -16,9 +17,9 @@ const DEMO_ACCOUNTS = [
 export default function LoginPage({ onLoginSuccess }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [busy, setBusy] = useState(false);
-  const [demoEnabled, setDemoEnabled] = useState(true);
-  const [email, setEmail] = useState('admin@acrnhealth.com');
-  const [password, setPassword] = useState('ACRN@2026');
+  const [demoEnabled, setDemoEnabled] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -45,8 +46,12 @@ export default function LoginPage({ onLoginSuccess }) {
     getAuthConfig()
       .then(config => {
         if (active) {
-          // Always keep demo panel active on local development, or if backend reports demo_enabled !== false
-          const isDemo = isLocalhost || Boolean(config?.demo_enabled);
+          // An explicit server setting always wins, including for localhost tunnels to production.
+          const isDemo = DEMO_UI_BUILD_ENABLED && (
+            typeof config?.demo_enabled === 'boolean'
+              ? config.demo_enabled
+              : isLocalhost
+          );
           setDemoEnabled(isDemo);
           if (isDemo && !email) {
             setEmail('admin@acrnhealth.com');
@@ -56,8 +61,8 @@ export default function LoginPage({ onLoginSuccess }) {
       })
       .catch(() => {
         if (active) {
-          setDemoEnabled(true);
-          if (!email) {
+          setDemoEnabled(DEMO_UI_BUILD_ENABLED && isLocalhost);
+          if (DEMO_UI_BUILD_ENABLED && isLocalhost && !email) {
             setEmail('admin@acrnhealth.com');
             setPassword('ACRN@2026');
           }
@@ -130,7 +135,7 @@ export default function LoginPage({ onLoginSuccess }) {
           </div>
 
           {/* Quick Access Demo Accounts Panel */}
-          {demoEnabled && (
+          {DEMO_UI_BUILD_ENABLED && demoEnabled && (
             <div style={{
               backgroundColor: '#fff7ed',
               border: '1px solid #fed7aa',
@@ -294,4 +299,3 @@ export default function LoginPage({ onLoginSuccess }) {
     </div>
   );
 }
-

@@ -41,10 +41,9 @@ def _sso_redirect_uri() -> str:
 
 @router.get("/config")
 def auth_config():
-    configured = os.getenv("ENABLE_DEMO_ACCOUNTS")
-    if configured is not None:
-        return {"demo_enabled": configured.strip().lower() in {"true", "1", "yes"}}
-    return {"demo_enabled": False}
+    demo_accounts = os.getenv("ENABLE_DEMO_ACCOUNTS", "").strip().lower() in {"true", "1", "yes"}
+    demo_data = os.getenv("ENABLE_DEMO_DATA", "").strip().lower() in {"true", "1", "yes"}
+    return {"demo_enabled": demo_accounts, "demo_data_enabled": demo_data}
 
 
 

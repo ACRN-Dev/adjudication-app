@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import * as Icon from 'lucide-react';
 import * as data from './adminData';
+import { DEMO_UI_BUILD_ENABLED } from '../config/featureFlags';
 import { 
   listUsers, 
   setUserStatus, 
@@ -8,7 +9,8 @@ import {
   resetDemoPassword, 
   setUserRole, 
   setPortalRole, 
-  createUser 
+  createUser,
+  getAuthConfig
 } from '../services/authApi';
 import { SOP_DOCUMENTS } from '../components/SopLibraryModal';
 import './admin.css';
@@ -51,27 +53,30 @@ const NAV = [
 ];
 
 const TITLES = Object.fromEntries(NAV.flatMap(([, x]) => x.map(([p, l]) => [p, l])));
+const PRODUCTION_NAV = [
+  ['ACCESS & PEOPLE', [['/admin/users', 'Users', 'Users']]],
+  ['SYSTEM', [['/admin/health', 'Environment and Health', 'Activity']]]
+];
+const PRODUCTION_TITLES = {
+  '/admin/users': 'Users',
+  '/admin/health': 'Environment and Health'
+};
 
 const DEFAULT_DASH = {
-  environment: 'DEMO / STANDALONE',
-  api: 'Healthy',
-  database: 'PostgreSQL / SQLite fallback',
+  environment: 'Production',
+  api: 'Checking',
+  database: 'Checking',
   metrics: {
-    active_studies: 2,
-    configured_sites: 5,
-    active_users: 6,
-    pending_approval: 1,
-    expiring_access: 1,
-    incomplete_training: 1,
-    open_access_reviews: 1,
-    integration_warnings: 2
+    active_studies: 0,
+    configured_sites: 0,
+    active_users: 0,
+    pending_approval: 0,
+    expiring_access: 0,
+    incomplete_training: 0,
+    open_access_reviews: 0,
+    integration_warnings: 0
   },
-  action_queue: [
-    { type: 'access', label: 'Approve pending user access (Lindiwe Dube)', count: 1 },
-    { type: 'expiry', label: 'Review expiring GCP certificates (Dr. Miriam Ndlovu)', count: 1 },
-    { type: 'training', label: 'Review incomplete staff training records', count: 1 },
-    { type: 'integration', label: 'Resolve eSource / eTMF adapter warnings', count: 2 }
-  ]
+  action_queue: []
 };
 
 function goTo(path) {
@@ -368,7 +373,8 @@ function Dashboard({ dash }) {
 /* =============================================
    2. USERS COMPONENT
    ============================================= */
-function Users() {
+function Users({ demoDataEnabled }) {
+  const showDemoControls = DEMO_UI_BUILD_ENABLED && demoDataEnabled;
   const [rows, setRows] = useState([]);
   const [msg, setMsg] = useState('');
   const [q, setQ] = useState('');
@@ -475,7 +481,7 @@ function Users() {
     u.role,
     u.portal_role ? u.portal_role.replace(/_/g, ' ') : 'Standard',
     u.status,
-    u.is_demo ? 'Yes' : 'No',
+    ...(showDemoControls ? [u.is_demo ? 'Yes' : 'No'] : []),
     u.last_login_at ? new Date(u.last_login_at).toLocaleString() : 'Never',
     u.locked_until ? 'Locked' : 'Unlocked'
   ]);
@@ -599,7 +605,16 @@ function Users() {
 
       <Table
         caption="User account register"
-        columns={['Name', 'Email', 'Role', 'Portal role', 'Status', 'Demo', 'Last login', 'Lock state']}
+        columns={[
+          'Name',
+          'Email',
+          'Role',
+          'Portal role',
+          'Status',
+          ...(showDemoControls ? ['Demo'] : []),
+          'Last login',
+          'Lock state'
+        ]}
         rows={tableRows}
         actions={(r) => {
           const u = rows.find(x => x.email === r[1]);
@@ -624,15 +639,17 @@ function Users() {
               >
                 Unlock
               </button>
-              <button
-                onClick={() => requestAuditAction(
-                  `Reset password for ${u.email}`,
-                  why => resetDemoPassword(u.id, why),
-                  'User requested credential reset'
-                )}
-              >
-                Reset password
-              </button>
+              {showDemoControls && (
+                <button
+                  onClick={() => requestAuditAction(
+                    `Reset password for ${u.email}`,
+                    why => resetDemoPassword(u.id, why),
+                    'User requested credential reset'
+                  )}
+                >
+                  Reset demo password
+                </button>
+              )}
               {u.roleCode === 'ADJUDICATOR' && (
                 <button onClick={() => goTo(`/admin/adjudicator-profiles?upn=${encodeURIComponent(u.email)}`)}>
                   View profile
@@ -1663,7 +1680,8 @@ function Reports() {
 /* =============================================
    17. ENVIRONMENT & HEALTH COMPONENT
    ============================================= */
-function Health() {
+function Health({ demoDataEnabled }) {
+  const showDemoControls = DEMO_UI_BUILD_ENABLED && demoDataEnabled;
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [auditModal, setAuditModal] = useState({ isOpen: false, title: '', actionFn: null });
@@ -1723,8 +1741,13 @@ function Health() {
   };
 
   return (
-    <Page title="Environment and Health" desc="Platform health, database status and demonstration environment controls.">
-      <Notice title="Demonstration environment">All data below is synthetic. Reset does not affect any production system.</Notice>
+    <Page
+      title="Environment and Health"
+      desc={showDemoControls ? 'Platform health, database status and demonstration environment controls.' : 'Platform health and database status.'}
+    >
+      {showDemoControls && (
+        <Notice title="Demonstration environment">All data below is synthetic. Reset does not affect any production system.</Notice>
+      )}
 
       <AuditReasonModal
         isOpen={auditModal.isOpen}
@@ -1739,13 +1762,13 @@ function Health() {
         <section className="a-panel">
           <h2><Icon.Database size={16} color="var(--admin-teal)" /> Database / migration</h2>
           <dl>
-            <div><dt>Mode</dt><dd>SQLite (demo) or PostgreSQL (production)</dd></div>
+            <div><dt>Mode</dt><dd>{showDemoControls ? 'Demonstration' : 'Production'}</dd></div>
             <div><dt>Auth tables</dt><dd>portal_users · auth_sessions · auth_audit_events</dd></div>
             <div><dt>Longitudinal tables</dt><dd>rt_import_batches · longitudinal_participants · visit_instances</dd></div>
             <div><dt>Adjudication tables</dt><dd>participants · adjudication_records · committee_decisions</dd></div>
           </dl>
         </section>
-        <section className="a-panel">
+        {showDemoControls && <section className="a-panel">
           <h2><Icon.RotateCcw size={16} color="var(--admin-orange)" /> Demo Environment Reset Controls</h2>
           <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>
             Restore the demonstration environment to a clean, deterministic baseline or wipe custom test batches.
@@ -1768,9 +1791,9 @@ function Health() {
             </button>
           </div>
           <p style={{ fontSize: '11.5px', color: '#64748b', marginTop: '12px' }}>
-            Requires admin role · Part 11 audited · Restores standard demo password (ACRN@2026)
+            Requires admin role · Part 11 audited
           </p>
-        </section>
+        </section>}
       </div>
     </Page>
   );
@@ -1783,21 +1806,46 @@ export default function AdminPortal({ user, onLogout, isEmbedded }) {
   const [path, setPath] = useState(location.pathname.startsWith('/admin') ? location.pathname : '/admin');
   const [collapsed, setCollapsed] = useState(false);
   const [dash, setDash] = useState(DEFAULT_DASH);
+  const [demoDataEnabled, setDemoDataEnabled] = useState(false);
 
   useEffect(() => {
     let pop = () => setPath(location.pathname);
     let navEvent = (e) => setPath(e.detail);
     addEventListener('popstate', pop);
     addEventListener('app-nav', navEvent);
-    fetch('/api/admin/dashboard', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(setDash)
-      .catch(() => setDash(x => ({ ...x, api: 'Offline demo data', database: 'Local synthetic fixtures' })));
+    getAuthConfig()
+      .then(config => {
+        const enabled = DEMO_UI_BUILD_ENABLED && config.demo_data_enabled === true;
+        setDemoDataEnabled(enabled);
+        const requestedPath = location.pathname;
+        if (!enabled && !['/admin/users', '/admin/health'].includes(requestedPath)) {
+          history.replaceState({}, '', '/admin/users');
+          setPath('/admin/users');
+        }
+        if (enabled) {
+          return fetch('/api/admin/dashboard', { credentials: 'include' })
+            .then(r => r.ok ? r.json() : Promise.reject(new Error('Dashboard request failed')))
+            .then(setDash)
+            .catch(() => setDash(x => ({ ...x, api: 'Unavailable', database: 'Unavailable' })));
+        }
+        setDash(x => ({ ...x, api: 'Production', database: 'Production' }));
+        return undefined;
+      })
+      .catch(() => {
+        setDemoDataEnabled(false);
+        setDash(x => ({ ...x, api: 'Unavailable', database: 'Unavailable' }));
+        if (!['/admin/users', '/admin/health'].includes(location.pathname)) {
+          history.replaceState({}, '', '/admin/users');
+          setPath('/admin/users');
+        }
+      });
     return () => {
       removeEventListener('popstate', pop);
       removeEventListener('app-nav', navEvent);
     };
   }, []);
+
+  const visibleNav = DEMO_UI_BUILD_ENABLED && demoDataEnabled ? NAV : PRODUCTION_NAV;
 
   let go = p => {
     history.pushState({}, '', p);
@@ -1805,31 +1853,37 @@ export default function AdminPortal({ user, onLogout, isEmbedded }) {
     dispatchEvent(new CustomEvent('app-nav', { detail: p }));
   };
 
-  // Route Dispatcher (ALL 22 ROUTES FULLY FUNCTIONAL)
-  let view = 
-    path === '/admin' ? <Dashboard dash={dash} /> :
-    path === '/admin/users' ? <Users /> :
-    path === '/admin/adjudicator-profiles' ? <AdjudicatorProfiles /> :
-    path === '/admin/committee-assignments' ? <CommitteeAssignments /> :
-    path === '/admin/access' ? <Roles /> :
-    path === '/admin/access-reviews' ? <Reviews /> :
-    path === '/admin/training' ? <TrainingAndCoi /> :
-    path === '/admin/studies' ? <Register type="studies" /> :
-    path === '/admin/sites' ? <Register type="sites" /> :
-    path === '/admin/endpoints' ? <EndpointsAndWindows /> :
-    path === '/admin/workflows' ? <Workflow /> :
-    path === '/admin/mappings' ? <Register type="mappings" /> :
-    path === '/admin/terminology' ? <UnitsAndTerminology /> :
-    path === '/admin/dictionaries' ? <ClinicalDictionaries /> :
-    path === '/admin/import-contracts' ? <ImportContracts /> :
-    path === '/admin/rules' ? <Register type="rules" /> :
-    path === '/admin/forms' ? <Register type="forms" /> :
-    path === '/admin/sops' ? <SopReferences /> :
-    path === '/admin/integrations' ? <Register type="integrations" /> :
-    path === '/admin/audit' ? <Audit /> :
-    path === '/admin/reports' ? <Reports /> :
-    path === '/admin/health' ? <Health /> :
-    <Dashboard dash={dash} />;
+  let view;
+  if (DEMO_UI_BUILD_ENABLED) {
+    view =
+      path === '/admin' ? <Dashboard dash={dash} /> :
+      path === '/admin/users' ? <Users demoDataEnabled={demoDataEnabled} /> :
+      path === '/admin/adjudicator-profiles' ? <AdjudicatorProfiles /> :
+      path === '/admin/committee-assignments' ? <CommitteeAssignments /> :
+      path === '/admin/access' ? <Roles /> :
+      path === '/admin/access-reviews' ? <Reviews /> :
+      path === '/admin/training' ? <TrainingAndCoi /> :
+      path === '/admin/studies' ? <Register type="studies" /> :
+      path === '/admin/sites' ? <Register type="sites" /> :
+      path === '/admin/endpoints' ? <EndpointsAndWindows /> :
+      path === '/admin/workflows' ? <Workflow /> :
+      path === '/admin/mappings' ? <Register type="mappings" /> :
+      path === '/admin/terminology' ? <UnitsAndTerminology /> :
+      path === '/admin/dictionaries' ? <ClinicalDictionaries /> :
+      path === '/admin/import-contracts' ? <ImportContracts /> :
+      path === '/admin/rules' ? <Register type="rules" /> :
+      path === '/admin/forms' ? <Register type="forms" /> :
+      path === '/admin/sops' ? <SopReferences /> :
+      path === '/admin/integrations' ? <Register type="integrations" /> :
+      path === '/admin/audit' ? <Audit /> :
+      path === '/admin/reports' ? <Reports /> :
+      path === '/admin/health' ? <Health demoDataEnabled={demoDataEnabled} /> :
+      <Dashboard dash={dash} />;
+  } else {
+    view = path === '/admin/users'
+      ? <Users demoDataEnabled={false} />
+      : <Health demoDataEnabled={false} />;
+  }
 
   if (isEmbedded) return <>{view}</>;
 
@@ -1851,7 +1905,6 @@ export default function AdminPortal({ user, onLogout, isEmbedded }) {
             <strong>{user?.name || 'Administrator'}</strong>
             <small>{user?.role || 'CLINICAL_OPS_ADMIN'}</small>
           </div>
-          <Badge>DEMO IDENTITY</Badge>
           <button onClick={onLogout} aria-label="Sign out" title="Sign out">
             <Icon.LogOut size={16} />
           </button>
@@ -1864,7 +1917,7 @@ export default function AdminPortal({ user, onLogout, isEmbedded }) {
             <span>ADMINISTRATION</span>
             {collapsed ? <Icon.ChevronsRight size={14} /> : <Icon.ChevronsLeft size={14} />}
           </button>
-          {NAV.map(([g, x]) => (
+          {visibleNav.map(([g, x]) => (
             <section key={g}>
               <h2>{g}</h2>
               {x.map(([p, l, ic]) => {
@@ -1887,7 +1940,7 @@ export default function AdminPortal({ user, onLogout, isEmbedded }) {
           <div className="a-env">
             <Icon.Database size={15} />
             <span>
-              DEMO DATA<br />
+              {DEMO_UI_BUILD_ENABLED && demoDataEnabled ? 'DEMO DATA' : 'PRODUCTION'}<br />
               <small>{dash.api}</small>
             </span>
           </div>
@@ -1897,7 +1950,7 @@ export default function AdminPortal({ user, onLogout, isEmbedded }) {
           <div className="a-crumb">
             <button onClick={() => go('/admin')}>Admin</button>
             <Icon.ChevronRight size={12} />
-            <span>{TITLES[path] || 'Dashboard'}</span>
+            <span>{(DEMO_UI_BUILD_ENABLED ? TITLES[path] : PRODUCTION_TITLES[path]) || 'Dashboard'}</span>
           </div>
           {view}
         </main>

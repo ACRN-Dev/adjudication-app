@@ -1,5 +1,8 @@
 services:
   app:
+    build:
+      args:
+        VITE_ENABLE_DEMO_UI: "false"
     env_file:
       - .env.prod
     environment:

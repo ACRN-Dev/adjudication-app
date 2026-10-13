@@ -6,7 +6,8 @@
 #   ./scripts/init-prod.sh --dry-run    # validate and preview the DB changes, change nothing
 #
 # Every step is idempotent, so this is safe to re-run on each deployment.
-# For a plain redeploy with no database work, use ./scripts/deploy-prod.sh instead.
+# For routine redeploys, ./scripts/deploy-prod.sh also applies migrations and removes
+# explicitly marked demo records and demo accounts before restarting the app.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
