@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, 'backend')
 from services.realtime_mapping import map_variable, classify
 
-staging_path = r'backend\.rt-staging\940f9f4f-ef15-4657-a383-a1a3257b8b82.csv'
+staging_path = r'backend\.rt-staging\2d6f4c03-fd04-4596-a866-eee1bdf6a666.csv'
 
 with open(staging_path, 'r', encoding='utf-8-sig', errors='ignore') as f:
     for _ in range(7):

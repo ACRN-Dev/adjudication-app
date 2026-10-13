@@ -1,0 +1,176 @@
+<div id="tariro-target-models">
+  <style>
+    #tariro-target-models { --navy: light-dark(#13233f,#dce7ff); --ink: light-dark(#172033,#e8eef8); --muted: light-dark(#64748b,#aab7c9); --line: light-dark(#d9e1ea,#35445a); --paper: light-dark(#ffffff,#121b2a); --soft: light-dark(#f4f7fa,#1c293b); --orange: #e66f25; --amber: light-dark(#fff5df,#3a2a13); --amber-ink: light-dark(#7c3f00,#ffd59d); --red: light-dark(#fff0ed,#3d1f1e); --red-ink: light-dark(#9d2f1c,#ffb4a6); --green: light-dark(#eaf7ef,#163426); --green-ink: light-dark(#17643a,#9be7ba); --blue: light-dark(#edf4ff,#192d4b); --blue-ink: light-dark(#275d9d,#a8cdfc); color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    #tariro-target-models * { box-sizing: border-box; }
+    #tariro-target-models .switcher { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 12px; }
+    #tariro-target-models .switcher button { min-height:38px; border:1px solid var(--line); background:var(--paper); color:var(--ink); border-radius:7px; padding:8px 13px; font:inherit; font-weight:500; }
+    #tariro-target-models .switcher button[aria-selected="true"] { background:var(--navy); color:var(--paper); border-color:var(--navy); }
+    #tariro-target-models .screen { background:var(--paper); border:1px solid var(--line); border-radius:10px; overflow:hidden; box-shadow:0 10px 30px light-dark(rgba(22,32,53,.09),rgba(0,0,0,.25)); }
+    #tariro-target-models .topbar { display:flex; justify-content:space-between; gap:16px; align-items:center; background:light-dark(#13233f,#0c1421); color:#fff; padding:12px 18px; }
+    #tariro-target-models .brand { font-weight:500; letter-spacing:.01em; }
+    #tariro-target-models .role { opacity:.8; font-size:12px; }
+    #tariro-target-models .page { padding:18px; background:var(--soft); }
+    #tariro-target-models .heading { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:14px; }
+    #tariro-target-models h2, #tariro-target-models h3, #tariro-target-models p { margin:0; }
+    #tariro-target-models h2 { font-size:18px; font-weight:500; color:var(--navy); }
+    #tariro-target-models h3 { font-size:14px; font-weight:500; color:var(--navy); }
+    #tariro-target-models .sub { color:var(--muted); font-size:12px; margin-top:4px; }
+    #tariro-target-models .status { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:5px 9px; font-size:12px; font-weight:500; background:var(--amber); color:var(--amber-ink); }
+    #tariro-target-models .grid { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(250px,.75fr); gap:12px; }
+    #tariro-target-models .panel { background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:14px; }
+    #tariro-target-models .panel + .panel { margin-top:12px; }
+    #tariro-target-models .panel-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:11px; }
+    #tariro-target-models .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:12px; }
+    #tariro-target-models .metric { background:var(--paper); border:1px solid var(--line); border-radius:7px; padding:10px; }
+    #tariro-target-models .metric b { display:block; font-size:19px; font-weight:500; color:var(--navy); }
+    #tariro-target-models .metric span { display:block; color:var(--muted); font-size:11px; margin-top:2px; }
+    #tariro-target-models table { width:100%; border-collapse:collapse; font-size:12px; }
+    #tariro-target-models th { text-align:left; color:var(--muted); font-weight:500; border-bottom:1px solid var(--line); padding:7px 6px; }
+    #tariro-target-models td { border-bottom:1px solid var(--line); padding:8px 6px; vertical-align:top; }
+    #tariro-target-models .bad { color:var(--red-ink); font-weight:500; }
+    #tariro-target-models .good { color:var(--green-ink); font-weight:500; }
+    #tariro-target-models .warn { color:var(--amber-ink); font-weight:500; }
+    #tariro-target-models .tag { display:inline-block; padding:3px 6px; border-radius:4px; background:var(--blue); color:var(--blue-ink); font-size:11px; }
+    #tariro-target-models .checklist { display:grid; gap:8px; }
+    #tariro-target-models .check { display:grid; grid-template-columns:16px 1fr; gap:7px; font-size:12px; }
+    #tariro-target-models .dot { width:10px; height:10px; margin-top:3px; border-radius:50%; background:var(--green-ink); }
+    #tariro-target-models .dot.fail { background:var(--red-ink); }
+    #tariro-target-models .dot.warn { background:var(--orange); }
+    #tariro-target-models .notice { background:var(--red); color:var(--red-ink); border-left:4px solid var(--red-ink); padding:10px 12px; font-size:12px; margin-bottom:12px; }
+    #tariro-target-models .narrative { background:var(--paper); border:2px solid var(--orange); border-left-width:7px; border-radius:8px; padding:16px; }
+    #tariro-target-models .narrative p { font-size:13px; line-height:1.62; margin-top:10px; }
+    #tariro-target-models .cite { color:var(--blue-ink); font-weight:500; white-space:nowrap; }
+    #tariro-target-models .visitline { display:flex; gap:7px; flex-wrap:wrap; margin:12px 0; }
+    #tariro-target-models .visit { border:1px solid var(--line); background:var(--paper); color:var(--ink); border-radius:6px; padding:7px 9px; font-size:11px; }
+    #tariro-target-models .visit.current { border-color:var(--orange); box-shadow:inset 0 -3px var(--orange); }
+    #tariro-target-models .visit.post { background:light-dark(#f4efff,#2a2140); color:light-dark(#6d3fb1,#d4b9ff); }
+    #tariro-target-models .decision { display:grid; gap:10px; }
+    #tariro-target-models .question { background:var(--blue); border-left:4px solid var(--blue-ink); padding:10px; font-size:13px; font-weight:500; }
+    #tariro-target-models .field { border:1px solid var(--line); background:var(--paper); border-radius:6px; padding:9px; font-size:12px; }
+    #tariro-target-models .field span { display:block; color:var(--muted); font-size:11px; margin-bottom:4px; }
+    #tariro-target-models .block { background:var(--red); color:var(--red-ink); padding:9px; border-radius:6px; font-size:11px; }
+    #tariro-target-models .trace { margin-top:12px; background:var(--blue); color:var(--blue-ink); padding:10px; border-radius:6px; font-size:11px; }
+    @media (max-width:720px) { #tariro-target-models .grid { grid-template-columns:1fr; } #tariro-target-models .metrics { grid-template-columns:repeat(2,1fr); } #tariro-target-models .heading { flex-direction:column; } }
+  </style>
+
+  <div class="switcher" role="tablist" aria-label="Target presentation model">
+    <button type="button" role="tab" aria-selected="true" aria-controls="monitor-model" id="monitor-tab">Monitor: mapping assurance</button>
+    <button type="button" role="tab" aria-selected="false" aria-controls="adjudicator-model" id="adjudicator-tab">Adjudicator: clinical report</button>
+  </div>
+
+  <section class="screen" id="monitor-model" role="tabpanel" aria-labelledby="monitor-tab">
+    <div class="topbar"><span class="brand">ACRN · Monitor / QC</span><span class="role">Operational data assurance · no clinical decisions</span></div>
+    <div class="page">
+      <div class="heading"><div><h2>Batch RT-2026-10-06 · Mapping assurance</h2><p class="sub">Mapping v3.4 · source snapshot SHA-256 verified · 118 participants</p></div><span class="status">Blocked · 3 critical exceptions</span></div>
+      <div class="metrics">
+        <div class="metric"><b>1,842</b><span>canonical observations</span></div>
+        <div class="metric"><b class="bad">3</b><span>release-blocking defects</span></div>
+        <div class="metric"><b class="warn">14</b><span>source discrepancies</span></div>
+        <div class="metric"><b>96.8%</b><span>traceable narrative fields</span></div>
+      </div>
+      <div class="grid">
+        <div>
+          <div class="panel">
+            <div class="panel-head"><h3>Exceptions requiring monitor resolution</h3><span class="tag">Show blockers first</span></div>
+            <table>
+              <thead><tr><th>Participant / visit</th><th>Canonical field</th><th>EDC value</th><th>eSource value</th><th>Rule / disposition</th></tr></thead>
+              <tbody>
+                <tr><td>ZWE001-0292 · V1</td><td>gravidity</td><td>G2</td><td>Nulligravida code 0</td><td class="bad">Conflict · never auto-resolve</td></tr>
+                <tr><td>ZWE001-0411 · Delivery</td><td>gestational_age</td><td>29w0d</td><td>27w2d</td><td class="bad">Dating drift · approved anchor required</td></tr>
+                <tr><td>ZWE001-0412 · V3</td><td>fetal_heart_rate</td><td>Code 1 = Yes</td><td>—</td><td class="bad">Codelist decode; do not render “1 bpm”</td></tr>
+                <tr><td>ZWE001-0413 · Postpartum</td><td>ultrasound_result</td><td>39w antenatal scan</td><td>Same record</td><td class="warn">Retain original 17 Sep assessment date</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Field trace preview · gravidity</h3><span class="tag">EDC authoritative</span></div>
+            <table>
+              <tbody>
+                <tr><th>Original source</th><td>Pregnancy history / GRAVIDITY_TOTAL / row 4281</td></tr>
+                <tr><th>Transformation</th><td>Integer parse; codelist not applicable</td></tr>
+                <tr><th>Canonical value</th><td>2 pregnancies</td></tr>
+                <tr><th>Narrative rendering</th><td>“27-year-old G2P0 participant …”</td></tr>
+                <tr><th>Versions</th><td>dataset 2026-10-06 · mapping v3.4 · rule v2.1</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <aside>
+          <div class="panel">
+            <div class="panel-head"><h3>Release gate</h3></div>
+            <div class="checklist">
+              <div class="check"><span class="dot"></span><span>Participant and visit isolation passed</span></div>
+              <div class="check"><span class="dot fail"></span><span>All narrative values match canonical dated values</span></div>
+              <div class="check"><span class="dot fail"></span><span>Gestational age derived from approved anchor</span></div>
+              <div class="check"><span class="dot warn"></span><span>All discrepancies have a monitor disposition</span></div>
+              <div class="check"><span class="dot"></span><span>No prohibited outcome fields exposed</span></div>
+              <div class="check"><span class="dot"></span><span>Missing values render as explicitly unavailable</span></div>
+            </div>
+            <div class="block" style="margin-top:12px">“QC approved” is unavailable until all critical checks pass. Bulk approval is disabled.</div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Required evidence pack</h3></div>
+            <div class="checklist">
+              <div class="check"><span class="dot"></span><span>Field-to-source mapping export</span></div>
+              <div class="check"><span class="dot"></span><span>Positive, negative and missing-data runs</span></div>
+              <div class="check"><span class="dot warn"></span><span>Protocol / charter version confirmation</span></div>
+              <div class="check"><span class="dot warn"></span><span>Clinical template approval record</span></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen" id="adjudicator-model" role="tabpanel" aria-labelledby="adjudicator-tab" hidden>
+    <div class="topbar"><span class="brand">ACRN · Adjudicator</span><span class="role">Blinded case · ZWE001-0292</span></div>
+    <div class="page">
+      <div class="heading"><div><h2>Independent endpoint review</h2><p class="sub">27 years · G2P0 · approved dating anchor: 24 Mar 2026 ultrasound</p></div><span class="status">2 unresolved questions</span></div>
+      <div class="notice"><strong>Read this first.</strong> The report presents source-supported facts and does not make the adjudication. Expand citations to inspect the original dated record.</div>
+      <div class="grid">
+        <main>
+          <article class="narrative">
+            <div class="panel-head"><h3>FDA submission-style clinical narrative</h3><span class="tag">Auto-generated · editable · original retained</span></div>
+            <p>A 27-year-old G2P0 participant was enrolled in PROTECT-Africa. Gestational age was established by first-trimester ultrasound at 12+4 weeks on 24 Mar 2026, giving an estimated delivery date of 4 Oct 2026. <span class="cite">[Dating US · source]</span></p>
+            <p>At Visit 1 on 15 Apr 2026, blood pressure was 118/74 mmHg and urine protein was negative. The supplied record does not support hypertension or proteinuria at this visit. <span class="cite">[V1 vitals] [V1 urinalysis]</span></p>
+            <p>On 3 Aug 2026 at 31+2 weeks, blood pressure was 162/112 mmHg at 08:14 and 168/114 mmHg at 12:40. UPCR was 1.84 g/g. Platelets were 92 ×10³/µL (reference 150–400), creatinine 1.31 mg/dL (reference 0.50–0.90), AST 96 U/L and ALT 78 U/L (reference 0–40). These are observed results; their clinical interpretation remains with the adjudicator. <span class="cite">[V4 vitals] [Lab report]</span></p>
+            <p>Ultrasound on 3 Aug showed estimated fetal weight 1,210 g (6th centile) and absent end-diastolic flow. Magnesium sulfate was recorded before emergency caesarean delivery at 31+3 weeks. Maternal blood loss was <strong>source field unavailable; this finding cannot be determined from the supplied record.</strong> A liveborn female weighed 1,200 g with Apgar scores 7 and 9. <span class="cite">[Ultrasound] [Hospital delivery record]</span></p>
+          </article>
+          <div class="visitline" aria-label="Clinical timeline"><span class="visit">V1 · 15 Apr · 15+3</span><span class="visit">V2 · 20 May · 20+3</span><span class="visit">V3 · 1 Jul · 26+3</span><span class="visit current">V4 · 3 Aug · 31+2</span><span class="visit">Delivery · 4 Aug · 31+3</span><span class="visit post">Postpartum · unavailable</span></div>
+          <div class="panel">
+            <div class="panel-head"><h3>Unresolved questions and discrepancies</h3><span class="bad">Must review</span></div>
+            <table><tbody><tr><td>Maternal blood loss</td><td>Source field unavailable</td><td class="warn">May require query</td></tr><tr><td>ALT interpretation</td><td>78 U/L against ULN 40 U/L</td><td>Result shown; diagnosis not inferred</td></tr></tbody></table>
+          </div>
+        </main>
+        <aside>
+          <div class="panel decision">
+            <h3>Adjudication</h3>
+            <div class="question">Does this participant meet the protocol criteria for pre-eclampsia?</div>
+            <div class="field"><span>Overall determination</span>Choose Yes / No / Unable to determine</div>
+            <div class="field"><span>If Yes</span>Diagnosis · EOPE/LOPE · severity · certainty · onset date</div>
+            <div class="field"><span>Required</span>Differential diagnosis / alternative explanation</div>
+            <div class="block">Sign and lock remains disabled until required fields are complete and unresolved critical discrepancies are acknowledged.</div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Definitions at point of use</h3></div>
+            <p class="sub">EOPE threshold: use the approved protocol/charter definition. Do not hard-code an unconfirmed threshold.</p>
+            <div class="trace">Decision → criterion → canonical value → dated source field → original record → dataset and mapping version</div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+  <script>
+    (() => {
+      const root = document.getElementById('tariro-target-models');
+      const tabs = [...root.querySelectorAll('[role="tab"]')];
+      tabs.forEach(tab => tab.addEventListener('click', () => {
+        tabs.forEach(item => {
+          const selected = item === tab;
+          item.setAttribute('aria-selected', selected ? 'true' : 'false');
+          root.querySelector('#' + item.getAttribute('aria-controls')).hidden = !selected;
+        });
+      }));
+    })();
+  </script>
+</div>
