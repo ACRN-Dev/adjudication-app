@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import * as Icon from 'lucide-react';
+import { Activity, AlertTriangle, Calendar, ChevronRight, ChevronsLeft, ChevronsRight,
+  Crown, Database, Eye, LayoutDashboard, LogOut, ScrollText, Search, ShieldAlert,
+  ShieldCheck, Stethoscope, Users } from 'lucide-react';
 import '../admin/admin.css';
+
+const Icon = { Activity, AlertTriangle, Calendar, ChevronRight, ChevronsLeft, ChevronsRight,
+  Crown, Database, Eye, LayoutDashboard, LogOut, ScrollText, Search, ShieldAlert,
+  ShieldCheck, Stethoscope, Users };
 
 // Reusable architectural UI components identical to AdminPortal
 function Badge({ children }) {
@@ -306,6 +312,7 @@ export default function OwnerPortal({ user, onLogout }) {
 
   return (
     <div className="admin-app">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <header className="a-header">
         <div className="a-brand">
           <span><img src="/acrn-logo.png" alt="Africa Clinical Research Network" /></span>
@@ -331,7 +338,7 @@ export default function OwnerPortal({ user, onLogout }) {
 
       <div className="a-body">
         <aside className={'a-nav ' + (collapsed ? 'collapsed' : '')}>
-          <button className="a-collapse" onClick={() => setCollapsed(!collapsed)} aria-label="Toggle navigation">
+          <button className="a-collapse" onClick={() => setCollapsed(!collapsed)} aria-label={`Owner portal navigation: ${collapsed ? 'expand' : 'collapse'}`}>
             <span>OWNER PORTAL</span>
             {collapsed ? <Icon.ChevronsRight /> : <Icon.ChevronsLeft />}
           </button>
@@ -356,7 +363,7 @@ export default function OwnerPortal({ user, onLogout }) {
           </div>
         </aside>
         
-        <main className="a-main">
+        <main id="main-content" className="a-main" tabIndex="-1">
           <div className="a-crumb">
             <button onClick={() => go('/owner')}>Owner</button>
             <Icon.ChevronRight size={12} />

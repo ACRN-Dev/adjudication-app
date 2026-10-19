@@ -1,5 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
-:root { --admin-navy:#162035; --admin-orange:#F07E26; --admin-border:#d8dee7; }
+:root { --admin-navy:#162035; --admin-orange:#9A3D00; --admin-border:#d8dee7; }
 .admin-app { height:100vh; display:flex; flex-direction:column; background:#f4f6f9; color:var(--admin-navy); font-family:Poppins,Arial,sans-serif; }
 .a-header { height:54px; background:var(--admin-navy); border-bottom:3px solid var(--admin-orange); color:#fff; display:flex; align-items:center; padding:0 14px; gap:18px; flex-shrink:0; }
 .a-brand,.a-user { display:flex; align-items:center; gap:9px; }
@@ -22,8 +22,8 @@
 .a-nav.collapsed h2,.a-nav.collapsed button span,.a-nav.collapsed .a-env span { display:none; }
 .a-env { margin:9px 7px; padding:8px; border-top:1px solid #334155; display:flex; gap:8px; color:#cbd5e1; font-size:9px; } .a-env small { color:#82CFCD; }
 .a-main { flex:1; overflow:auto; padding:0 18px 30px; }
-.a-crumb { height:34px; border-bottom:1px solid #dbe1e8; display:flex; align-items:center; gap:5px; font-size:9px; color:#64748b; } .a-crumb button { background:none; border:0; color:#4771AD; }
-.a-page-head { display:flex; justify-content:space-between; align-items:end; margin:14px 0 10px; } .a-page-head h1 { font-size:18px; } .a-page-head p { font-size:10px; color:#64748b; margin-top:2px; }
+.a-crumb { height:34px; border-bottom:1px solid #dbe1e8; display:flex; align-items:center; gap:5px; font-size:9px; color:#526176; } .a-crumb button { background:none; border:0; color:#315b98; }
+.a-page-head { display:flex; justify-content:space-between; align-items:end; margin:14px 0 10px; } .a-page-head h1 { font-size:18px; } .a-page-head p { font-size:10px; color:#526176; margin-top:2px; }
 .a-notice,.a-success { border:1px solid #cbd5e1; border-left:3px solid #4771AD; background:#fff; padding:8px 10px; display:flex; align-items:center; gap:9px; font-size:10px; margin-bottom:9px; }
 .a-notice div { display:flex; flex-direction:column; } .a-notice span { color:#64748b; } .a-notice.warn { border-left-color:#d97706; background:#fffbeb; } .a-notice.danger { border-left-color:#b91c1c; background:#fef2f2; } .a-success { border-left-color:#15803d; background:#f0fdf4; }
 .a-metrics { display:grid; grid-template-columns:repeat(8,minmax(80px,1fr)); gap:6px; margin-bottom:9px; }
@@ -34,7 +34,7 @@
 .a-queue { width:100%; display:grid; grid-template-columns:1fr auto auto; gap:7px; border:0; border-top:1px solid #e2e8f0; background:#fff; text-align:left; padding:6px 3px; font:500 9.5px Poppins,Arial,sans-serif; cursor:pointer; }
 .a-toolbar { display:flex; gap:6px; margin:8px 0; } .a-toolbar>div { display:flex; align-items:center; gap:4px; background:#fff; border:1px solid #cbd5e1; padding:0 6px; min-width:270px; } .a-toolbar input { border:0; outline:0; padding:6px; width:100%; font:9.5px Poppins,Arial,sans-serif; }
 .a-toolbar select,.a-toolbar>button,.a-secondary { border:1px solid #cbd5e1; background:#fff; padding:0 8px; font:9.5px Poppins,Arial,sans-serif; }
-.a-primary { border:0; background:var(--admin-orange); color:#fff; padding:6px 9px; display:inline-flex; align-items:center; gap:5px; font:600 9.5px Poppins,Arial,sans-serif; cursor:pointer; border-radius:3px; } .a-primary:hover { background:#d96b18; }
+.a-primary { border:0; background:var(--admin-orange); color:#fff; padding:6px 9px; display:inline-flex; align-items:center; gap:5px; font:600 9.5px Poppins,Arial,sans-serif; cursor:pointer; border-radius:3px; } .a-primary:hover { background:#7c3100; }
 .a-table-wrap { overflow:auto; background:#fff; border:1px solid var(--admin-border); margin-bottom:9px; } .a-table { width:100%; border-collapse:collapse; font-size:9px; white-space:nowrap; }
 .a-table caption { text-align:left; padding:10px 12px; background:#eef2f6; font-weight:700; border-bottom:1px solid #cbd5e1; } .a-table th { background:#f8fafc; color:#475569; text-transform:uppercase; text-align:left; font-size:9px; padding:10px 12px; border-bottom:1px solid #cbd5e1; } .a-table td { padding:10px 12px; border-bottom:1px solid #e5eaf0; } .a-table tr:hover { background:#f8fafc; }
 .a-badge { display:inline-flex; padding:2px 6px; border-radius:9px; background:#e2e8f0; color:#334155; font-size:8px; font-weight:700; } .a-badge.ok { background:#dcfce7; color:#166534; } .a-badge.warn { background:#fef3c7; color:#92400e; } .a-badge.bad { background:#fee2e2; color:#991b1b; }

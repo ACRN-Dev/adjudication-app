@@ -392,7 +392,7 @@ body {
 
 .rt-menu-btn:hover { background: rgba(255, 255, 255, 0.06); color: #ffffff; }
 .rt-menu-btn.active {
-  background: var(--acrn-orange-primary);
+  background: #9A3D00;
   color: #ffffff;
   font-weight: 700;
 }
@@ -701,6 +701,43 @@ body {
   display: flex;
   align-items: center;
   gap: 5px;
+}
+
+.skip-link {
+  position: fixed;
+  left: 12px;
+  top: 8px;
+  z-index: 10000;
+  padding: 9px 13px;
+  color: #fff;
+  background: #162035;
+  border: 2px solid #82cfcd;
+  border-radius: 4px;
+  transform: translateY(-160%);
+}
+
+.skip-link:focus { transform: translateY(0); }
+
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid #0b6b69;
+  outline-offset: 2px;
+}
+
+.portal-loading {
+  min-height: 160px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  font-size: 1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .adjudication-dropdown {

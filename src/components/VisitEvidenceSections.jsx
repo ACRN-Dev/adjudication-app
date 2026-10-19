@@ -1,5 +1,11 @@
 import React, { useState } from 'react';
-import * as I from 'lucide-react';
+import { Activity, AlertOctagon, AlertTriangle, Baby, CheckCircle2, ChevronLeft, ChevronRight,
+  ClipboardList, Clock3, Database, EyeOff, FlaskConical, Info, MessageSquareWarning, MinusCircle,
+  ShieldCheck, Stethoscope, Table2 } from 'lucide-react';
+
+const I = { Activity, AlertOctagon, AlertTriangle, Baby, CheckCircle2, ChevronLeft, ChevronRight,
+  ClipboardList, Clock3, Database, EyeOff, FlaskConical, Info, MessageSquareWarning, MinusCircle,
+  ShieldCheck, Stethoscope, Table2 };
 import {
   buildDemographicString,
   buildLongitudinalRows,

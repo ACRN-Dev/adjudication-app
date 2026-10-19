@@ -7,7 +7,7 @@ from api.realtime import assign
 from api.adjudication import _demo_validation_bypass_enabled
 from conftest import TestingSession
 from models.auth import PortalUser
-from models.longitudinal import LongitudinalParticipant, RTImportBatch, ReviewerAssignment
+from models.longitudinal import LongitudinalParticipant, RTImportBatch, ReviewerAssignment, VisitInstance
 
 
 def _seed_assignment_target():
@@ -35,6 +35,16 @@ def _seed_assignment_target():
         status="ACTIVE",
     )
     db.add_all([participant, reviewer])
+    db.flush()
+    db.add(VisitInstance(
+        participant_id=participant.id,
+        source_batch_id=batch.id,
+        form_title="Visit 1",
+        scheduled_visit_code="V01",
+        visit_sequence=1,
+        reconstruction_method="TEST",
+        reconstruction_confidence="HIGH",
+    ))
     db.commit()
     return db, participant.id, reviewer_email
 

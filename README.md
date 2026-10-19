@@ -215,6 +215,7 @@ Starts `app` plus a throwaway `postgres:16-alpine` container (`docker-compose.lo
 | `SECRET_KEY` | no | Reserved for future use — not currently read by the backend. |
 | `OPENAI_API_KEY` | no | Enables AI-assisted narrative generation; falls back to the local rule-based generator when unset. |
 | `SESSION_HOURS` | no (default `12`) | Session lifetime. |
+| `SESSION_IDLE_MINUTES` | no (default `30`) | Sliding inactivity timeout; production accepts 5-60 minutes and always caps the session at `SESSION_HOURS`. |
 | `LOGIN_LOCK_AFTER` / `LOGIN_LOCK_MINUTES` | no (default `5` / `15`) | Login lockout policy. |
 | `ENABLE_DEMO_ACCOUNTS` | no (default `false`) | Seeds the fixed demo accounts on startup. Set `true` in dev, `false` in prod. |
 | `ENABLE_DEMO_DATA` | no (default `false`) | Enables resettable synthetic Admin Portal data without enabling demo-account authentication. Use only in a dedicated demonstration environment. |
@@ -222,8 +223,9 @@ Starts `app` plus a throwaway `postgres:16-alpine` container (`docker-compose.lo
 | `DEMO_FORCE_PASSWORD_CHANGE` | no | Forces a password change on first demo login. |
 | `AUTH_COOKIE_SECURE` | yes | Set `true` behind HTTPS (both dev and prod, since the edge terminates TLS). |
 | `AUTH_COOKIE_SAMESITE` | no (default `lax` when set, else `none` if `AUTH_COOKIE_SECURE=true`) | Session cookie SameSite policy. Set to `lax` (default in dev/prod compose overrides) since the SPA and API are same-origin. |
-| `RT_PSEUDONYM_SECRET` | before the first RealTime import | Keys the HMAC that turns MRN + screening number into a participant pseudonym. **If unset the backend falls back to a value published in this repository**, making pseudonyms reversible by anyone with the source. |
-| `RT_IDENTITY_ENCRYPTION_KEY` | before the first RealTime import | Fernet key encrypting the restricted identity crosswalk. If unset it is derived from `RT_PSEUDONYM_SECRET`, inheriting that fallback's weakness. Set both before importing any RealTime data — adding or rotating them later orphans every pseudonym and crosswalk row created without them. |
+| `RT_DELETE_STAGED_SOURCE_AFTER_PROCESSING` | no (forced by the production overlay) | Removes raw uploaded source files after processing and clears their stored filesystem path. |
+| `RT_PSEUDONYM_SECRET` | yes in production | Keys the HMAC that turns MRN + screening number into a participant pseudonym. Production startup is refused when it is absent. |
+| `RT_IDENTITY_ENCRYPTION_KEY` | yes in production | Fernet key encrypting the restricted identity crosswalk. Production startup is refused when it is absent; rotation requires a controlled re-key procedure. |
 | `ENTRA_TENANT_ID` | yes on real dev/prod | Microsoft Entra ID tenant ID. See [docs/entra-sso-setup.md](docs/entra-sso-setup.md). |
 | `ENTRA_CLIENT_ID` | yes on real dev/prod | Entra App Registration client ID. |
 | `ENTRA_CLIENT_SECRET` | yes on real dev/prod | Entra App Registration client secret. |

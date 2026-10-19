@@ -16,7 +16,7 @@ from services.auth_service import (
     ACTIVE, AUTH_COOKIE, AUTH_COOKIE_SECURE, AUTH_COOKIE_SAMESITE, INACTIVE, ROLE_ADJUDICATOR, ROLE_ADMIN, audit_auth,
     change_password as auth_change_password, current_user, default_password, hash_password, identity_from_user,
     issue_session, login as auth_login, logout as auth_logout, require_role, seed_demo_accounts, normalize_email,
-    validate_password_strength,
+    revoke_user_sessions, validate_password_strength,
 )
 from services.admin_security import ADMIN_ROLES, ROLE_PERMISSIONS, Identity as AdminIdentity, validate_delegation
 from services.monitor_security import ROLES as MONITOR_ROLES
@@ -121,7 +121,12 @@ def sso_callback(request: Request, code: Optional[str] = None, state: Optional[s
         user.must_change_password = True
 
     resp = redirect("/")
-    issue_session(db, user, resp, request, event_type)
+    authentication_methods = {str(value).lower() for value in (claims.get("amr") or [])}
+    issue_session(
+        db, user, resp, request, event_type,
+        authentication_method="ENTRA_ID",
+        mfa_verified="mfa" in authentication_methods,
+    )
     return resp
 
 
@@ -332,8 +337,9 @@ def set_status(user_id: str, req: StatusRequest, request: Request, admin: Portal
         raise HTTPException(409, "You cannot change your own account status.")
     previous = row.status
     row.status = status
+    revoked_sessions = revoke_user_sessions(db, row.id) if status == INACTIVE else 0
     audit_auth(db, "ACCOUNT_ACTIVATION" if status == ACTIVE else "ACCOUNT_DEACTIVATION", "SUCCESS",
-               actor=admin, affected=row, request=request, reason=req.reason, details={"previous_status": previous, "status": status})
+               actor=admin, affected=row, request=request, reason=req.reason, details={"previous_status": previous, "status": status, "revoked_sessions": revoked_sessions})
     db.commit()
     return public_user(row)
 
@@ -370,7 +376,9 @@ def reset_password(user_id: str, req: ReasonRequest, request: Request, admin: Po
     row.must_change_password = True
     row.failed_login_count = 0
     row.locked_until = None
-    audit_auth(db, "PASSWORD_RESET", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason)
+    revoked_sessions = revoke_user_sessions(db, row.id)
+    audit_auth(db, "PASSWORD_RESET", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
+               details={"revoked_sessions": revoked_sessions})
     db.commit()
     return public_user(row)
 
@@ -400,8 +408,9 @@ def set_role(user_id: str, req: RoleRequest, request: Request, admin: PortalUser
         row.portal_role = "MEDICAL_OFFICER"
     else:
         row.portal_role = None
+    revoked_sessions = revoke_user_sessions(db, row.id)
     audit_auth(db, "ROLE_CHANGE", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
-               details={"previous_role": previous, "role": role, "previous_portal_role": previous_portal_role, "portal_role": row.portal_role})
+               details={"previous_role": previous, "role": role, "previous_portal_role": previous_portal_role, "portal_role": row.portal_role, "revoked_sessions": revoked_sessions})
     db.commit()
     return public_user(row)
 
@@ -487,8 +496,9 @@ def set_portal_role(user_id: str, req: PortalRoleRequest, request: Request, admi
         validate_delegation(acting_identity, ROLE_PERMISSIONS.get(portal_role, set()))
     previous = row.portal_role
     row.portal_role = portal_role
+    revoked_sessions = revoke_user_sessions(db, row.id)
     audit_auth(db, "PORTAL_ROLE_CHANGE", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
-               details={"previous_portal_role": previous, "portal_role": portal_role})
+               details={"previous_portal_role": previous, "portal_role": portal_role, "revoked_sessions": revoked_sessions})
     db.commit()
     return public_user(row)
 
@@ -505,8 +515,9 @@ def set_study_scope(user_id: str, req: StudyScopeRequest, request: Request, admi
     normalized_scope = _normalize_study_scope(req.study_scope)
     previous = row.study_scope
     row.study_scope = normalized_scope
+    revoked_sessions = revoke_user_sessions(db, row.id)
     audit_auth(db, "STUDY_SCOPE_CHANGE", "SUCCESS", actor=admin, affected=row, request=request, reason=req.reason,
-               details={"previous_study_scope": previous, "study_scope": normalized_scope})
+               details={"previous_study_scope": previous, "study_scope": normalized_scope, "revoked_sessions": revoked_sessions})
     db.commit()
     return public_user(row)
 

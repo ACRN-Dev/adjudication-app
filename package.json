@@ -5,11 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-      "dev:api": "set \"ENABLE_DEMO_ACCOUNTS=true\"&& set \"ENABLE_DEMO_DATA=true\"&& set \"AUTH_COOKIE_SECURE=false\"&& .venv\\Scripts\\python.exe -m uvicorn main:app --app-dir backend --reload --port 8000",
-      "dev:api:demo": "set \"ENABLE_DEMO_ACCOUNTS=true\"&& set \"ENABLE_DEMO_DATA=true\"&& set \"AUTH_COOKIE_SECURE=false\"&& .venv\\Scripts\\python.exe -m uvicorn main:app --app-dir backend --reload --port 8000",
-      "demo:reset": "set \"ENABLE_DEMO_ACCOUNTS=true\"&& .venv\\Scripts\\python.exe backend\\scripts\\reset_demo_data.py",
+    "dev:api": "set \"ENABLE_DEMO_ACCOUNTS=true\"&& set \"ENABLE_DEMO_DATA=true\"&& set \"AUTH_COOKIE_SECURE=false\"&& .venv\\Scripts\\python.exe -m uvicorn main:app --app-dir backend --reload --port 8000",
+    "dev:api:demo": "set \"ENABLE_DEMO_ACCOUNTS=true\"&& set \"ENABLE_DEMO_DATA=true\"&& set \"AUTH_COOKIE_SECURE=false\"&& .venv\\Scripts\\python.exe -m uvicorn main:app --app-dir backend --reload --port 8000",
+    "demo:reset": "set \"ENABLE_DEMO_ACCOUNTS=true\"&& .venv\\Scripts\\python.exe backend\\scripts\\reset_demo_data.py",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:services": "node --test src/services/clinicalNarrative.test.mjs src/services/visitEvidence.test.mjs",
+    "test:serve": "vite build && vite preview",
+    "test:e2e": "playwright test",
+    "test:a11y": "playwright test tests/e2e/accessibility.spec.js"
   },
   "dependencies": {
     "lucide-react": "^0.453.0",
@@ -17,6 +21,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.62.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

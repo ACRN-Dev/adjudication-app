@@ -1,7 +1,7 @@
 """Demo authentication domain for controlled prototype access."""
 import uuid
 from datetime import datetime
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, JSON
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, JSON, UniqueConstraint
 from database import Base
 
 
@@ -40,6 +40,8 @@ class AuthSession(Base):
     revoked_at = Column(DateTime)
     user_agent = Column(String(255))
     ip_address = Column(String(80))
+    authentication_method = Column(String(30), nullable=False, default="PASSWORD")
+    mfa_verified_at = Column(DateTime)
 
 
 class CommitteeAssignment(Base):
@@ -74,3 +76,18 @@ class AuthAuditEvent(Base):
     request_metadata = Column(JSON, default=dict)
     details = Column(JSON, default=dict)
     reason = Column(Text)
+
+
+class ApiRateLimitBucket(Base):
+    """Shared fixed-window counters used by every application node."""
+
+    __tablename__ = "api_rate_limit_buckets"
+    id = Column(String(36), primary_key=True, default=uid)
+    subject_hash = Column(String(64), nullable=False)
+    action = Column(String(40), nullable=False)
+    window_started_at = Column(DateTime, nullable=False)
+    request_count = Column(Integer, nullable=False, default=0)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    __table_args__ = (
+        UniqueConstraint("subject_hash", "action", "window_started_at", name="uq_api_rate_limit_window"),
+    )

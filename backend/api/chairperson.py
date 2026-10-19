@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
+import json
 import uuid
 
 from database import get_db
@@ -20,8 +21,19 @@ from models.canonical import (
 )
 from models.longitudinal import LongitudinalParticipant, VisitInstance
 from services.auth_service import require_role, require_chairperson_assignment, ROLE_CHAIRPERSON, ROLE_ADMIN, audit_auth
+from services.runtime_policy import is_production
 
 router = APIRouter()
+
+
+def _require_committee_mfa(request: Request):
+    session = getattr(request.state, "auth_session", None)
+    if is_production() and (
+        not session or not session.mfa_verified_at
+        or session.mfa_verified_at < datetime.utcnow() - timedelta(minutes=15)
+    ):
+        raise HTTPException(403, "A recent identity-provider MFA verification is required to sign")
+    return session
 
 
 class MeetingSignOffRequest(BaseModel):
@@ -148,9 +160,12 @@ def cancel_meeting(meeting_id: str, req: MeetingCancelRequest, db: Session = Dep
     return {"status": "cancelled", "meeting_id": str(meeting.id), "reason": req.reason}
 
 @router.post("/cases/{subject_id}/finalize")
-def finalize_case(subject_id: str, req: CaseFinalizeRequest, db: Session = Depends(get_db),
+def finalize_case(subject_id: str, req: CaseFinalizeRequest, request: Request, db: Session = Depends(get_db),
                   user: PortalUser = Depends(require_chairperson_assignment())):
     """Finalize one discordant visit from the chairperson case queue."""
+    session = _require_committee_mfa(request)
+    if not req.quorum_met or req.members_present < 3:
+        raise HTTPException(409, "Committee quorum of at least three members is required.")
     participant = db.query(Participant).filter(
         (Participant.subject_id == subject_id) |
         (Participant.case_number == subject_id)
@@ -213,9 +228,25 @@ def finalize_case(subject_id: str, req: CaseFinalizeRequest, db: Session = Depen
             visit_number=visit.visit_number,
         )
         db.add(decision)
+    signature_payload = {
+        "participant_id": str(participant.id), "visit_id": str(visit.id),
+        "visit_number": visit.visit_number, "chair_upn": user.email,
+        "signed_at": now_dt.isoformat(), "meaning": "Committee final outcome approved and locked",
+        "final_diagnosis": req.final_diagnosis.value,
+        "final_onset_class": req.final_onset_class.value,
+        "final_severity": req.final_severity.value,
+        "final_certainty": req.final_certainty.value,
+        "adopted_reviewer": req.adopted_reviewer.value,
+        "chair_rationale": req.chair_rationale, "minutes": req.minutes,
+        "attendees": sorted(normalized_attendees), "members_present": req.members_present,
+    }
     signature_hash = hashlib.sha256(
-        f"CASE|{participant.subject_id}|{visit.visit_number}|{user.email}|{now_dt.isoformat()}".encode()
+        json.dumps(signature_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+    meeting.signature_hash = signature_hash
+    meeting.signature_payload = signature_payload
+    meeting.authentication_method = getattr(session, "authentication_method", None) or ("DEMO" if user.is_demo_account else "SSO")
+    meeting.authentication_session_id = str(session.id) if session else None
     decision.adopted_reviewer = req.adopted_reviewer
     decision.final_diagnosis = req.final_diagnosis
     decision.final_onset_class = req.final_onset_class
@@ -229,6 +260,9 @@ def finalize_case(subject_id: str, req: CaseFinalizeRequest, db: Session = Depen
     decision.meeting_id = str(meeting.id)
     decision.signed_at = now_dt
     decision.signature_hash = signature_hash
+    decision.signature_payload = signature_payload
+    decision.authentication_method = meeting.authentication_method
+    decision.authentication_session_id = meeting.authentication_session_id
     decision.locked = True
     decision.locked_at = now_dt
     decision.closed = True
@@ -504,23 +538,43 @@ def sign_off_meeting(req: MeetingSignOffRequest, request: Request, db: Session =
     Captures committee meeting minutes, attendee roster, computes chair e-signature,
     marks cases as CLOSED, generates formal meeting report, and writes to eTMF.
     """
+    session = _require_committee_mfa(request)
     chair_upn = user.email
     now_dt = datetime.utcnow()
-    raw_sig = f"MEETING|{req.meeting_title}|{chair_upn}|{now_dt.isoformat()}|{len(req.case_ids)}"
-    sig_hash = hashlib.sha256(raw_sig.encode()).hexdigest()
+    attendees = sorted({str(value).strip().lower() for value in req.attendees if str(value).strip()})
+    if chair_upn.lower() not in attendees:
+        attendees.append(chair_upn.lower())
+        attendees.sort()
+    if not req.quorum_met or len(attendees) < 3:
+        raise HTTPException(409, "Committee quorum requires at least three identified attendees.")
+    if not req.case_ids or len(set(req.case_ids)) != len(req.case_ids):
+        raise HTTPException(422, "case_ids must contain at least one unique case reference.")
+    signature_payload = {
+        "meeting_title": req.meeting_title, "batch_id": req.batch_id,
+        "chair_upn": chair_upn, "chair_name": req.chair_name,
+        "signed_at": now_dt.isoformat(), "meaning": "Committee minutes and listed final outcomes approved",
+        "attendees": attendees, "quorum_met": True,
+        "minutes": req.minutes, "case_ids": sorted(req.case_ids),
+    }
+    sig_hash = hashlib.sha256(
+        json.dumps(signature_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
     meeting = CommitteeMeeting(
         meeting_title=req.meeting_title,
         batch_id=req.batch_id,
         chair_upn=chair_upn,
         chair_name=req.chair_name,
-        attendees=req.attendees,
+        attendees=attendees,
         quorum_met=req.quorum_met,
         minutes=req.minutes,
         case_ids=req.case_ids,
         signed=True,
         signed_at=now_dt,
         signature_hash=sig_hash,
+        signature_payload=signature_payload,
+        authentication_method=getattr(session, "authentication_method", None) or ("DEMO" if user.is_demo_account else "SSO"),
+        authentication_session_id=str(session.id) if session else None,
         status="CLOSED"
     )
     db.add(meeting)
@@ -537,18 +591,39 @@ def sign_off_meeting(req: MeetingSignOffRequest, request: Request, db: Session =
                 p = db.query(Participant).filter_by(id=uuid.UUID(cid)).first()
             except Exception:
                 p = None
-        if p:
-            p.status = AdjudicationStatus.CLOSED
-            dec = db.query(CommitteeDecision).filter_by(participant_id=p.id).first()
+        if not p:
+            raise HTTPException(404, f"Committee case not found: {cid}")
+        visits = db.query(AdjudicationVisit).filter_by(participant_id=p.id).all()
+        if not visits:
+            raise HTTPException(409, f"Case {cid} has no adjudication visits.")
+        for visit in visits:
+            records = db.query(AdjudicationRecord).filter_by(visit_id=visit.id, signed=True).all()
+            by_role = {row.reviewer_role: row for row in records}
+            if not {ReviewerRole.REVIEWER_A, ReviewerRole.REVIEWER_B}.issubset(by_role):
+                raise HTTPException(409, f"Case {cid} visit {visit.visit_number} lacks two signed independent reviews.")
+            dec = db.query(CommitteeDecision).filter_by(visit_id=visit.id).first()
+            if visit.status in {"DISCORDANT", "COMMITTEE_PENDING", "AWAITING_REVIEWER_C", "THREE_WAY_DIVERGENT"}:
+                if not dec or not dec.locked or not dec.signature_hash:
+                    raise HTTPException(409, f"Case {cid} visit {visit.visit_number} has no locked committee outcome.")
+            else:
+                a, b = by_role[ReviewerRole.REVIEWER_A], by_role[ReviewerRole.REVIEWER_B]
+                clinical_a = (a.diagnosis, a.onset_class, a.severity, a.certainty)
+                clinical_b = (b.diagnosis, b.onset_class, b.severity, b.certainty)
+                if clinical_a != clinical_b:
+                    raise HTTPException(409, f"Case {cid} visit {visit.visit_number} is not concordant or committee-locked.")
+            visit.status = "CLOSED"
+            visit.finalized_at = visit.finalized_at or now_dt
             if dec:
                 dec.closed = True
                 dec.closed_at = now_dt
                 dec.meeting_id = str(meeting.id)
-            closed_cases_info.append({
-                "subject_id": p.subject_id,
-                "case_number": p.case_number,
-                "final_diagnosis": dec.final_diagnosis.value if dec and dec.final_diagnosis else "CONCORDANT_CLOSED",
-            })
+        p.status = AdjudicationStatus.CLOSED
+        participant_decision = db.query(CommitteeDecision).filter_by(participant_id=p.id).order_by(CommitteeDecision.visit_number.desc()).first()
+        closed_cases_info.append({
+            "subject_id": p.subject_id,
+            "case_number": p.case_number,
+            "final_diagnosis": participant_decision.final_diagnosis.value if participant_decision and participant_decision.final_diagnosis else "CONCORDANT_CLOSED",
+        })
 
     # Generate structured meeting report artifact
     report_content = (
@@ -559,7 +634,7 @@ def sign_off_meeting(req: MeetingSignOffRequest, request: Request, db: Session =
         f"Chairperson:     {req.chair_name} ({chair_upn})\n"
         f"Date & Time:     {now_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
         f"Quorum Met:      {'YES' if req.quorum_met else 'NO'}\n"
-        f"Attendees:       {', '.join(req.attendees)}\n"
+        f"Attendees:       {', '.join(attendees)}\n"
         f"Signature Hash:  {sig_hash}\n\n"
         f"MEETING MINUTES:\n"
         f"{'-'*65}\n"
@@ -571,9 +646,9 @@ def sign_off_meeting(req: MeetingSignOffRequest, request: Request, db: Session =
         report_content += f" • Case: {c['case_number']} | Final Outcome: {c['final_diagnosis']}\n"
 
     report_bytes = report_content.encode("utf-8")
+    report_sha256 = hashlib.sha256(report_bytes).hexdigest()
 
     # Write to eTMF
-    etmf_dest = None
     try:
         adapter = get_etmf_adapter()
         etmf_dest = adapter.write_meeting_report(
@@ -583,8 +658,18 @@ def sign_off_meeting(req: MeetingSignOffRequest, request: Request, db: Session =
             report_bytes=report_bytes,
             timestamp=now_dt,
         )
+        receipt = adapter.verify(etmf_dest, report_sha256)
     except Exception as exc:
-        etmf_dest = f"eTMF write error: {exc}"
+        db.rollback()
+        raise HTTPException(503, f"Committee report filing verification failed: {str(exc)[:300]}")
+
+    meeting.report_sha256 = report_sha256
+    meeting.filing_verified_at = receipt.verified_at
+    meeting.filing_receipt = {
+        "receipt_id": receipt.receipt_id, "destination": receipt.destination,
+        "content_sha256": receipt.content_sha256, "manifest_sha256": receipt.manifest_sha256,
+        "verified_at": receipt.verified_at.isoformat(),
+    }
 
     # Write audit log
     db.add(AuditEvent(
@@ -598,6 +683,8 @@ def sign_off_meeting(req: MeetingSignOffRequest, request: Request, db: Session =
             "signature_hash": sig_hash,
             "closed_cases_count": len(closed_cases_info),
             "etmf_destination": etmf_dest,
+            "report_sha256": report_sha256,
+            "filing_receipt_id": receipt.receipt_id,
         },
         timestamp=now_dt,
     ))

@@ -1,14 +1,12 @@
 import React, { useState } from 'react';
 import { Lock, ShieldCheck, Key, AlertCircle, CheckCircle } from 'lucide-react';
+import { DEMO_UI_BUILD_ENABLED } from '../config/featureFlags';
 
 export default function SignatureModal({ caseData, user, submission, onSignConfirm, onClose }) {
   const [password, setPassword] = useState('');
-  const [mfaCode, setMfaCode] = useState('849201');
+  const [mfaCode, setMfaCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-
-  // Pre-calculated SHA-256 hash representation of the case facts + narrative
-  const caseHash = "SHA256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
   const handleSignature = (e) => {
     e.preventDefault();
@@ -118,8 +116,8 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--acrn-sky-blue)', marginTop: '6px', wordBreak: 'break-all' }}>
-                {caseHash}
+              <div style={{ fontSize: '11px', color: 'var(--acrn-sky-blue)', marginTop: '6px' }}>
+                The server will bind the authenticated identity, determination, visit, and signing time into the immutable signature record.
               </div>
             </div>
 
@@ -171,8 +169,8 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
               />
             </div>
 
-            <div className="form-group">
-              <label>Entra ID MFA Security Passcode</label>
+            {DEMO_UI_BUILD_ENABLED && <div className="form-group">
+              <label>Demo signature passcode</label>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <input
                   type="text"
@@ -180,11 +178,11 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
                   value={mfaCode}
                   onChange={(e) => setMfaCode(e.target.value)}
                 />
-                <button type="button" className="btn-secondary" style={{ whiteSpace: 'nowrap' }} onClick={() => alert('Demo OTP resent. In production, this action will invoke Entra ID step-up authentication and will not expose or store the OTP in the browser.')}>
+                <button type="button" className="btn-secondary" style={{ whiteSpace: 'nowrap' }} onClick={() => alert('Request a new demo passcode from the demo administrator.')}>
                   Resend OTP
                 </button>
               </div>
-            </div>
+            </div>}
           </div>
 
           <div className="modal-footer">

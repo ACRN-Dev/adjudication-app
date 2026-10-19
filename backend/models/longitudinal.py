@@ -32,6 +32,25 @@ class RTImportBatch(Base):
     source_path = Column(String(500))  # server-restricted staging path; never serialized
 
 
+class RTImportJob(Base):
+    """Durable execution record for an import batch.
+
+    A job is committed before dispatch.  A worker owns it only while its lease
+    is valid, allowing startup recovery after a process or host failure.
+    """
+    __tablename__ = "rt_import_jobs"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey("rt_import_batches.id"), nullable=False, index=True)
+    operation = Column(String(30), nullable=False, default="PROCESS")
+    status = Column(String(30), nullable=False, default="QUEUED", index=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    queued_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    started_at = Column(DateTime); finished_at = Column(DateTime)
+    lease_owner = Column(String(100)); lease_expires_at = Column(DateTime, index=True)
+    last_heartbeat_at = Column(DateTime); error_summary = Column(Text)
+
+
 class LongitudinalParticipant(Base):
     __tablename__ = "longitudinal_participants"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -91,8 +110,24 @@ class CanonicalObservation(Base):
     documentation_status = Column(String(40), nullable=True)
     provenance_type = Column(String(30), default="SOURCE_RECORDED")
     prohibited_flag = Column(Boolean, default=False); superseded = Column(Boolean, default=False); source_fingerprint = Column(String(64), index=True)
+    supersedes_observation_id = Column(UUID(as_uuid=True), ForeignKey("canonical_observations.id"), nullable=True, index=True)
+    correction_id = Column(UUID(as_uuid=True), ForeignKey("observation_corrections.id"), nullable=True, index=True)
     visit = relationship("VisitInstance", back_populates="observations")
     __table_args__ = (Index("ix_obs_participant_variable_date","participant_id","canonical_variable","observation_datetime"),)
+
+
+class ObservationCorrection(Base):
+    """Immutable request/approval record for a replacement canonical observation."""
+    __tablename__ = "observation_corrections"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    participant_id = Column(UUID(as_uuid=True), ForeignKey("longitudinal_participants.id"), nullable=False, index=True)
+    original_observation_id = Column(UUID(as_uuid=True), ForeignKey("canonical_observations.id"), nullable=False, index=True)
+    replacement_observation_id = Column(UUID(as_uuid=True), ForeignKey("canonical_observations.id"), nullable=True)
+    proposed_values = Column(JSON, nullable=False)
+    request_reason = Column(Text, nullable=False)
+    requested_by = Column(String(255), nullable=False); requested_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    status = Column(String(30), nullable=False, default="PENDING_APPROVAL", index=True)
+    approval_reason = Column(Text); approved_by = Column(String(255)); approved_at = Column(DateTime)
 
 
 class VisitDerivation(Base):
@@ -100,7 +135,7 @@ class VisitDerivation(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     participant_id = Column(UUID(as_uuid=True), nullable=False, index=True); visit_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     dv_identifier = Column(String(10), nullable=False); result = Column(JSON); status = Column(String(40)); inputs = Column(JSON); missing_inputs = Column(JSON)
-    rule_version = Column(String(40), default="ISSHP-2021-v1.3"); derived_at = Column(DateTime, default=datetime.utcnow)
+    rule_version = Column(String(40), default="PROTECT-DV-2026.08"); derived_at = Column(DateTime, default=datetime.utcnow)
     __table_args__ = (UniqueConstraint("visit_id","dv_identifier",name="uq_visit_dv"),)
 
 
@@ -134,11 +169,36 @@ class ReviewerAssignment(Base):
     __table_args__ = (UniqueConstraint("participant_id","reviewer_role",name="uq_participant_reviewer_role"),)
 
 
+class ClinicalDataQuery(Base):
+    __tablename__ = "clinical_data_queries"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    participant_id = Column(UUID(as_uuid=True), ForeignKey("longitudinal_participants.id"), nullable=False, index=True)
+    visit_id = Column(UUID(as_uuid=True), ForeignKey("visit_instances.id"), index=True)
+    category = Column(String(60), nullable=False); query_text = Column(Text, nullable=False)
+    raised_by = Column(String(255), nullable=False); raised_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    status = Column(String(30), nullable=False, default="OPEN", index=True)
+    response_text = Column(Text); responded_by = Column(String(255)); responded_at = Column(DateTime)
+    closed_by = Column(String(255)); closed_at = Column(DateTime); closure_reason = Column(Text)
+
+
+class ReviewerRecusal(Base):
+    __tablename__ = "reviewer_recusals"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    participant_id = Column(UUID(as_uuid=True), ForeignKey("longitudinal_participants.id"), nullable=False, index=True)
+    assignment_id = Column(UUID(as_uuid=True), ForeignKey("reviewer_assignments.id"), nullable=False)
+    reviewer_upn = Column(String(255), nullable=False, index=True); reviewer_role = Column(String(20), nullable=False)
+    reason_code = Column(String(50), nullable=False); comments = Column(Text, nullable=False)
+    declared_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    replacement_upn = Column(String(255)); replacement_assigned_at = Column(DateTime)
+
+
 class LongitudinalAuditEvent(Base):
     __tablename__ = "longitudinal_audit_events"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4); timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
     actor = Column(String(255), nullable=False); actor_role = Column(String(80)); action = Column(String(80), nullable=False, index=True)
-    entity_type = Column(String(50)); entity_id = Column(String(80)); safe_details = Column(JSON, default=dict); record_hash = Column(String(64), nullable=False)
+    entity_type = Column(String(50)); entity_id = Column(String(80)); safe_details = Column(JSON, default=dict)
+    previous_hash = Column(String(64)); chain_sequence = Column(Integer, nullable=False, default=1, index=True)
+    record_hash = Column(String(64), nullable=False); integrity_version = Column(String(20), nullable=False, default="SHA256-CHAIN-1")
 
 
 class LabReferenceRange(Base):

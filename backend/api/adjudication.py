@@ -11,12 +11,13 @@ Enforces:
   - Pseudonymisation: adjudicators receive the blinded case ID, NOT the true subject_id
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import hashlib
+import json
 import os
 import random
 
@@ -27,13 +28,27 @@ from models.canonical import (
     AdjudicationStatus, StudyCode,
 )
 from models.auth import PortalUser
-from models.longitudinal import LongitudinalParticipant, ReviewerAssignment
-from services.auth_service import verify_password
+from models.longitudinal import LongitudinalParticipant, ReviewerAssignment, ClinicalDataQuery
+from services.auth_service import verify_password, resolve_session
+from services.runtime_policy import legacy_unsafe_routes_enabled
 from services.case_finalization import finalize_case_pdf, record_determination_activity
 from services.adjudication_resolution import apply_visit_resolution
 from services.visit5_service import validate_visit5_submission, map_source_to_visit5_assessments, compare_visit5_concordance
 
 router = APIRouter()
+
+
+def adjudication_user(request: Request, db: Session = Depends(get_db)):
+    """Require an active adjudicator session outside explicitly enabled legacy/demo mode."""
+    if legacy_unsafe_routes_enabled():
+        return None
+    token = request.cookies.get("acrn_demo_session")
+    session = resolve_session(db, token) if token else None
+    user = db.get(PortalUser, session.user_id) if session else None
+    if not session or not user or user.role != "ADJUDICATOR":
+        raise HTTPException(401 if not session else 403, "Authenticated adjudicator access required")
+    request.state.auth_session = session
+    return user
 
 
 def _demo_validation_bypass_enabled() -> bool:
@@ -141,7 +156,7 @@ class ReviewerSubmission(BaseModel):
     fetal_neonatal_provenance: Optional[dict] = None
 
 
-def _process_single_submission(subject_id: str, sub: ReviewerSubmission, db: Session):
+def _process_single_submission(subject_id: str, sub: ReviewerSubmission, db: Session, signer_context: dict | None = None):
     sub.visit_date = _naive_utc(sub.visit_date)
     sub.date_of_diagnosis = _naive_utc(sub.date_of_diagnosis)
     sub.first_pe_date = _naive_utc(sub.first_pe_date)
@@ -175,6 +190,16 @@ def _process_single_submission(subject_id: str, sub: ReviewerSubmission, db: Ses
         db.flush()
     else:
         realtime_case = db.query(LongitudinalParticipant).filter_by(blinded_subject_id=subject_id).first()
+
+    if realtime_case:
+        active_rt_assignment = db.query(ReviewerAssignment).filter_by(
+            participant_id=realtime_case.id, reviewer_upn=sub.reviewer_upn.strip().lower(), status="ASSIGNED"
+        ).first()
+        if not active_rt_assignment:
+            raise HTTPException(status_code=403, detail="Reviewer is not actively assigned to this case.")
+        open_query = db.query(ClinicalDataQuery).filter_by(participant_id=realtime_case.id, status="OPEN").first()
+        if open_query:
+            raise HTTPException(status_code=409, detail="Electronic signature is blocked while a clinical data query remains open.")
 
     # Keep SubjectAssignment (the table the stickiness check below reads) in sync with
     # the realtime ReviewerAssignment table on every submission — not just at the moment
@@ -471,13 +496,34 @@ def _process_single_submission(subject_id: str, sub: ReviewerSubmission, db: Ses
     # ── 6. Generate e-signature hash (SHA-256, 21 CFR Part 11) ───────────────
     # Bound to reviewer_user.id (immutable, unique per person) rather than just the
     # UPN string, so the credential used to sign can never be attributed to anyone else.
-    raw_sig = (
-        f"{subject_id}|{reviewer_user.id}|{sub.reviewer_upn}|{sub.reviewer_role.value}|"
-        f"{sub.diagnosis.value}|{sub.visit_number}|"
-        f"{sub.date_of_diagnosis.isoformat() if sub.date_of_diagnosis else ''}|"
-        f"{datetime.utcnow().isoformat()}"
-    )
-    sig_hash = hashlib.sha256(raw_sig.encode()).hexdigest()
+    signed_at = datetime.utcnow()
+    signature_payload = {
+        "case_reference": subject_id,
+        "participant_record_id": str(participant.id),
+        "visit_record_id": str(visit.id),
+        "visit_number": sub.visit_number,
+        "reviewer_user_id": reviewer_user.id,
+        "reviewer_upn": sub_upn,
+        "reviewer_role": sub.reviewer_role.value,
+        "meets_criteria": sub.meets_criteria,
+        "diagnosis": sub.diagnosis.value,
+        "date_of_diagnosis": sub.date_of_diagnosis.isoformat() if sub.date_of_diagnosis else None,
+        "onset_class": sub.onset_class.value,
+        "severity": sub.severity.value,
+        "certainty": sub.certainty.value,
+        "differential_diagnosis": sub.differential_diagnosis,
+        "rationale": sub.rationale,
+        "comment": sub.comment,
+        "longitudinal_comment": sub.longitudinal_comment,
+        "first_pe_visit_number": sub.first_pe_visit_number,
+        "first_pe_date": sub.first_pe_date.isoformat() if sub.first_pe_date else None,
+        "other_rationale": sub.other_rationale,
+        "fetal_neonatal_assessments": sub.fetal_neonatal_assessments,
+        "gestational_age_at_delivery": sub.gestational_age_at_delivery,
+        "pregnancy_outcome": sub.pregnancy_outcome,
+        "signed_at": signed_at.isoformat(),
+    }
+    sig_hash = hashlib.sha256(json.dumps(signature_payload, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
 
     # ── 7. Persist Adjudication Record ───────────────────────────────────────
     if existing:
@@ -515,10 +561,14 @@ def _process_single_submission(subject_id: str, sub: ReviewerSubmission, db: Ses
     rec.fetal_neonatal_provenance = sub.fetal_neonatal_provenance
 
     rec.signed = True
-    rec.signed_at = datetime.utcnow()
+    rec.signed_at = signed_at
     rec.signature_hash = sig_hash
-    rec.mfa_verified = True
-    rec.submitted_at = datetime.utcnow()
+    rec.signature_payload = signature_payload
+    rec.signature_meaning = "I approve this adjudication determination and certify that I reviewed the blinded evidence."
+    rec.authentication_method = (signer_context or {}).get("authentication_method", "DEMO_STEP_UP")
+    rec.authentication_session_id = (signer_context or {}).get("session_id")
+    rec.mfa_verified = bool((signer_context or {}).get("mfa_verified", demo_step_up_verified))
+    rec.submitted_at = signed_at
 
     db.flush()
     record_determination_activity(db, participant, visit, rec)
@@ -703,11 +753,29 @@ def _process_single_submission(subject_id: str, sub: ReviewerSubmission, db: Ses
 def submit_adjudication(
     subject_id: str,
     sub: ReviewerSubmission,
+    request: Request,
+    actor: Optional[PortalUser] = Depends(adjudication_user),
     db: Session = Depends(get_db),
 ):
+    if actor and actor.email.strip().lower() != sub.reviewer_upn.strip().lower():
+        raise HTTPException(403, "The signed reviewer identity must match the authenticated session")
+    if actor and not legacy_unsafe_routes_enabled():
+        session = getattr(request.state, "auth_session", None)
+        recent_mfa = bool(
+            session and session.mfa_verified_at
+            and session.mfa_verified_at >= datetime.utcnow() - timedelta(minutes=15)
+        )
+        if not recent_mfa:
+            raise HTTPException(403, "A recent identity-provider MFA verification is required to sign")
     if not sub.differential_diagnosis or not sub.differential_diagnosis.strip():
         raise HTTPException(status_code=422, detail="Differential diagnosis is required.")
 
+    auth_session = getattr(request.state, "auth_session", None)
+    signer_context = {
+        "session_id": str(auth_session.id) if auth_session else None,
+        "authentication_method": auth_session.authentication_method if auth_session else "DEMO_STEP_UP",
+        "mfa_verified": bool(auth_session and auth_session.mfa_verified_at) or legacy_unsafe_routes_enabled(),
+    }
     if sub.is_overall_first:
         results = []
         for onset in sub.per_visit_onset:
@@ -730,19 +798,20 @@ def submit_adjudication(
                 single_sub.fetal_neonatal_provenance = None
 
                 
-            res = _process_single_submission(subject_id, single_sub, db)
+            res = _process_single_submission(subject_id, single_sub, db, signer_context)
             results.append(res)
         db.commit()
         return {"status": "success", "results": results}
     else:
-        res = _process_single_submission(subject_id, sub, db)
+        res = _process_single_submission(subject_id, sub, db, signer_context)
         db.commit()
         return res
 
 @router.get("/{subject_id}")
 def get_adjudication_status(
     subject_id: str,
-    requesting_upn: str,
+    requesting_upn: Optional[str] = None,
+    actor: Optional[PortalUser] = Depends(adjudication_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -751,6 +820,12 @@ def get_adjudication_status(
     DISCORDANT / COMMITTEE_PENDING / THREE_WAY_DIVERGENT / FINALIZED / CLOSED.
     The true subject_id is NEVER returned — only the case_number (blinded reference).
     """
+    if actor:
+        if requesting_upn and requesting_upn.strip().lower() != actor.email.strip().lower():
+            raise HTTPException(403, "requesting_upn must match the authenticated session")
+        requesting_upn = actor.email
+    if not requesting_upn:
+        raise HTTPException(422, "requesting_upn is required")
     participant = (
         db.query(Participant)
         .filter(
@@ -844,6 +919,7 @@ def get_adjudication_status(
 @router.get("/{subject_id}/visit-5-mapping")
 def get_visit_5_mapping(
     subject_id: str,
+    actor: Optional[PortalUser] = Depends(adjudication_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -859,6 +935,11 @@ def get_visit_5_mapping(
             (LongitudinalParticipant.blinded_subject_id == p.case_number) |
             (LongitudinalParticipant.subject_id == p.subject_id)
         ).first()
+
+    if actor and lp and not db.query(ReviewerAssignment).filter_by(
+        participant_id=lp.id, reviewer_upn=actor.email.strip().lower(), status="ASSIGNED"
+    ).first():
+        raise HTTPException(403, "Participant is not assigned to this reviewer")
 
     observations = []
     if lp:

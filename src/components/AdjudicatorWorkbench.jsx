@@ -3,7 +3,6 @@ import { ArrowRight, ArrowLeft, CheckCircle2, Activity, Database, ShieldCheck, F
 import { OverallSummary, VisitEvidencePanel, VisitRibbon } from './VisitEvidenceSections';
 import { generateNarrative, generateSummary, AI_ENGINE_MODEL } from '../services/demoNarrative';
 import { generateVisitNarrative, generateOverallNarrative } from '../services/clinicalNarrative';
-import { runDvEngine } from '../services/dvEngine';
 import { downloadPdfReport } from '../services/api';
 import { isReviewerVisitSigned, isVisitComplete, normalizeVisitEvidence } from '../services/visitEvidence';
 
@@ -432,15 +431,18 @@ export default function AdjudicatorWorkbench({
     return `Visit ${index + 1}`;
   };
 
-  // Compute DV engine results for active case
-  const dvResults = activeCase ? runDvEngine(activeCase) : null;
-  const evidenceScore = selectedEvidenceVisit?.interpretation?.completeness != null
-    ? selectedEvidenceVisit.interpretation.completeness / 100
-    : (dvResults ? dvResults.evidenceScore : (activeCase?.pktScore || 0));
-  const missingAnchors = selectedEvidenceVisit?.interpretation?.missing || dvResults?.missingAnchors || [];
-  const certaintyGatePassed = selectedEvidenceVisit
-    ? (selectedEvidenceVisit.interpretation?.missing?.length === 0)
-    : (dvResults?.certaintyGate?.inputs?.gate_open ?? evidenceScore === 1.0);
+  // Clinical interpretation is server-derived, persisted, and versioned.  The
+  // reviewer client deliberately fails closed when that authority is absent.
+  const interpretation = selectedEvidenceVisit?.interpretation;
+  const hasAuthoritativeDerivation = interpretation?.authoritative === true;
+  const evidenceScore = hasAuthoritativeDerivation && interpretation.completeness != null
+    ? interpretation.completeness / 100
+    : 0;
+  const missingAnchors = hasAuthoritativeDerivation
+    ? (interpretation.missing || [])
+    : ['Authoritative server derivation unavailable'];
+  const certaintyGatePassed = hasAuthoritativeDerivation
+    && interpretation?.certainty_gate?.inputs?.gate_open === true;
   const maxCertaintyAllowed = certaintyGatePassed ? 'Definite' : 'Probable';
 
   useEffect(() => {

@@ -1,7 +1,6 @@
 /**
  * ACRN Adjudication API Client Service
- * Connects React frontend to FastAPI backend service (http://localhost:8000/api).
- * Includes automatic fallback to mock data when backend is unreachable.
+ * Connects the React frontend to the same-origin FastAPI API gateway.
  */
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
@@ -11,7 +10,7 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/
  */
 export async function checkBackendHealth() {
   try {
-    const res = await fetch('http://localhost:8000/', { method: 'GET' });
+    const res = await fetch(`${API_BASE_URL}/auth/config`, { method: 'GET', credentials: 'include' });
     if (res.ok) {
       const data = await res.json();
       return { online: true, data };

@@ -349,13 +349,13 @@
 }
 
 .monitor-toolbar .a-primary {
-  background: #F07E26;
+  background: #9A3D00;
   color: #ffffff;
   border: 1px solid #d96b18;
 }
 
 .monitor-toolbar .a-primary:hover {
-  background: #d96b18;
+  background: #7c3100;
 }
 
 .assignment-tabs {

@@ -13,7 +13,8 @@ from database import DB_OFFLINE
 from models.auth import PortalUser, AuthSession, AuthAuditEvent, CommitteeAssignment
 from models.admin import (
     AdminUser, AdminRole, UserRole, StudyAccess, AdminStudy, AdminSite,
-    ControlledVersion, IntegrationStatus, AccessReview, AdminAuditEvent,
+    ControlledVersion, IntegrationStatus, AccessReview, RetentionPolicy, LegalHold,
+    DispositionRequest, AdminAuditEvent,
     AdjudicationActivityLedger
 )
 from models.canonical import (
@@ -94,6 +95,9 @@ def purge_all_demo_data(db: Session) -> dict[str, int]:
     # 4. Admin Governance & Ledger
     _delete(AdjudicationActivityLedger)
     _delete(AdminAuditEvent)
+    _delete(DispositionRequest)
+    _delete(LegalHold)
+    _delete(RetentionPolicy)
     _delete(AccessReview)
     _delete(IntegrationStatus)
     _delete(ControlledVersion)

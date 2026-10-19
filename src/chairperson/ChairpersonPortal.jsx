@@ -359,7 +359,7 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
         </div>
         {activeTab === 'concordance' && !readOnly && (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <select className="a-toolbar" style={{ padding: '0 8px', height: '30px', fontSize: '9.5px' }} value={releaseStudy} onChange={e => setReleaseStudy(e.target.value)}>
+            <select aria-label="Final release study" className="a-toolbar" style={{ padding: '0 8px', height: '30px', fontSize: '9.5px' }} value={releaseStudy} onChange={e => setReleaseStudy(e.target.value)}>
               <option value="PROTECT-Africa">PROTECT-Africa</option>
               <option value="LOPE-Nigeria">LOPE-Nigeria</option>
             </select>
@@ -409,7 +409,7 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
             </thead>
             <tbody>
               {Object.entries(groupedAdjudications).length === 0 ? (
-                <tr><td colSpan="9" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>No adjudication records yet.</td></tr>
+                <tr><td colSpan="9" style={{ textAlign: 'center', padding: '30px', color: '#526176' }}>No adjudication records yet.</td></tr>
               ) : (
                 Object.entries(groupedAdjudications).map(([subjectId, items]) =>
                   items.map((adj, adjIndex) => {
@@ -731,6 +731,7 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
 
   return (
     <div className="admin-app">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       {finalizeModal}
       {inspectionItem && <EvidenceInspectorModal item={inspectionItem} onClose={() => setInspectionItem(null)} />}
 
@@ -772,7 +773,7 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
               </button>
             ))}
           </section>
-          <button className="a-collapse" onClick={() => setNavCollapsed(!navCollapsed)} style={{ marginTop: 'auto' }}>
+          <button className="a-collapse" onClick={() => setNavCollapsed(!navCollapsed)} aria-label={navCollapsed ? 'Expand navigation' : 'Collapse navigation'} style={{ marginTop: 'auto' }}>
             {navCollapsed ? <ChevronRight size={13} /> : <><ChevronRight size={13} style={{ transform: 'rotate(180deg)' }} /> <span>Collapse</span></>}
           </button>
           <div className="a-env">
@@ -782,7 +783,7 @@ export default function ChairpersonPortal({ user, onLogout, isEmbedded, readOnly
         </aside>
 
         {/* Main content */}
-        <main className="a-main">
+        <main id="main-content" className="a-main" tabIndex="-1">
           <div className="a-crumb">
             <span>Chairperson</span>
             <ChevronRight size={12} />

@@ -408,6 +408,60 @@ def test_chairperson_sign_off_meeting_and_close_cases():
     meetings = r_list.json()
     assert len(meetings["items"]) >= 1
     assert any(m["title"] == "PROTECT-Africa Adjudication Batch 1 Meeting" for m in meetings["items"])
+    db = TestingSession()
+    meeting = db.query(CommitteeMeeting).filter_by(meeting_title=payload["meeting_title"]).order_by(CommitteeMeeting.created_at.desc()).first()
+    assert meeting.signature_payload["meaning"] == "Committee minutes and listed final outcomes approved"
+    assert meeting.report_sha256 == meeting.filing_receipt["content_sha256"]
+    assert meeting.filing_verified_at is not None
+    db.close()
+
+
+def test_meeting_signoff_rejects_unresolved_discordance_and_preserves_case():
+    subject_id = _seed_completed_case(concordant=False)
+    user = _chairperson_user_with_assignment()
+    previous = app.dependency_overrides.get(current_user)
+    app.dependency_overrides[current_user] = lambda: user
+    try:
+        response = client.post("/api/chairperson/meetings/sign-off", json={
+            "meeting_title": "Invalid unresolved sign-off",
+            "attendees": [user.email, "member-a@example.test", "member-b@example.test"],
+            "quorum_met": True,
+            "minutes": "The unresolved case must not be closed by batch sign-off.",
+            "case_ids": [subject_id],
+            "chair_name": "Assigned Chairperson",
+        })
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(current_user, None)
+        else:
+            app.dependency_overrides[current_user] = previous
+    assert response.status_code == 409
+    db = TestingSession()
+    assert db.query(Participant).filter_by(subject_id=subject_id).one().status == AdjudicationStatus.DISCORDANT
+    db.close()
+
+
+def test_case_finalization_rejects_missing_quorum():
+    subject_id = _seed_completed_case(concordant=False)
+    user = _chairperson_user_with_assignment()
+    previous = app.dependency_overrides.get(current_user)
+    app.dependency_overrides[current_user] = lambda: user
+    try:
+        response = client.post(f"/api/chairperson/cases/{subject_id}/finalize", json={
+            "meeting_title": "No quorum arbitration",
+            "minutes": "Only two members attended this attempted arbitration.",
+            "chair_rationale": "Cannot approve without quorum.",
+            "final_diagnosis": "PE", "final_onset_class": "EOPE",
+            "final_severity": "With severe features", "final_certainty": "Definite",
+            "attendees": ["member-a@example.test"], "quorum_met": False,
+            "members_present": 3, "visit_number": 1,
+        })
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(current_user, None)
+        else:
+            app.dependency_overrides[current_user] = previous
+    assert response.status_code == 409
 
 
 def test_chairperson_can_schedule_and_cancel_meeting():

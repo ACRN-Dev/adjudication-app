@@ -153,17 +153,40 @@ def derive_dv03_confirmed_htn(bp_readings: List[Dict[str, Any]]) -> DVResult:
     if len(qualifying) < 2:
         return DVResult("DV-03", False, False, "NOT_MET", "Fewer than 2 qualifying BP readings (>=140/90 mmHg) documented.", {"qualifying_count": len(qualifying)})
 
-    dates = set(b.get("date") for b in qualifying if b.get("date"))
-    has_severe = any(float(b.get("sbp", 0)) >= 160 or float(b.get("dbp", 0)) >= 110 for b in qualifying)
+    timed = []
+    for bp in qualifying:
+        value = bp.get("datetime")
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                value = None
+        if isinstance(value, datetime):
+            timed.append((value, bp))
 
-    if len(dates) >= 2 or has_severe:
+    if len(timed) < 2:
         return DVResult(
-            "DV-03", True, False, "CONFIRMED_HTN_MET",
-            f"Confirmed HTN met: {len(qualifying)} qualifying readings across {len(dates)} distinct dates (Severe range: {has_severe}).",
-            {"qualifying_count": len(qualifying), "distinct_dates": len(dates), "has_severe": has_severe}
+            "DV-03", False, True, "NOT_ASSESSABLE",
+            "Two qualifying blood-pressure observations with reliable timestamps are required.",
+            {"qualifying_count": len(qualifying), "timed_count": len(timed)},
         )
-    
-    return DVResult("DV-03", False, False, "NOT_MET", "Multiple qualifying BPs found on single date without severe-range confirmation.", {"qualifying_count": len(qualifying)})
+
+    timed.sort(key=lambda item: item[0])
+    for index, (first_time, _first_bp) in enumerate(timed):
+        for second_time, _second_bp in timed[index + 1:]:
+            interval_hours = (second_time - first_time).total_seconds() / 3600
+            if 6 <= interval_hours <= 168:
+                return DVResult(
+                    "DV-03", True, False, "CONFIRMED_HTN_MET",
+                    f"Confirmed HTN met: qualifying readings {interval_hours:.1f} hours apart.",
+                    {"qualifying_count": len(qualifying), "interval_hours": round(interval_hours, 2)},
+                )
+
+    return DVResult(
+        "DV-03", False, False, "NOT_MET",
+        "Qualifying blood-pressure observations are not separated by the approved 6-hour to 1-week interval.",
+        {"qualifying_count": len(qualifying)},
+    )
 
 
 def derive_dv04_ga_anchor(first_uss_date: Optional[str], first_uss_ga: Optional[str], event_date: Optional[str]) -> DVResult:
@@ -276,35 +299,37 @@ def derive_dv09_creatinine_harmonise(value: Optional[float], unit: Optional[str]
     return float(value), False
 
 
-def derive_dv10_renal(creatinine_raw: Optional[float], creatinine_unit: Optional[str] = "mg/dL", baseline_cr: Optional[float] = None) -> DVResult:
-    """DV-10: Renal impairment (ACOG >1.1 mg/dL AND ISSHP >=90 umol/L reported)."""
+def derive_dv10_renal(creatinine_raw: Optional[float], creatinine_unit: Optional[str] = "mg/dL", baseline_cr: Optional[float] = None, oliguria: bool = False) -> DVResult:
+    """DV-10: Renal impairment by absolute value, baseline doubling, or oliguria."""
     if creatinine_raw is None:
-        return DVResult("DV-10", False, True, "NOT_ASSESSABLE", "Dated platelet count with AST/ALT evidence not documented")
+        if oliguria:
+            return DVResult("DV-10", True, False, "RENAL_IMPAIRMENT_MET", "Documented oliguria meets the renal criterion.", {"oliguria": True})
+        return DVResult("DV-10", False, True, "NOT_ASSESSABLE", "Dated creatinine or documented oliguria is not available.")
 
     cr_mg, harmonised = derive_dv09_creatinine_harmonise(creatinine_raw, creatinine_unit)
     cr_umol = round(cr_mg * 88.4, 1) if cr_mg else None
 
-    met_acog = cr_mg > 1.1 if cr_mg else False
-    met_isshp = cr_umol >= 90.0 if cr_umol else False
+    met_absolute = cr_mg >= 1.1 if cr_mg is not None else False
+    doubled_baseline = bool(baseline_cr is not None and baseline_cr > 0 and cr_mg >= (2 * baseline_cr))
 
-    if met_acog or met_isshp:
+    if met_absolute or doubled_baseline or oliguria:
         return DVResult(
             "DV-10", True, False, "RENAL_IMPAIRMENT_MET",
-            f"Renal dysfunction confirmed: {cr_mg} mg/dL ({cr_umol} umol/L). ACOG >1.1: {met_acog}, ISSHP >=90: {met_isshp}.",
-            {"creatinine_mg_dl": cr_mg, "creatinine_umol_l": cr_umol, "met_acog": met_acog, "met_isshp": met_isshp}
+            f"Renal criterion met: creatinine {cr_mg} mg/dL; absolute threshold: {met_absolute}; baseline doubled: {doubled_baseline}; oliguria: {oliguria}.",
+            {"creatinine_mg_dl": cr_mg, "creatinine_umol_l": cr_umol, "baseline_creatinine": baseline_cr, "met_absolute": met_absolute, "doubled_baseline": doubled_baseline, "oliguria": oliguria}
         )
 
     return DVResult(
         "DV-10", False, False, "NOT_MET",
         f"Renal function within normal limits: {cr_mg} mg/dL ({cr_umol} umol/L).",
-        {"creatinine_mg_dl": cr_mg, "creatinine_umol_l": cr_umol}
+        {"creatinine_mg_dl": cr_mg, "creatinine_umol_l": cr_umol, "baseline_creatinine": baseline_cr, "oliguria": oliguria}
     )
 
 
 def derive_dv11_hepatic(ast: Optional[float], alt: Optional[float], ast_uln: float = 40.0, alt_uln: float = 35.0) -> DVResult:
     """DV-11: Hepatic dysfunction (ACOG >2xULN and ISSHP >40 U/L both reported)."""
     if ast is None and alt is None:
-        return DVResult("DV-11", False, True, "NOT_ASSESSABLE", "Dated platelet count with AST/ALT evidence not documented")
+        return DVResult("DV-11", False, True, "NOT_ASSESSABLE", "Dated AST or ALT evidence is not documented.")
 
     ast_val = ast or 0.0
     alt_val = alt or 0.0
@@ -327,14 +352,14 @@ def derive_dv11_hepatic(ast: Optional[float], alt: Optional[float], ast_uln: flo
 
 
 def derive_dv12_ldh(ldh: Optional[float]) -> DVResult:
-    """DV-12: Hemolysis / LDH >= 600 IU/L (fixed absolute threshold)."""
+    """DV-12: Hemolysis / LDH >600 IU/L (fixed absolute threshold)."""
     if ldh is None:
-        return DVResult("DV-12", False, True, "NOT_ASSESSABLE", "Dated platelet count with AST/ALT evidence not documented")
+        return DVResult("DV-12", False, True, "NOT_ASSESSABLE", "Dated LDH evidence is not documented.")
 
-    if ldh >= 600.0:
-        return DVResult("DV-12", True, False, "LDH_ELEVATED", f"Severe hemolysis / LDH threshold met: {ldh} IU/L (>=600).", {"ldh": ldh})
+    if ldh > 600.0:
+        return DVResult("DV-12", True, False, "LDH_ELEVATED", f"Severe hemolysis / LDH threshold met: {ldh} IU/L (>600).", {"ldh": ldh})
 
-    return DVResult("DV-12", False, False, "NOT_MET", f"LDH below severe threshold: {ldh} IU/L (<600).", {"ldh": ldh})
+    return DVResult("DV-12", False, False, "NOT_MET", f"LDH does not exceed the severe threshold: {ldh} IU/L (<=600).", {"ldh": ldh})
 
 
 def derive_dv13_hellp(platelet_count: Optional[float], ast: Optional[float], alt: Optional[float], ldh: Optional[float]) -> DVResult:
@@ -342,7 +367,7 @@ def derive_dv13_hellp(platelet_count: Optional[float], ast: Optional[float], alt
     if platelet_count is None or (ast is None and alt is None) or ldh is None:
         return DVResult("DV-13", False, True, "NOT_ASSESSABLE", "Complete laboratory panel (Platelets, AST/ALT, LDH) not fully documented.")
 
-    has_hemolysis = ldh >= 600.0
+    has_hemolysis = ldh > 600.0
     has_liver = (ast and ast > 70.0) or (alt and alt > 70.0)
     has_low_plt = platelet_count < 100.0
 
@@ -368,7 +393,7 @@ def derive_dv14_severity(dv_results: Dict[str, DVResult]) -> DVResult:
     ) or (dv08 and dv08.met and dv08.inputs.get("tier") in ("<100", "<50"))
 
     if has_severe:
-        return DVResult("DV-14", True, False, "SEVERE_FEATURES", "Pre-eclampsia with Severe Features confirmed by automated criteria.", {"severity": "SEVERE_FEATURES"})
+        return DVResult("DV-14", True, False, "SEVERE_FEATURES", "Automated decision support identified one or more severe-feature criteria; adjudicator confirmation is required.", {"severity": "SEVERE_FEATURES"})
 
     dv03 = dv_results.get("DV-03")
     dv07 = dv_results.get("DV-07")
@@ -539,7 +564,7 @@ def run_dv_engine(case_data: Dict[str, Any]) -> Dict[str, Any]:
     
     results["DV-07"] = derive_dv07_proteinuria(case_data.get("upcr"), case_data.get("dipstick_raw"), case_data.get("prot_24h_mg"))
     results["DV-08"] = derive_dv08_platelets(case_data.get("platelet_count"))
-    results["DV-10"] = derive_dv10_renal(case_data.get("creatinine_raw") or case_data.get("creatinine"), case_data.get("creatinine_unit", "mg/dL"), case_data.get("baseline_creatinine"))
+    results["DV-10"] = derive_dv10_renal(case_data.get("creatinine_raw") or case_data.get("creatinine"), case_data.get("creatinine_unit", "mg/dL"), case_data.get("baseline_creatinine"), bool(case_data.get("oliguria")))
     results["DV-11"] = derive_dv11_hepatic(case_data.get("ast"), case_data.get("alt"), case_data.get("ast_uln", 40.0), case_data.get("alt_uln", 35.0))
     results["DV-12"] = derive_dv12_ldh(case_data.get("ldh"))
     results["DV-13"] = derive_dv13_hellp(case_data.get("platelet_count"), case_data.get("ast"), case_data.get("alt"), case_data.get("ldh"))

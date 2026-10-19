@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import * as I from 'lucide-react';
+import { Activity, AlertTriangle, Baby, ChevronDown, ClipboardList, Pill } from 'lucide-react';
+
+const I = { Activity, AlertTriangle, Baby, ChevronDown, ClipboardList, Pill };
 
 function TriStateBadge({ value }) {
   if (value === 'Yes') return <span style={{ background: '#fef2f2', color: '#991b1b', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>Yes</span>;

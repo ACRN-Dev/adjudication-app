@@ -11,11 +11,11 @@ from models.admin import AdminAuditEvent
 from models.auth import PortalUser
 
 ROLE_PERMISSIONS = {
-    "OWNER": {"admin.read", "users.read", "users.manage", "roles.read", "studies.manage", "studies.read", "sites.manage", "rules.manage", "rules.read", "rules.approve", "mappings.manage", "mappings.approve", "forms.manage", "forms.approve", "workflows.manage", "integrations.manage", "audit.read", "reports.read", "access.approve", "access.review", "finance.read", "finance.manage"},
-    "ADMIN": {"admin.read", "users.read", "users.manage", "roles.read", "studies.manage", "sites.manage", "rules.manage", "mappings.manage", "forms.manage", "workflows.manage", "integrations.manage", "audit.read", "reports.read", "access.approve", "access.review"},
+    "OWNER": {"admin.read", "users.read", "users.manage", "roles.read", "studies.manage", "studies.read", "sites.manage", "rules.manage", "rules.read", "rules.approve", "mappings.manage", "mappings.approve", "forms.manage", "forms.approve", "workflows.manage", "integrations.manage", "audit.read", "reports.read", "access.approve", "access.review", "retention.manage", "finance.read", "finance.manage"},
+    "ADMIN": {"admin.read", "users.read", "users.manage", "roles.read", "studies.manage", "sites.manage", "rules.manage", "mappings.manage", "forms.manage", "workflows.manage", "integrations.manage", "audit.read", "reports.read", "access.approve", "access.review", "retention.manage"},
     "TECHNICAL_ADMIN": {"admin.read", "users.read", "users.manage", "roles.read", "integrations.manage", "audit.read", "reports.read"},
     "CLINICAL_OPS_ADMIN": {"admin.read", "users.read", "studies.manage", "sites.manage", "rules.manage", "mappings.manage", "forms.manage", "workflows.manage", "audit.read", "reports.read", "access.approve"},
-    "QA_AUDITOR": {"admin.read", "audit.read", "reports.read", "rules.approve", "mappings.approve", "forms.approve"},
+    "QA_AUDITOR": {"admin.read", "audit.read", "reports.read", "rules.approve", "mappings.approve", "forms.approve", "retention.manage"},
     "GOVERNANCE_REVIEWER": {"admin.read", "roles.read", "studies.read", "rules.read", "audit.read", "reports.read"},
     "ACCESS_REVIEWER": {"admin.read", "users.read", "access.review", "audit.read", "reports.read"},
     "FINANCE": {"admin.read", "finance.read", "finance.manage", "audit.read", "reports.read"},
@@ -40,10 +40,9 @@ def get_identity(request: Request, acrn_demo_session: Optional[str] = Cookie(Non
     """Resolves identity from the session-backed PortalUser. X-Demo-* headers are only
     trusted as a fallback when ENABLE_DEMO_ACCOUNTS=true and no valid session is present."""
     if acrn_demo_session:
-        from services.auth_service import _hash_token
-        from models.auth import AuthSession
-        session = db.query(AuthSession).filter_by(token_hash=_hash_token(acrn_demo_session), revoked_at=None).first()
-        if session and session.expires_at > datetime.utcnow():
+        from services.auth_service import resolve_session
+        session = resolve_session(db, acrn_demo_session)
+        if session:
             user = db.get(PortalUser, session.user_id)
             if user and user.status == "ACTIVE":
                 if user.role == "OWNER":
@@ -108,7 +107,10 @@ def validate_workflow_definition(definition):
             raise HTTPException(422, "Locked records require the controlled-reopen process.")
     return True
 
-def add_audit(db, identity, action, entity_type, entity_id, reason, previous=None, new=None, study_code=None, outcome="SUCCESS", is_demo=True):
+def add_audit(db, identity, action, entity_type, entity_id, reason, previous=None, new=None, study_code=None, outcome="SUCCESS", is_demo=None):
+    if is_demo is None:
+        environment = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "development").strip().lower()
+        is_demo = environment not in {"prod", "production"} and os.getenv("ENABLE_DEMO_DATA", "false").lower() == "true"
     payload = {"t": datetime.now(timezone.utc).isoformat(), "a": identity.upn, "x": action, "e": entity_id, "n": new}
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
     row = AdminAuditEvent(actor_upn=identity.upn, actor_role=identity.role, action=action, entity_type=entity_type,

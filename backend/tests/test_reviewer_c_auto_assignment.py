@@ -87,6 +87,7 @@ def _submit(case_number, role, email, diagnosis, password="ACRN@2026", mfa_code=
         "severity": SeverityGrade.WITH_SEVERE.value,
         "certainty": CertaintyLevel.DEFINITE.value,
         "rationale": "Complete clinical rationale for endpoint classification.",
+        "differential_diagnosis": "Alternative hypertensive disorders were considered and excluded.",
     })
 
 

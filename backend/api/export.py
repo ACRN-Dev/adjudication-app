@@ -13,6 +13,7 @@ from datetime import datetime
 from database import get_db, DB_OFFLINE
 from models.canonical import Participant, AdjudicationStatus
 from services.pdf_generator import generate_adjudication_pdf
+from services.runtime_policy import require_legacy_unsafe_route
 
 router = APIRouter()
 
@@ -52,7 +53,11 @@ DEMO_MAP = {
 
 
 @router.get("/pdf/{subject_id}")
-def download_pdf_report(subject_id: str, db: Session = Depends(get_db)):
+def download_pdf_report(
+    subject_id: str,
+    _legacy_gate: None = Depends(require_legacy_unsafe_route),
+    db: Session = Depends(get_db),
+):
     case_data = None
     if not DB_OFFLINE and db:
         try:
@@ -108,7 +113,10 @@ def download_pdf_report(subject_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/csv")
-def export_csv_dataset(db: Session = Depends(get_db)):
+def export_csv_dataset(
+    _legacy_gate: None = Depends(require_legacy_unsafe_route),
+    db: Session = Depends(get_db),
+):
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
@@ -156,6 +164,7 @@ def export_csv_dataset(db: Session = Depends(get_db)):
 def study_analysis_export(
     study: str = "PROTECT-Africa",
     status_filter: str = "FINALIZED",
+    _legacy_gate: None = Depends(require_legacy_unsafe_route),
     db: Session = Depends(get_db),
 ):
     """

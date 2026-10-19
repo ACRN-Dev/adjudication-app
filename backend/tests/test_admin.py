@@ -22,6 +22,11 @@ client=TestClient(app)
 CLIN={"X-Demo-User":"clinical.ops.demo@acrnhealth.com","X-Demo-Role":"CLINICAL_OPS_ADMIN","X-Study-Scope":"PROTECT-Africa,LOPE-Nigeria"}
 TECH={"X-Demo-User":"tech.admin.demo@acrnhealth.com","X-Demo-Role":"TECHNICAL_ADMIN","X-Study-Scope":"*"}
 
+def test_spa_shell_revalidates_cached_html():
+    response = client.get("/admin")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+
 def test_admin_route_requires_authentication(): assert client.get("/api/admin/dashboard").status_code==401
 def test_direct_url_denied_to_adjudicator(): assert client.get("/api/admin/dashboard",headers={"X-Demo-User":"reviewer@demo","X-Demo-Role":"ADJUDICATOR"}).status_code==403
 def test_admin_identity_never_grants_clinical_content(): assert client.get("/api/admin/me",headers=TECH).json()["clinical_case_access"] is False
@@ -58,6 +63,25 @@ def test_audit_events_immutable():
 def test_demo_data_separated_and_marked():
     r=client.get("/api/admin/users",headers=TECH); assert r.status_code==200 and r.json()["demo"] is True
     db=TestingSession(); assert all(x.is_demo for x in db.query(AdminUser).all()); db.close()
+
+
+def test_production_admin_inventory_excludes_demo_records(monkeypatch):
+    import api.admin as admin_api
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("ENABLE_DEMO_DATA", "false")
+    db = TestingSession()
+    marker = str(__import__('uuid').uuid4())[:8]
+    production = AdminUser(display_name="Production User", email=f"prod-{marker}@example.test", country="Zimbabwe", is_demo=False)
+    demonstration = AdminUser(display_name="Demo User", email=f"demo-{marker}@example.test", country="Zimbabwe", is_demo=True)
+    db.add_all([production, demonstration]); db.commit()
+    try:
+        result = admin_api.users(identity=Identity("admin@example.test", "TECHNICAL_ADMIN", ("*",), "SSO"), db=db)
+        returned = {item["email"] for item in result["items"]}
+        assert result["demo"] is False
+        assert production.email in returned
+        assert demonstration.email not in returned
+    finally:
+        db.close()
 def test_delegated_authority_prevents_excess_permissions():
     payload={"reason":"Excess grant attempt","display_name":"Bad Grant","email":"bad.grant@demo.local","country":"Ghana","role_codes":["CLINICAL_OPS_ADMIN"],"study_codes":[]}
     assert client.post("/api/admin/users",headers=TECH,json=payload).status_code==403

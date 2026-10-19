@@ -1,5 +1,6 @@
 import os
 import sys
+import pytest
 
 
 def _ensure_backend_on_path():
@@ -50,3 +51,27 @@ def test_postgres_url_encodes_special_characters(monkeypatch):
     import database
     assert database._build_postgres_url() == "postgresql://user%40corp:p%40ss%3Aw%2Ford@some_host:5432/some_db"
     sys.modules.pop("database", None)
+
+
+def test_production_environment_detection(monkeypatch):
+    _ensure_backend_on_path()
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    sys.modules.pop("database", None)
+    import database
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    assert database._is_production_environment() is True
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    assert database._is_production_environment() is False
+
+
+def test_production_database_connection_failure_never_falls_back(monkeypatch):
+    _ensure_backend_on_path()
+    import database
+    monkeypatch.setenv("ENVIRONMENT", "production")
+
+    def unavailable(*_args, **_kwargs):
+        raise OSError("database unavailable")
+
+    monkeypatch.setattr(database, "create_engine", unavailable)
+    with pytest.raises(RuntimeError, match="SQLite fallback is prohibited"):
+        database._create_engine_with_fallback()

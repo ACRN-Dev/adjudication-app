@@ -120,6 +120,7 @@ def _submit_c(case_number, email, diagnosis=DiagnosisCode.PREECLAMPSIA.value):
         "severity": SeverityGrade.WITH_SEVERE.value,
         "certainty": CertaintyLevel.DEFINITE.value,
         "rationale": "Independent third-reviewer adjudication rationale.",
+        "differential_diagnosis": "Alternative hypertensive disorders were considered and excluded.",
     })
 
 

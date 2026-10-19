@@ -31,10 +31,9 @@ def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get
             raise HTTPException(403,"Monitor Portal access denied")
         return MonitorIdentity(x_demo_user,x_demo_role.upper(),tuple(filter(None,(x_study_scope or "").split(","))))
     if acrn_demo_session:
-        from services.auth_service import _hash_token
-        from models.auth import AuthSession
-        session=db.query(AuthSession).filter_by(token_hash=_hash_token(acrn_demo_session),revoked_at=None).first()
-        if session and session.expires_at>datetime.utcnow():
+        from services.auth_service import resolve_session
+        session=resolve_session(db, acrn_demo_session)
+        if session:
             user=db.get(PortalUser,session.user_id)
             if user and user.status=="ACTIVE":
                 if user.role in {"MONITOR", "MEDICAL_OFFICER", "MEDICAL_MONITOR"}:

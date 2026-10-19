@@ -90,6 +90,7 @@ def _submit(case_number, role, email, diagnosis, onset=OnsetClass.EOPE.value):
         "severity": SeverityGrade.WITH_SEVERE.value,
         "certainty": CertaintyLevel.DEFINITE.value,
         "rationale": "Full independent reviewer adjudication rationale.",
+        "differential_diagnosis": "Alternative hypertensive disorders were considered and excluded.",
     })
 
 

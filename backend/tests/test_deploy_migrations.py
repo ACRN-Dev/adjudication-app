@@ -28,8 +28,17 @@ def test_production_compose_disables_demo_features():
 
     assert 'ENABLE_DEMO_DATA: "false"' in compose
     assert 'ENABLE_DEMO_ACCOUNTS: "false"' in compose
+    assert 'ENABLE_LEGACY_UNSAFE_ROUTES: "false"' in compose
     assert 'VITE_ENABLE_DEMO_UI: "false"' in compose
     assert "ARG VITE_ENABLE_DEMO_UI=false" in dockerfile
+
+
+def test_production_init_requires_identity_protection_keys():
+    script = (REPO_ROOT / "scripts" / "init-prod.sh").read_text(encoding="utf-8")
+    start = script.index("REQUIRED=(")
+    required_block = script[start:script.index(")", start)]
+    assert "RT_PSEUDONYM_SECRET" in required_block
+    assert "RT_IDENTITY_ENCRYPTION_KEY" in required_block
 
 
 def test_demo_deploy_applies_schema_before_starting_app():

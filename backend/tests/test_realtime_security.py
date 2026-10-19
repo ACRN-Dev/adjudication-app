@@ -5,18 +5,19 @@ This is the Monitor Portal's ACTUAL backend (the frontend calls /api/realtime/*,
 the sibling admin_security.py / monitor_security.py fixes.
 """
 import os, sys
+import uuid
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from fastapi.testclient import TestClient
 from main import app
 from models.auth import PortalUser
+from models.longitudinal import LongitudinalParticipant, RTImportBatch, ReviewerAssignment
 from services.auth_service import ACTIVE, hash_password
 from conftest import TestingSession
 
 client = TestClient(app)
 
-# QC decisions are the last thing still gated on Monitor/QC authority. Against a
-# non-existent participant an authorised caller gets 404 and an unauthorised one 403,
+# Against a non-existent participant an authorised caller gets 404 and an unauthorised one 403,
 # which cleanly separates "no authority" from "allowed but nothing there".
 QC_DECISION = "/api/realtime/patients/00000000-0000-0000-0000-000000000000/approve"
 
@@ -49,7 +50,7 @@ def test_realtime_session_with_valid_portal_role_grants_access(monkeypatch):
 
 
 def test_realtime_session_without_portal_role_rejected(monkeypatch):
-    """QC review still needs a provisioned portal role -- but the import itself does not."""
+    """A Monitor account without an approved portal role has no RealTime authority."""
     monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
     db = TestingSession()
     db.add(PortalUser(
@@ -62,9 +63,8 @@ def test_realtime_session_without_portal_role_rejected(monkeypatch):
     assert login.status_code == 200
     cookies = {"acrn_demo_session": login.cookies["acrn_demo_session"]}
     assert client.post(QC_DECISION, cookies=cookies).status_code == 403
-    # ...but the import and the reconstructed-participant views are open to them.
-    assert client.get("/api/realtime/batches", cookies=cookies).status_code == 200
-    assert client.get("/api/realtime/patients", cookies=cookies).status_code == 200
+    assert client.get("/api/realtime/batches", cookies=cookies).status_code == 403
+    assert client.get("/api/realtime/patients", cookies=cookies).status_code == 403
 
 
 def test_realtime_non_monitor_session_rejected_even_with_spoofed_headers(monkeypatch):
@@ -208,37 +208,33 @@ def _upload_as(email, role, portal_role, filename):
     return client.post("/api/realtime/batches", files=files, cookies=cookies), cookies
 
 
-def test_realtime_session_adjudicator_can_upload_batch(monkeypatch):
-    """Adjudicators were refused with 403; the import is open to every role."""
+def test_realtime_session_adjudicator_cannot_upload_or_browse_batches(monkeypatch):
     monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
     r, cookies = _upload_as("sso.upload.adjudicator@acrnhealth.com", "ADJUDICATOR", None, "adjudicator_batch.csv")
-    assert r.status_code == 202, r.text
-    assert r.json()["filename"] == "adjudicator_batch.csv"
-    assert client.get("/api/realtime/batches", cookies=cookies).status_code == 200
+    assert r.status_code == 403, r.text
+    assert client.get("/api/realtime/batches", cookies=cookies).status_code == 403
 
 
-def test_realtime_session_chairperson_can_upload_batch(monkeypatch):
+def test_realtime_session_chairperson_cannot_upload_or_browse_batches(monkeypatch):
     monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
     r, cookies = _upload_as("sso.upload.chair@acrnhealth.com", "CHAIRPERSON", None, "chair_batch.csv")
-    assert r.status_code == 202, r.text
-    assert client.get("/api/realtime/batches", cookies=cookies).status_code == 200
+    assert r.status_code == 403, r.text
+    assert client.get("/api/realtime/batches", cookies=cookies).status_code == 403
 
 
-def test_realtime_unprovisioned_monitor_can_upload_batch(monkeypatch):
-    """A MONITOR whose portal_role was never provisioned may import and view, not decide."""
+def test_realtime_unprovisioned_monitor_cannot_upload_or_view(monkeypatch):
     monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
     r, cookies = _upload_as("sso.upload.monitor.noportal@acrnhealth.com", "MONITOR", None, "noportal_batch.csv")
-    assert r.status_code == 202, r.text
-    assert client.get("/api/realtime/patients", cookies=cookies).status_code == 200
+    assert r.status_code == 403, r.text
+    assert client.get("/api/realtime/patients", cookies=cookies).status_code == 403
     assert client.post(QC_DECISION, cookies=cookies).status_code == 403
 
 
-def test_realtime_adjudicator_can_view_reconstructed_patients(monkeypatch):
-    """'Inspect Reconstructed Patients' is reachable by every role; QC decisions are not."""
+def test_realtime_adjudicator_cannot_browse_monitor_patient_inventory(monkeypatch):
     monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
     r, cookies = _upload_as("sso.view.adjudicator@acrnhealth.com", "ADJUDICATOR", None, "view_batch.csv")
-    assert r.status_code == 202, r.text
-    assert client.get("/api/realtime/patients", cookies=cookies).status_code == 200
+    assert r.status_code == 403, r.text
+    assert client.get("/api/realtime/patients", cookies=cookies).status_code == 403
     assert client.post(QC_DECISION, cookies=cookies).status_code == 403
 
 
@@ -261,4 +257,87 @@ def test_realtime_import_still_requires_authentication(monkeypatch):
         "/api/realtime/batches",
         files={"file": ("anon.csv", b"MRN,Screening #\n1,2\n", "text/csv")},
     ).status_code == 401
+
+
+def test_realtime_monitor_patient_inventory_enforces_study_scope(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    email = "scoped.monitor@acrnhealth.com"
+    db = TestingSession()
+    db.add(PortalUser(
+        email=email, display_name="Scoped Monitor", password_hash=hash_password("Whatever123!"),
+        role="MONITOR", portal_role="MONITOR_QC_REVIEWER", status=ACTIVE, study_scope="STUDY-A",
+    ))
+    batch = RTImportBatch(
+        filename="scope.csv", checksum=uuid.uuid4().hex, file_size=1, uploaded_by=email,
+        status="MONITOR_QC_REQUIRED",
+    )
+    db.add(batch)
+    db.flush()
+    in_scope = LongitudinalParticipant(
+        blinded_subject_id=f"SCOPE-A-{uuid.uuid4().hex[:8]}", study="STUDY-A",
+        source_batch_id=batch.id, workflow_status="MONITOR_QC_REQUIRED",
+    )
+    out_of_scope = LongitudinalParticipant(
+        blinded_subject_id=f"SCOPE-B-{uuid.uuid4().hex[:8]}", study="STUDY-B",
+        source_batch_id=batch.id, workflow_status="MONITOR_QC_REQUIRED",
+    )
+    db.add_all([in_scope, out_of_scope])
+    db.commit()
+    out_of_scope_id = out_of_scope.id
+    db.close()
+
+    login = client.post("/api/auth/login", json={"email": email, "password": "Whatever123!"})
+    cookies = {"acrn_demo_session": login.cookies["acrn_demo_session"]}
+    listing = client.get("/api/realtime/patients?include_rejected=true", cookies=cookies)
+    assert listing.status_code == 200
+    assert {item["study"] for item in listing.json()["items"]} == {"STUDY-A"}
+    assert client.get(f"/api/realtime/patients/{out_of_scope_id}", cookies=cookies).status_code == 404
+
+
+def test_realtime_reviewer_responses_do_not_disclose_peer_identity(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    reviewer_email = "isolated.reviewer@acrnhealth.com"
+    peer_email = "hidden.peer@acrnhealth.com"
+    db = TestingSession()
+    db.add(PortalUser(
+        email=reviewer_email, display_name="Isolated Reviewer", password_hash=hash_password("Whatever123!"),
+        role="ADJUDICATOR", status=ACTIVE, study_scope="STUDY-PRIVATE",
+    ))
+    batch = RTImportBatch(
+        filename="reviewer-scope.csv", checksum=uuid.uuid4().hex, file_size=1, uploaded_by="monitor",
+        status="AUTO_QC_COMPLETE",
+    )
+    db.add(batch)
+    db.flush()
+    participant = LongitudinalParticipant(
+        blinded_subject_id=f"PRIVATE-{uuid.uuid4().hex[:8]}", study="STUDY-PRIVATE",
+        source_batch_id=batch.id, workflow_status="ASSIGNED",
+    )
+    db.add(participant)
+    db.flush()
+    db.add_all([
+        ReviewerAssignment(participant_id=participant.id, reviewer_upn=reviewer_email, reviewer_role="REVIEWER_A"),
+        ReviewerAssignment(participant_id=participant.id, reviewer_upn=peer_email, reviewer_role="REVIEWER_B"),
+    ])
+    db.commit()
+    participant_id = participant.id
+    subject_id = participant.blinded_subject_id
+    db.close()
+
+    login = client.post("/api/auth/login", json={"email": reviewer_email, "password": "Whatever123!"})
+    cookies = {"acrn_demo_session": login.cookies["acrn_demo_session"]}
+    queue = client.get("/api/realtime/assigned", cookies=cookies)
+    assert queue.status_code == 200
+    own_case = next(item for item in queue.json() if item["id"] == str(participant_id))
+    assert "assignments" not in own_case
+
+    detail = client.get(f"/api/realtime/assigned/{participant_id}", cookies=cookies)
+    assert detail.status_code == 200
+    assert "assignments" not in detail.json()
+
+    progress = client.get("/api/realtime/progress", cookies=cookies)
+    assert progress.status_code == 200
+    own_progress = next(item for item in progress.json()["items"] if item["subject_id"] == subject_id)
+    assert own_progress["adjudicators"] == [reviewer_email]
+    assert peer_email not in progress.text
 

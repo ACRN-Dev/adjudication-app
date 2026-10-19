@@ -41,6 +41,8 @@ export const assignPatient=(id,email,role,user)=>request(`/patients/${id}/assign
 export const listAssigned=(user)=>request('/assigned',user);
 export const listAdjudicators=(user)=>request('/adjudicators',user);
 export const getAssigned=(id,user)=>request(`/assigned/${id}`,user);
+export const raiseDataQuery=(id,payload,user)=>request(`/assigned/${id}/queries`,user,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+export const declareRecusal=(id,payload,user)=>request(`/assigned/${id}/recuse`,user,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
 
 // XHR (not fetch) so we get real upload progress events for the progress bar.
 function xhrUpload(path,formData,user,onProgress){

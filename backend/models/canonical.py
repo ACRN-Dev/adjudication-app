@@ -267,6 +267,9 @@ class SignedCaseArtifact(Base):
     filing_attempts = Column(Integer, nullable=False, default=0)
     filing_error = Column(Text, nullable=True)
     filed_at = Column(DateTime, nullable=True)
+    filing_verified_at = Column(DateTime, nullable=True)
+    manifest_sha256 = Column(String(64), nullable=True)
+    filing_receipt = Column(JSON, nullable=True)
 
 
 # ── Canonical Field ────────────────────────────────────────────────────────
@@ -472,6 +475,10 @@ class AdjudicationRecord(Base):
     signed = Column(Boolean, default=False)
     signed_at = Column(DateTime)
     signature_hash = Column(String(255))   # SHA-256 of case record + reviewer decision
+    signature_payload = Column(JSON, nullable=True)
+    signature_meaning = Column(String(255), nullable=True)
+    authentication_method = Column(String(30), nullable=True)
+    authentication_session_id = Column(String(36), nullable=True)
     mfa_verified = Column(Boolean, default=False)
 
     submitted_at = Column(DateTime, default=datetime.utcnow)
@@ -535,6 +542,9 @@ class CommitteeDecision(Base):
     chair_name = Column(String(255))
     signed_at = Column(DateTime)
     signature_hash = Column(String(255))
+    signature_payload = Column(JSON, nullable=True)
+    authentication_method = Column(String(30), nullable=True)
+    authentication_session_id = Column(String(36), nullable=True)
     locked = Column(Boolean, default=False)
     locked_at = Column(DateTime)
 
@@ -610,6 +620,12 @@ class CommitteeMeeting(Base):
     signed = Column(Boolean, default=False)
     signed_at = Column(DateTime)
     signature_hash = Column(String(255))
+    signature_payload = Column(JSON, nullable=True)
+    authentication_method = Column(String(30), nullable=True)
+    authentication_session_id = Column(String(36), nullable=True)
+    report_sha256 = Column(String(64), nullable=True)
+    filing_verified_at = Column(DateTime, nullable=True)
+    filing_receipt = Column(JSON, nullable=True)
     status = Column(String(50), default="CLOSED")
     created_at = Column(DateTime, default=datetime.utcnow)
 

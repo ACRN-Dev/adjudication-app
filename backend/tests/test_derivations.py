@@ -29,7 +29,7 @@ from services.resolve_value import resolve_value, DiscrepancyCategory
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
 T0 = datetime(2026, 7, 4, 8, 14)   # First severe BP reading
-T1 = T0 + timedelta(hours=4, minutes=26)  # Second reading (4h26m later)
+T1 = T0 + timedelta(hours=6)  # Approved minimum confirming interval
 T_BASELINE = T0 - timedelta(days=21)
 
 BP_SEVERE_PAIR = [
@@ -39,7 +39,7 @@ BP_SEVERE_PAIR = [
 
 BP_MILD_PAIR = [
     {"sbp": 144, "dbp": 92,  "datetime": T0,                           "source": "EDC Visit"},
-    {"sbp": 146, "dbp": 94,  "datetime": T0 + timedelta(hours=5),      "source": "EDC Visit"},
+    {"sbp": 146, "dbp": 94,  "datetime": T0 + timedelta(hours=6),      "source": "EDC Visit"},
 ]
 
 BP_TOO_CLOSE = [
@@ -74,7 +74,7 @@ def test_parse_dipstick_none():
 # ── HTN-01 ─────────────────────────────────────────────────────────────────
 
 def test_htn_01_positive_severe_pair():
-    """ZWE001-0292 archetype: 162/112 and 168/114, 4h26m apart."""
+    """Severe qualifying readings exactly 6 hours apart."""
     r = derive_htn_01(BP_SEVERE_PAIR)
     assert r.met is True
     assert r.criterion_id == "HTN-01"
@@ -82,7 +82,7 @@ def test_htn_01_positive_severe_pair():
     assert r.first_date_met == T0
 
 def test_htn_01_positive_mild_pair():
-    """Mild hypertension ≥140/90 confirmed ≥4h apart."""
+    """Mild hypertension confirmed at the approved 6-hour boundary."""
     r = derive_htn_01(BP_MILD_PAIR)
     assert r.met is True
 
@@ -563,8 +563,8 @@ def test_g01_distinct_visit_dates_fallback():
         {"sbp": 145, "dbp": 93, "date": "2026-06-17", "source": "eSource"},
     ]
     r = derive_htn_01(bp)
-    assert r.met is True
-    assert "Distinct Visit Dates" in r.criterion_name or "Fallback" in r.notes or "distinct" in r.formula.lower()
+    assert r.met is False
+    assert r.missingness_status == "NOT_DOCUMENTED"
 
 
 def test_g02_severe_range_recheck_within_visit():
@@ -574,7 +574,8 @@ def test_g02_severe_range_recheck_within_visit():
         {"sbp": 168, "dbp": 112, "date": "2026-07-04", "source": "eSource Recheck"},
     ]
     r = derive_htn_01(bp)
-    assert r.met is True
+    assert r.met is False
+    assert r.missingness_status == "NOT_DOCUMENTED"
 
 
 def test_g01_two_readings_same_date_non_severe_not_confirmed():
@@ -596,7 +597,7 @@ def test_g01_timestamp_available_takes_priority():
         {"sbp": 145, "dbp": 93, "datetime": T1, "date": "2026-07-04", "source": "eSource"},
     ]
     r = derive_htn_01(bp)
-    assert r.met is True  # T1 is 4h26m after T0 — confirmed by timestamp
+    assert r.met is True
 
 
 # ── EC-11: Missingness Semantics ───────────────────────────────────────────

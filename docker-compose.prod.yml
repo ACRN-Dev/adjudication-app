@@ -10,6 +10,9 @@ services:
       # Keep synthetic data and spoofing/fake accounts disabled in production.
       ENABLE_DEMO_DATA: "false"
       ENABLE_DEMO_ACCOUNTS: "false"
+      ENABLE_LEGACY_UNSAFE_ROUTES: "false"
       AUTH_COOKIE_SECURE: "true"
       AUTH_COOKIE_SAMESITE: "lax"
+      SESSION_IDLE_MINUTES: "30"
+      RT_DELETE_STAGED_SOURCE_AFTER_PROCESSING: "true"
     restart: always

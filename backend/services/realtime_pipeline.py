@@ -1,9 +1,11 @@
 """Streaming, chunk-committed RealTime batch pipeline."""
-import base64, csv, hashlib, hmac, os, re, uuid
+import base64, csv, hashlib, hmac, json, os, re, uuid
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 from cryptography.fernet import Fernet
 from database import SessionLocal
+from sqlalchemy import text
 from models.history import PatientHistory, PatientHistoryField, PatientRiskSummary
 from models.longitudinal import RTImportBatch,LongitudinalParticipant,RestrictedIdentityCrosswalk,VisitInstance,CanonicalObservation,ImportIssue,LongitudinalAuditEvent,LongitudinalCaseDerivation
 from services.realtime_mapping import classify,map_variable,source_value,source_unit,parse_datetime,parse_numeric,parse_coded,visit_code,MAPPING_VERSION,is_clinical_candidate
@@ -11,6 +13,7 @@ from services.longitudinal_derivation import derive_participant
 from services.history_parser import is_history_form, process_history_row, finalize_history
 from services.import_readiness import participant_import_readiness
 from services.edc_mapping import is_edc_schema, is_clinical_one_schema, normalize_edc_rows, normalize_clinical_one_rows
+from services.runtime_policy import is_production
 REQUIRED_HEADERS={"MRN","Screening #","Randomization #","Form Title","Form Version","Page Title","Field type","Field Label","Data Input","Data Value","Audit Trails","Export Variable Name"}
 PSEUDO_SECRET=os.getenv("RT_PSEUDONYM_SECRET","acrn-demo-only-change-in-production").encode()
 FERNET_KEY=os.getenv("RT_IDENTITY_ENCRYPTION_KEY")
@@ -26,8 +29,69 @@ def checksum_file(path,chunk=1024*1024):
     return h.hexdigest()
 def pseudonym(mrn,screening): return "ACRN-"+hmac.new(PSEUDO_SECRET,f"{mrn}|{screening}".encode(),hashlib.sha256).hexdigest()[:12].upper()
 def audit(db,actor,role,action,etype,eid,details=None,outcome="SUCCESS"):
-    stamp=datetime.utcnow().isoformat(); safe=details or {}; digest=hashlib.sha256(f"{stamp}|{actor}|{action}|{eid}".encode()).hexdigest()
-    db.add(LongitudinalAuditEvent(actor=actor,actor_role=role,action=action,entity_type=etype,entity_id=str(eid),safe_details=safe,record_hash=digest))
+    stamp=datetime.utcnow(); safe=details or {}
+    if db.bind and db.bind.dialect.name == "postgresql":
+        # Serialize the single audit chain across API/worker processes.
+        db.execute(text("SELECT pg_advisory_xact_lock(8102026)"))
+    # Sessions intentionally disable autoflush. Persist any preceding event so
+    # multiple audit() calls in one transaction extend, rather than fork, the chain.
+    db.flush()
+    previous = db.query(LongitudinalAuditEvent).order_by(LongitudinalAuditEvent.chain_sequence.desc()).first()
+    sequence = (previous.chain_sequence or 0) + 1 if previous else 1
+    previous_hash = previous.record_hash if previous else None
+    payload = json.dumps({
+        "sequence": sequence, "timestamp": stamp.isoformat(), "actor": actor,
+        "role": role, "action": action, "entity_type": etype,
+        "entity_id": str(eid), "details": safe, "outcome": outcome,
+        "previous_hash": previous_hash,
+    }, sort_keys=True, separators=(",", ":"), default=str)
+    digest=hashlib.sha256(payload.encode()).hexdigest()
+    db.add(LongitudinalAuditEvent(timestamp=stamp,actor=actor,actor_role=role,action=action,entity_type=etype,entity_id=str(eid),safe_details={**safe,"outcome":outcome},previous_hash=previous_hash,chain_sequence=sequence,record_hash=digest,integrity_version="SHA256-CHAIN-1"))
+
+
+def verify_audit_chain(db):
+    previous_hash = None
+    expected_sequence = 1
+    for event in db.query(LongitudinalAuditEvent).order_by(LongitudinalAuditEvent.chain_sequence).all():
+        if event.chain_sequence != expected_sequence:
+            return False
+        if event.integrity_version == "LEGACY-UNCHAINED":
+            previous_hash = event.record_hash; expected_sequence += 1
+            continue
+        if event.previous_hash != previous_hash:
+            return False
+        safe = dict(event.safe_details or {})
+        outcome = safe.pop("outcome", "SUCCESS")
+        payload = json.dumps({
+            "sequence": event.chain_sequence, "timestamp": event.timestamp.isoformat(), "actor": event.actor,
+            "role": event.actor_role, "action": event.action, "entity_type": event.entity_type,
+            "entity_id": event.entity_id, "details": safe, "outcome": outcome,
+            "previous_hash": event.previous_hash,
+        }, sort_keys=True, separators=(",", ":"), default=str)
+        if not hmac.compare_digest(event.record_hash, hashlib.sha256(payload.encode()).hexdigest()):
+            return False
+        previous_hash = event.record_hash; expected_sequence += 1
+    return True
+
+
+def staged_source_cleanup_enabled() -> bool:
+    configured = os.getenv("RT_DELETE_STAGED_SOURCE_AFTER_PROCESSING", "false").strip().lower()
+    return is_production() or configured in {"1", "true", "yes", "on"}
+
+
+def purge_staged_source(batch: RTImportBatch) -> bool:
+    """Remove a raw upload and clear its persisted path after pipeline processing."""
+    path = batch.source_path
+    if not path:
+        return False
+    staging_root = (Path(__file__).resolve().parents[1] / ".rt-staging").resolve()
+    candidate = Path(path).resolve()
+    if candidate.parent != staging_root:
+        raise ValueError("Refusing to delete a source outside the RealTime staging directory")
+    if candidate.exists():
+        candidate.unlink()
+    batch.source_path = None
+    return True
 
 def process_batch(batch_id, reset=False):
     if isinstance(batch_id, str):
@@ -256,5 +320,37 @@ def process_batch(batch_id, reset=False):
         if batch:
             batch.status="CANCELLED" if str(exc)=="IMPORT_CANCELLED" else "FAILED"; batch.error_count+=1; batch.error_summary=str(exc)[:1000]; batch.processing_finished_at=datetime.utcnow(); audit(db,batch.uploaded_by,"MONITOR_QC_REVIEWER","IMPORT_PROCESSING_FAILED","IMPORT_BATCH",batch.id,{"stage":batch.status,"error_type":type(exc).__name__},"FAILED"); db.commit()
     finally:
+        if staged_source_cleanup_enabled():
+            try:
+                batch = db.get(RTImportBatch, batch_id)
+                if batch and purge_staged_source(batch):
+                    audit(
+                        db,
+                        batch.uploaded_by,
+                        "SYSTEM",
+                        "STAGED_SOURCE_DELETED",
+                        "IMPORT_BATCH",
+                        batch.id,
+                        {"retention": "DELETED_AFTER_PROCESSING"},
+                    )
+                    db.commit()
+            except Exception as cleanup_exc:
+                db.rollback()
+                batch = db.get(RTImportBatch, batch_id)
+                if batch:
+                    batch.status = "FAILED_SOURCE_CLEANUP"
+                    batch.error_count = (batch.error_count or 0) + 1
+                    batch.error_summary = f"Raw source cleanup failed: {type(cleanup_exc).__name__}"
+                    audit(
+                        db,
+                        batch.uploaded_by,
+                        "SYSTEM",
+                        "STAGED_SOURCE_DELETE_FAILED",
+                        "IMPORT_BATCH",
+                        batch.id,
+                        {"error_type": type(cleanup_exc).__name__},
+                        "FAILED",
+                    )
+                    db.commit()
         db.close()
 

@@ -1,26 +1,31 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import Header from './components/Header';
 import SidebarNav from './components/SidebarNav';
-import AdjudicatorWorkbench from './components/AdjudicatorWorkbench';
-import SourceDocViewer from './components/SourceDocViewer';
-import SignatureModal from './components/SignatureModal';
-import HelpModal from './components/HelpModal';
-import SopLibraryModal from './components/SopLibraryModal';
-import RecusalModal from './components/RecusalModal';
-import DataQueryModal from './components/DataQueryModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoginPage from './components/LoginPage';
 import ForceChangePassword from './components/ForceChangePassword';
-import AdminPortal from './admin/AdminPortal';
-import MonitorPortal from './monitor/MonitorPortal';
-import ChairpersonPortal from './chairperson/ChairpersonPortal';
-import OwnerPortal from './owner/OwnerPortal';
 import { DEMO_UI_BUILD_ENABLED } from './config/featureFlags';
 
-import { listAssigned, getAssigned, asWorkbenchCase } from './services/realtimeApi';
+import { listAssigned, getAssigned, asWorkbenchCase, raiseDataQuery, declareRecusal } from './services/realtimeApi';
 import { me, logout as logoutApi } from './services/authApi';
 import { isReviewerVisitSigned } from './services/visitEvidence';
 import './styles/acrn-theme.css';
+
+const AdjudicatorWorkbench = lazy(() => import('./components/AdjudicatorWorkbench'));
+const SourceDocViewer = lazy(() => import('./components/SourceDocViewer'));
+const SignatureModal = lazy(() => import('./components/SignatureModal'));
+const HelpModal = lazy(() => import('./components/HelpModal'));
+const SopLibraryModal = lazy(() => import('./components/SopLibraryModal'));
+const RecusalModal = lazy(() => import('./components/RecusalModal'));
+const DataQueryModal = lazy(() => import('./components/DataQueryModal'));
+const AdminPortal = lazy(() => import('./admin/AdminPortal'));
+const MonitorPortal = lazy(() => import('./monitor/MonitorPortal'));
+const ChairpersonPortal = lazy(() => import('./chairperson/ChairpersonPortal'));
+const OwnerPortal = lazy(() => import('./owner/OwnerPortal'));
+
+function LoadingPortal() {
+  return <div role="status" aria-live="polite" className="portal-loading">Loading workspace…</div>;
+}
 
 export default function App() {
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
@@ -166,11 +171,17 @@ export default function App() {
     requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'smooth' }));
   };
 
-  const handleConfirmRecusal = (recusalData) => {
-    setShowRecusalModal(false);
-    alert(`FORM-ADJ-08 Recusal Recorded: Participant ${recusalData.caseId} has been recused and re-routed to an independent non-conflicted reviewer.`);
-    const nextCase = cases.find(c => c && c.id !== activeCaseId);
-    if (nextCase) setActiveCaseId(nextCase.id);
+  const handleConfirmRecusal = async (recusalData) => {
+    try {
+      await declareRecusal(activeCase.databaseId, { reason_code: recusalData.recusalReason, comments: recusalData.comments }, user);
+      setShowRecusalModal(false);
+      const remaining = cases.filter(c => c && c.id !== activeCaseId);
+      setCases(remaining);
+      setActiveCaseId(remaining[0]?.id || null);
+      alert(`FORM-ADJ-08 Recusal recorded. Participant ${recusalData.caseId} was reassigned to an independent reviewer.`);
+    } catch (error) {
+      alert(error.message);
+    }
   };
 
   useEffect(() => {
@@ -179,18 +190,14 @@ export default function App() {
     return () => window.removeEventListener('open-data-query-modal', handleOpenQuery);
   }, []);
 
-  const handleSubmitQuery = (queryData) => {
-    setShowDataQueryModal(false);
-    
-    const savedQueries = JSON.parse(localStorage.getItem('data_queries') || '[]');
-    savedQueries.unshift({
-      ...queryData,
-      raisedBy: user?.name || user?.display_name || user?.email || 'Adjudicator',
-      status: 'Pending Monitor Review'
-    });
-    localStorage.setItem('data_queries', JSON.stringify(savedQueries));
-
-    alert(`FORM-ADJ-09 Data Query Sent: Query for Participant ${queryData.caseId} submitted to Adjudication Coordinator for review and dispatch.`);
+  const handleSubmitQuery = async (queryData) => {
+    try {
+      await raiseDataQuery(activeCase.databaseId, { category: queryData.queryCategory, query_text: queryData.queryText }, user);
+      setShowDataQueryModal(false);
+      alert(`FORM-ADJ-09 Data Query sent for Participant ${queryData.caseId}. Electronic signature is blocked until it is resolved.`);
+    } catch (error) {
+      alert(error.message);
+    }
   };
 
   if (!isAuthenticated) {
@@ -228,28 +235,29 @@ export default function App() {
         </div>
       );
     }
-    return <OwnerPortal user={user} onLogout={handleLogout} />;
+    return <Suspense fallback={<LoadingPortal />}><OwnerPortal user={user} onLogout={handleLogout} /></Suspense>;
   }
   if (currentPath.startsWith('/admin')) {
     const adminRoles = ['ADMIN', 'TECHNICAL_ADMIN', 'CLINICAL_OPS_ADMIN', 'QA_AUDITOR', 'GOVERNANCE_REVIEWER', 'ACCESS_REVIEWER', 'OWNER'];
     if (!adminRoles.includes(user?.roleCode)) {
       return <div role="alert" style={{ padding: 40, fontFamily: 'Poppins, sans-serif' }}><h1>Access denied</h1><p>Your current role is not permitted to access the Admin Portal.</p><button className="btn-primary" onClick={handleLogout}>Return to sign in</button></div>;
     }
-    return <AdminPortal user={user} onLogout={handleLogout} readOnly={user?.roleCode === 'OWNER'} />;
+    return <Suspense fallback={<LoadingPortal />}><AdminPortal user={user} onLogout={handleLogout} readOnly={user?.roleCode === 'OWNER'} /></Suspense>;
   }
   if (currentPath.startsWith('/monitor')) {
     const monitorRoles=['MONITOR','MEDICAL_OFFICER','MEDICAL_MONITOR','ADMIN','CHAIRPERSON','ADJUDICATION_COORDINATOR','MONITOR_QC_REVIEWER','QA_REVIEWER','RELEASE_OPERATOR','OWNER'];
     if(!monitorRoles.includes(user?.roleCode)) return <div role="alert" style={{padding:40}}><h1>Access denied</h1><p>Your role cannot access Monitor/QC operational case data.</p><button onClick={handleLogout}>Return to sign in</button></div>;
-    return <MonitorPortal user={user} onLogout={handleLogout}/>;
+    return <Suspense fallback={<LoadingPortal />}><MonitorPortal user={user} onLogout={handleLogout}/></Suspense>;
   }
   if (currentPath.startsWith('/chairperson') || user?.roleCode === 'CHAIRPERSON' || user?.portal === 'chairperson') {
-    return <ChairpersonPortal user={user} onLogout={handleLogout} />;
+    return <Suspense fallback={<LoadingPortal />}><ChairpersonPortal user={user} onLogout={handleLogout} /></Suspense>;
   }
 
   const isSigned = activeCase?.status?.includes('Finalized');
 
-  return (<ErrorBoundary>
+  return (<ErrorBoundary><Suspense fallback={<LoadingPortal />}>
     <div className="app-container">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       {/* RealTime CTMS Header Bar */}
       <Header
         activeCase={activeCase}
@@ -275,7 +283,7 @@ export default function App() {
         />
 
         {/* Main Viewport */}
-        <main className="main-viewport">
+        <main id="main-content" className="main-viewport" tabIndex="-1">
 
           <>
 
@@ -342,6 +350,6 @@ export default function App() {
         />
       )}
     </div>
-    </ErrorBoundary>
+    </Suspense></ErrorBoundary>
   );
 }

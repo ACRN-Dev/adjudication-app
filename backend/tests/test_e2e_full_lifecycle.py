@@ -720,9 +720,29 @@ class TestStage5Chairperson:
 
         visit = db.query(AdjudicationVisit).filter_by(participant_id=p.id, visit_number=1).first()
         if not visit:
-            visit = AdjudicationVisit(participant_id=p.id, visit_number=1, visit_code="V01", visit_date=datetime(2026, 8, 1))
+            visit = AdjudicationVisit(
+                participant_id=p.id, visit_number=1, visit_code="V01",
+                visit_date=datetime(2026, 8, 1), status="COMMITTEE_PENDING",
+            )
             db.add(visit)
             db.flush()
+
+        existing_roles = {
+            row.reviewer_role for row in db.query(AdjudicationRecord).filter_by(visit_id=visit.id, signed=True).all()
+        }
+        for role, upn, diagnosis in (
+            (ReviewerRole.REVIEWER_A, "reviewer-a@test.acrn", DiagnosisCode.PREECLAMPSIA),
+            (ReviewerRole.REVIEWER_B, "reviewer-b@test.acrn", DiagnosisCode.SEVERE_PE),
+        ):
+            if role not in existing_roles:
+                db.add(AdjudicationRecord(
+                    participant_id=p.id, visit_id=visit.id, visit_number=1,
+                    reviewer_role=role, reviewer_upn=upn, diagnosis=diagnosis,
+                    onset_class=OnsetClass.EOPE, severity=SeverityGrade.WITH_SEVERE,
+                    certainty=CertaintyLevel.DEFINITE, rationale="Signed independent review.",
+                    signed=True, signed_at=datetime.utcnow(),
+                    signature_hash=hashlib.sha256(upn.encode()).hexdigest(),
+                ))
 
         dec = db.query(CommitteeDecision).filter_by(participant_id=p.id, visit_id=visit.id).first()
         if not dec:

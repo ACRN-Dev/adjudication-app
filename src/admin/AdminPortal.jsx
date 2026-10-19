@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import * as Icon from 'lucide-react';
+import { Activity, ArrowLeft, BookOpen, Calculator, CalendarRange, CheckCircle2, ChevronRight,
+  ChevronsLeft, ChevronsRight, Circle, ClipboardCheck, Clock, Database, Download, EyeOff,
+  FileSpreadsheet, LogOut, Plus, RefreshCw, RotateCcw, Scale, Search, Shield, ShieldAlert,
+  ShieldCheck, Trash2, UserCheck, UserCog, UserPlus, X } from 'lucide-react';
 import * as data from './adminData';
 import { DEMO_UI_BUILD_ENABLED } from '../config/featureFlags';
 import { 
@@ -14,6 +17,11 @@ import {
 } from '../services/authApi';
 import { SOP_DOCUMENTS } from '../components/SopLibraryModal';
 import './admin.css';
+
+const Icon = { Activity, ArrowLeft, BookOpen, Calculator, CalendarRange, CheckCircle2, ChevronRight,
+  ChevronsLeft, ChevronsRight, Circle, ClipboardCheck, Clock, Database, Download, EyeOff,
+  FileSpreadsheet, LogOut, Plus, RefreshCw, RotateCcw, Scale, Search, Shield, ShieldAlert,
+  ShieldCheck, Trash2, UserCheck, UserCog, UserPlus, X };
 
 const NAV = [
   ['OVERVIEW', [
@@ -48,17 +56,20 @@ const NAV = [
     ['/admin/integrations', 'Integrations', 'PlugZap'],
     ['/admin/audit', 'Audit Trail', 'ScrollText'],
     ['/admin/reports', 'Reports', 'FileBarChart'],
+    ['/admin/retention', 'Retention and Legal Holds', 'ShieldCheck'],
     ['/admin/health', 'Environment and Health', 'Activity']
   ]]
 ];
 
 const TITLES = Object.fromEntries(NAV.flatMap(([, x]) => x.map(([p, l]) => [p, l])));
 const PRODUCTION_NAV = [
-  ['ACCESS & PEOPLE', [['/admin/users', 'Users', 'Users']]],
-  ['SYSTEM', [['/admin/health', 'Environment and Health', 'Activity']]]
+  ['ACCESS & PEOPLE', [['/admin/users', 'Users', 'Users'], ['/admin/access-reviews', 'Access Reviews', 'UserCheck']]],
+  ['SYSTEM', [['/admin/retention', 'Retention and Legal Holds', 'ShieldCheck'], ['/admin/health', 'Environment and Health', 'Activity']]]
 ];
 const PRODUCTION_TITLES = {
   '/admin/users': 'Users',
+  '/admin/access-reviews': 'Access Reviews',
+  '/admin/retention': 'Retention and Legal Holds',
   '/admin/health': 'Environment and Health'
 };
 
@@ -181,7 +192,7 @@ function Table({ caption, columns, rows, actions }) {
   }), [rows, filter]);
 
   return (
-    <div className="a-table-wrap">
+    <div className="a-table-wrap" tabIndex="0" role="region" aria-label={`${caption} table, horizontally scrollable`}>
       <table className="a-table">
         <caption>{caption} — {shown.length} record{shown.length === 1 ? '' : 's'}</caption>
         <thead>
@@ -1642,6 +1653,52 @@ function Reviews() {
 /* =============================================
    16. REPORTS COMPONENT
    ============================================= */
+function GovernedReviews() {
+  const [reviews, setReviews] = useState([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [error, setError] = useState('');
+  const [reason, setReason] = useState('Periodic access certification based on current duties and training evidence');
+  const [certification, setCertification] = useState('I certify that every access decision is complete, accurate, and supported by current role evidence.');
+  const [campaign, setCampaign] = useState({ name: '', scope_type: 'PORTAL', scope_value: 'ADMIN', reviewer_upn: '', due_at: '', reason: '' });
+  const load = () => fetch('/api/admin/access-reviews', { credentials: 'include' })
+    .then(async response => { if (!response.ok) throw new Error((await response.json()).detail || 'Unable to load reviews'); return response.json(); })
+    .then(body => { setReviews(body.items || []); setSelectedId(current => current || body.items?.[0]?.id || ''); })
+    .catch(err => setError(err.message));
+  useEffect(load, []);
+  const selected = reviews.find(item => item.id === selectedId);
+  const post = async (url, body) => {
+    setError('');
+    const response = await fetch(url, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!response.ok) { setError((await response.json()).detail || 'Access review action failed'); return; }
+    await load();
+  };
+  return <Page title="Access Reviews" desc="Locked population snapshots, independent decisions, revocation and certification.">
+    {error && <Notice kind="danger" title="Access review action failed">{error}</Notice>}
+    <details className="a-panel"><summary>Create access-review campaign</summary><form onSubmit={async event => { event.preventDefault(); const response=await fetch('/api/admin/access-reviews',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({...campaign,due_at:new Date(campaign.due_at).toISOString()})}); if(!response.ok){setError((await response.json()).detail || 'Campaign creation failed');return;} const created=await response.json(); setSelectedId(created.id); setCampaign({name:'',scope_type:'PORTAL',scope_value:'ADMIN',reviewer_upn:'',due_at:'',reason:''}); await load(); }}>
+      <div className="a-grid2"><label>Name<input required value={campaign.name} onChange={e=>setCampaign({...campaign,name:e.target.value})}/></label><label>Assigned reviewer<input required type="email" value={campaign.reviewer_upn} onChange={e=>setCampaign({...campaign,reviewer_upn:e.target.value})}/></label><label>Scope type<select value={campaign.scope_type} onChange={e=>setCampaign({...campaign,scope_type:e.target.value})}><option>PORTAL</option><option>STUDY</option><option>STATUS</option><option>USER</option><option>ALL</option></select></label><label>Scope value<input required value={campaign.scope_value} onChange={e=>setCampaign({...campaign,scope_value:e.target.value})}/></label><label>Due at<input required type="datetime-local" value={campaign.due_at} onChange={e=>setCampaign({...campaign,due_at:e.target.value})}/></label><label>Reason<textarea required value={campaign.reason} onChange={e=>setCampaign({...campaign,reason:e.target.value})}/></label></div><button className="a-primary">Create locked snapshot</button>
+    </form></details>
+    <div className="a-toolbar"><label htmlFor="review-campaign">Campaign</label><select id="review-campaign" value={selectedId} onChange={e => setSelectedId(e.target.value)}><option value="">Select a campaign</option>{reviews.map(item => <option key={item.id} value={item.id}>{item.name} - {item.status}</option>)}</select><button onClick={load}>Refresh</button></div>
+    {selected ? <>
+      <section className="a-panel"><h2>{selected.name}</h2><p><Badge>{selected.status}</Badge> Reviewer: {selected.reviewer_upn}</p><p>Population hash: <code>{selected.snapshot_hash}</code></p><label htmlFor="review-reason">Decision reason</label><textarea id="review-reason" value={reason} onChange={e => setReason(e.target.value)} rows="2" style={{ width: '100%' }} disabled={selected.locked} /></section>
+      <div className="a-table-wrap" tabIndex="0" role="region" aria-label="Locked access-review population, horizontally scrollable"><table className="a-table"><caption>Locked review population</caption><thead><tr><th>User</th><th>Status</th><th>Roles</th><th>Decision</th><th>Action</th></tr></thead><tbody>{(selected.snapshot || []).map(subject => { const decision=(selected.decisions || []).find(item => item.user_id===subject.user_id); return <tr key={subject.user_id}><td>{subject.email}</td><td>{subject.status}</td><td>{(subject.role_codes || []).join(', ') || 'None'}</td><td>{decision?.decision || 'Outstanding'}</td><td className="a-actions"><button disabled={selected.locked} onClick={() => post(`/api/admin/access-reviews/${selected.id}/decisions`, { user_id: subject.user_id, decision: 'RETAIN', reason, replacement_role_codes: subject.role_codes || [] })}>Retain</button><button disabled={selected.locked} onClick={() => post(`/api/admin/access-reviews/${selected.id}/decisions`, { user_id: subject.user_id, decision: 'REVOKE', reason })}>Revoke</button></td></tr>; })}</tbody></table></div>
+      {!selected.locked && <section className="a-panel"><label htmlFor="review-certification">Completion certification</label><textarea id="review-certification" value={certification} onChange={e => setCertification(e.target.value)} rows="3" style={{ width: '100%' }} /><button className="a-primary" onClick={() => post(`/api/admin/access-reviews/${selected.id}/complete`, { reason, certification })}>Complete and lock review</button></section>}
+    </> : <Notice title="No campaign selected">No access-review campaign is available.</Notice>}
+  </Page>;
+}
+
+function RetentionGovernance() {
+  const [policies, setPolicies] = useState([]); const [holds, setHolds] = useState([]); const [error, setError] = useState('');
+  const [policy, setPolicy] = useState({ record_type: '', retention_days: 2555, legal_basis: '', reason: '' });
+  const [hold, setHold] = useState({ name: '', scope_type: 'STUDY', scope_value: '', reason: '' });
+  const load = () => Promise.all([fetch('/api/admin/retention/policies', { credentials: 'include' }), fetch('/api/admin/retention/legal-holds', { credentials: 'include' })]).then(async ([p,h]) => { if (!p.ok || !h.ok) throw new Error('Unable to load retention governance'); setPolicies((await p.json()).items || []); setHolds((await h.json()).items || []); }).catch(err => setError(err.message));
+  useEffect(load, []);
+  const post = async (url, body) => { setError(''); const response=await fetch(url,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(!response.ok){setError((await response.json()).detail || 'Governance action failed');return false;} await load();return true; };
+  return <Page title="Retention and Legal Holds" desc="Versioned retention rules, independent approval, and disposition-blocking holds.">{error && <Notice kind="danger" title="Governance action failed">{error}</Notice>}<div className="a-grid2">
+    <form className="a-panel" onSubmit={async e => {e.preventDefault(); if(await post('/api/admin/retention/policies',policy))setPolicy({record_type:'',retention_days:2555,legal_basis:'',reason:''});}}><h2>Draft retention policy</h2><label>Record type<input required value={policy.record_type} onChange={e=>setPolicy({...policy,record_type:e.target.value})}/></label><label>Retention days<input required min="1" type="number" value={policy.retention_days} onChange={e=>setPolicy({...policy,retention_days:Number(e.target.value)})}/></label><label>Legal basis<textarea required value={policy.legal_basis} onChange={e=>setPolicy({...policy,legal_basis:e.target.value})}/></label><label>Reason<textarea required value={policy.reason} onChange={e=>setPolicy({...policy,reason:e.target.value})}/></label><button className="a-primary">Create draft</button></form>
+    <form className="a-panel" onSubmit={async e => {e.preventDefault(); if(await post('/api/admin/retention/legal-holds',hold))setHold({name:'',scope_type:'STUDY',scope_value:'',reason:''});}}><h2>Place legal hold</h2><label>Name<input required value={hold.name} onChange={e=>setHold({...hold,name:e.target.value})}/></label><label>Scope type<input required value={hold.scope_type} onChange={e=>setHold({...hold,scope_type:e.target.value})}/></label><label>Scope value<input required value={hold.scope_value} onChange={e=>setHold({...hold,scope_value:e.target.value})}/></label><label>Reason<textarea required value={hold.reason} onChange={e=>setHold({...hold,reason:e.target.value})}/></label><button className="a-primary">Place hold</button></form>
+  </div><Table caption="Retention policy versions" columns={['Record type','Version','Days','Status','Creator','Approver']} rows={policies.map(x=>[x.record_type,x.version,x.retention_days,x.status,x.created_by,x.approved_by||'Pending'])} actions={row=>{const item=policies.find(x=>x.record_type===row[0]&&x.version===row[1]);return item?.status==='DRAFT'?<button className="a-link" onClick={()=>post(`/api/admin/retention/policies/${item.id}/activate`,{reason:'Independent approval of validated retention schedule'})}>Activate</button>:null;}}/><Table caption="Legal hold register" columns={['Name','Scope type','Scope value','Status','Placed by']} rows={holds.map(x=>[x.name,x.scope_type,x.scope_value,x.status,x.created_by])} actions={row=>{const item=holds.find(x=>x.name===row[0]&&x.scope_value===row[2]);return item?.status==='ACTIVE'?<button className="a-link" onClick={()=>post(`/api/admin/retention/legal-holds/${item.id}/release`,{reason:'Approved matter closure; hold no longer required'})}>Release</button>:null;}}/></Page>;
+}
+
 function Reports() {
   let r = [
     'User access register',
@@ -1861,7 +1918,7 @@ export default function AdminPortal({ user, onLogout, isEmbedded }) {
       path === '/admin/adjudicator-profiles' ? <AdjudicatorProfiles /> :
       path === '/admin/committee-assignments' ? <CommitteeAssignments /> :
       path === '/admin/access' ? <Roles /> :
-      path === '/admin/access-reviews' ? <Reviews /> :
+      path === '/admin/access-reviews' ? <GovernedReviews /> :
       path === '/admin/training' ? <TrainingAndCoi /> :
       path === '/admin/studies' ? <Register type="studies" /> :
       path === '/admin/sites' ? <Register type="sites" /> :
@@ -1877,11 +1934,13 @@ export default function AdminPortal({ user, onLogout, isEmbedded }) {
       path === '/admin/integrations' ? <Register type="integrations" /> :
       path === '/admin/audit' ? <Audit /> :
       path === '/admin/reports' ? <Reports /> :
+      path === '/admin/retention' ? <RetentionGovernance /> :
       path === '/admin/health' ? <Health demoDataEnabled={demoDataEnabled} /> :
       <Dashboard dash={dash} />;
   } else {
-    view = path === '/admin/users'
-      ? <Users demoDataEnabled={false} />
+    view = path === '/admin/users' ? <Users demoDataEnabled={false} />
+      : path === '/admin/access-reviews' ? <GovernedReviews />
+      : path === '/admin/retention' ? <RetentionGovernance />
       : <Health demoDataEnabled={false} />;
   }
 
@@ -1889,6 +1948,7 @@ export default function AdminPortal({ user, onLogout, isEmbedded }) {
 
   return (
     <div className="admin-app">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <header className="a-header">
         <div className="a-brand">
           <span><img src="/acrn-logo.png" alt="Africa Clinical Research Network" /></span>
@@ -1913,7 +1973,7 @@ export default function AdminPortal({ user, onLogout, isEmbedded }) {
 
       <div className="a-body">
         <aside className={'a-nav ' + (collapsed ? 'collapsed' : '')}>
-          <button className="a-collapse" onClick={() => setCollapsed(!collapsed)} aria-label="Toggle navigation">
+          <button className="a-collapse" onClick={() => setCollapsed(!collapsed)} aria-label={`Administration navigation: ${collapsed ? 'expand' : 'collapse'}`}>
             <span>ADMINISTRATION</span>
             {collapsed ? <Icon.ChevronsRight size={14} /> : <Icon.ChevronsLeft size={14} />}
           </button>
@@ -1946,7 +2006,7 @@ export default function AdminPortal({ user, onLogout, isEmbedded }) {
           </div>
         </aside>
 
-        <main className="a-main">
+        <main id="main-content" className="a-main" tabIndex="-1">
           <div className="a-crumb">
             <button onClick={() => go('/admin')}>Admin</button>
             <Icon.ChevronRight size={12} />

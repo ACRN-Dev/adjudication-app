@@ -27,11 +27,23 @@ import abc
 import os
 import hashlib
 import json
+from dataclasses import dataclass
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from datetime import datetime
 from pathlib import Path
+
+
+@dataclass(frozen=True)
+class FilingReceipt:
+    """Evidence that destination bytes reconcile with the submitted artifact."""
+
+    destination: str
+    content_sha256: str
+    manifest_sha256: str
+    verified_at: datetime
+    receipt_id: str
 
 
 class ETMFAdapter(abc.ABC):
@@ -59,6 +71,10 @@ class ETMFAdapter(abc.ABC):
         timestamp: datetime | None = None,
     ) -> str:
         """Write a signed committee meeting summary report to the eTMF repository."""
+
+    @abc.abstractmethod
+    def verify(self, destination: str, expected_sha256: str) -> FilingReceipt:
+        """Read a filed artifact back and return independently verified receipt data."""
 
     @staticmethod
     def _naming(study: str, blinded_id: str, subject_id: str, ts: datetime) -> str:
@@ -147,6 +163,28 @@ class LocalFilesystemAdapter(ETMFAdapter):
         )
         return str(dest_path)
 
+    def verify(self, destination: str, expected_sha256: str) -> FilingReceipt:
+        path = Path(destination).resolve()
+        root = self._root.resolve()
+        if root != path and root not in path.parents:
+            raise RuntimeError("Filing destination is outside the configured eTMF root")
+        manifest_path = Path(str(path) + ".sha256")
+        if not path.is_file() or not manifest_path.is_file():
+            raise RuntimeError("Filed artifact or checksum manifest is missing")
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        manifest_parts = manifest_path.read_text(encoding="utf-8").strip().split()
+        if len(manifest_parts) < 2 or manifest_parts[1] != path.name:
+            raise RuntimeError("Checksum manifest is malformed or names a different artifact")
+        manifest_hash = manifest_parts[0].lower()
+        expected = expected_sha256.lower()
+        if actual != expected or manifest_hash != expected:
+            raise RuntimeError("Filed artifact checksum reconciliation failed")
+        verified_at = datetime.utcnow()
+        receipt_id = hashlib.sha256(
+            f"local|{path}|{actual}|{verified_at.isoformat()}".encode("utf-8")
+        ).hexdigest()
+        return FilingReceipt(str(path), actual, manifest_hash, verified_at, receipt_id)
+
 
 class SharePointAdapter(ETMFAdapter):
     """
@@ -213,7 +251,27 @@ class SharePointAdapter(ETMFAdapter):
             f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{path}:/content",
             method="PUT", body=content, content_type="application/pdf",
         )
-        return result.get("webUrl") or result["id"]
+        return result["id"]
+
+    def _download(self, item_id):
+        drive_id = self._drive_id()
+        url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{quote(item_id)}/content"
+        headers = {"Authorization": f"Bearer {self._access_token()}"}
+        with urlopen(Request(url, headers=headers), timeout=60) as response:
+            return response.read()
+
+    def verify(self, destination: str, expected_sha256: str) -> FilingReceipt:
+        actual = hashlib.sha256(self._download(destination)).hexdigest()
+        expected = expected_sha256.lower()
+        if actual != expected:
+            raise RuntimeError("SharePoint artifact checksum reconciliation failed")
+        verified_at = datetime.utcnow()
+        receipt_id = hashlib.sha256(
+            f"sharepoint|{destination}|{actual}|{verified_at.isoformat()}".encode("utf-8")
+        ).hexdigest()
+        # SharePoint is the authoritative object store; the verified object hash
+        # serves as its manifest value in the persisted receipt.
+        return FilingReceipt(destination, actual, actual, verified_at, receipt_id)
 
     def write(self, subject_id, blinded_id, study, pdf_bytes, timestamp=None, visit_code=None):
         filename = self._naming(study, f"{blinded_id}-{visit_code}" if visit_code else blinded_id, subject_id, timestamp or datetime.utcnow())
@@ -233,4 +291,9 @@ def get_etmf_adapter() -> ETMFAdapter:
     adapter_name = os.getenv("ETMF_ADAPTER", "local").strip().lower()
     if adapter_name == "sharepoint":
         return SharePointAdapter()
-    return LocalFilesystemAdapter()
+    if adapter_name == "local":
+        environment = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "development").strip().lower()
+        if environment in {"prod", "production"}:
+            raise RuntimeError("The local filesystem eTMF adapter is prohibited in production")
+        return LocalFilesystemAdapter()
+    raise RuntimeError(f"Unsupported ETMF_ADAPTER: {adapter_name}")

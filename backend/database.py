@@ -15,6 +15,11 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 logger = logging.getLogger("acrn.database")
 
 
+def _is_production_environment():
+    environment = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "development").strip().lower()
+    return environment in {"prod", "production"}
+
+
 def _build_postgres_url():
     """Assembles the Postgres URL from discrete DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT vars."""
     user = os.getenv("DB_USER", "acrn_user")
@@ -26,7 +31,7 @@ def _build_postgres_url():
 
 
 _POSTGRES_URL = _build_postgres_url()
-_SQLITE_PATH = os.path.join(os.path.dirname(__file__), "acrn_demo.db")
+_SQLITE_PATH = os.getenv("SQLITE_PATH") or os.path.join(os.path.dirname(__file__), "acrn_demo.db")
 _SQLITE_URL = f"sqlite:///{_SQLITE_PATH}"
 _DB_SSL_MODE = os.getenv("DB_SSL_MODE")
 
@@ -47,6 +52,9 @@ def _create_engine_with_fallback():
         logger.info("✅ PostgreSQL connection established.")
         return eng, False
     except Exception as e:
+        if _is_production_environment():
+            logger.error("PostgreSQL is unavailable in production; fallback database startup refused.")
+            raise RuntimeError("PostgreSQL is unavailable in production; SQLite fallback is prohibited") from e
         logger.warning(
             f"⚠ PostgreSQL unavailable ({e}). "
             "Falling back to SQLite (demo / offline mode). "

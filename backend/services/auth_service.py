@@ -25,6 +25,7 @@ ACTIVE = "ACTIVE"
 INACTIVE = "INACTIVE"
 AUTH_COOKIE = "acrn_demo_session"
 SESSION_HOURS = int(os.getenv("SESSION_HOURS", "12"))
+SESSION_IDLE_MINUTES = int(os.getenv("SESSION_IDLE_MINUTES", "30"))
 LOCK_AFTER = int(os.getenv("LOGIN_LOCK_AFTER", "5"))
 LOCK_MINUTES = int(os.getenv("LOGIN_LOCK_MINUTES", "15"))
 DEFAULT_PASSWORD_ENV = "DEMO_DEFAULT_PASSWORD"
@@ -219,7 +220,7 @@ def _public_user(user: PortalUser) -> dict:
     }
 
 
-def issue_session(db: Session, user: PortalUser, response: Response, request: Optional[Request], event_type: str = "LOGIN_SUCCESS") -> dict:
+def issue_session(db: Session, user: PortalUser, response: Response, request: Optional[Request], event_type: str = "LOGIN_SUCCESS", *, authentication_method: str = "PASSWORD", mfa_verified: bool = False) -> dict:
     now = datetime.utcnow()
     user.failed_login_count = 0
     user.locked_until = None
@@ -228,9 +229,14 @@ def issue_session(db: Session, user: PortalUser, response: Response, request: Op
     db.add(AuthSession(
         token_hash=_hash_token(raw_token),
         user_id=user.id,
-        expires_at=now + timedelta(hours=SESSION_HOURS),
+        expires_at=min(
+            now + timedelta(minutes=SESSION_IDLE_MINUTES),
+            now + timedelta(hours=SESSION_HOURS),
+        ),
         user_agent=(request.headers.get("user-agent", "")[:255] if request else ""),
         ip_address=(request.client.host if request and request.client else ""),
+        authentication_method=authentication_method,
+        mfa_verified_at=now if mfa_verified else None,
     ))
     audit_auth(db, event_type, "SUCCESS", actor=user, affected=user, request=request)
     db.commit()
@@ -244,6 +250,39 @@ def issue_session(db: Session, user: PortalUser, response: Response, request: Op
         path="/",
     )
     return _public_user(user)
+
+
+def resolve_session(db: Session, token: Optional[str], *, touch: bool = True) -> Optional[AuthSession]:
+    """Resolve a server-side session with idle and absolute expiry enforcement."""
+    if not token:
+        return None
+    session = db.query(AuthSession).filter_by(token_hash=_hash_token(token), revoked_at=None).first()
+    if not session:
+        return None
+    now = datetime.utcnow()
+    absolute_expiry = session.created_at + timedelta(hours=SESSION_HOURS)
+    if session.expires_at <= now or absolute_expiry <= now:
+        session.revoked_at = now
+        db.commit()
+        return None
+    if touch:
+        refreshed_expiry = min(now + timedelta(minutes=SESSION_IDLE_MINUTES), absolute_expiry)
+        if refreshed_expiry > session.expires_at:
+            session.expires_at = refreshed_expiry
+            db.commit()
+    return session
+
+
+def revoke_user_sessions(db: Session, user_id: str, *, except_session_id: Optional[str] = None) -> int:
+    """Immediately revoke active sessions after account or privilege changes."""
+    query = db.query(AuthSession).filter_by(user_id=user_id, revoked_at=None)
+    if except_session_id:
+        query = query.filter(AuthSession.id != except_session_id)
+    sessions = query.all()
+    now = datetime.utcnow()
+    for session in sessions:
+        session.revoked_at = now
+    return len(sessions)
 
 
 def login(db: Session, email: str, password: str, response: Response, request: Request) -> dict:
@@ -283,8 +322,8 @@ def logout(db: Session, token: Optional[str], response: Response, request: Reque
 def current_user(request: Request, acrn_demo_session: Optional[str] = Cookie(None), db: Session = Depends(get_db)) -> PortalUser:
     if not acrn_demo_session:
         raise HTTPException(401, "Authentication required")
-    session = db.query(AuthSession).filter_by(token_hash=_hash_token(acrn_demo_session), revoked_at=None).first()
-    if not session or session.expires_at <= datetime.utcnow():
+    session = resolve_session(db, acrn_demo_session)
+    if not session:
         raise HTTPException(401, "Authentication required")
     user = db.get(PortalUser, session.user_id)
     if not user or user.status != ACTIVE or (user.locked_until and user.locked_until > datetime.utcnow()):
@@ -308,7 +347,17 @@ def change_password(db: Session, user: PortalUser, current_password: str, new_pa
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
     user.updated_at = datetime.utcnow()
+    revoked_sessions = revoke_user_sessions(db, user.id)
     audit_auth(db, "PASSWORD_CHANGED", "SUCCESS", actor=user, affected=user, request=request)
+    audit_auth(
+        db,
+        "SESSIONS_REVOKED_AFTER_PASSWORD_CHANGE",
+        "SUCCESS",
+        actor=user,
+        affected=user,
+        request=request,
+        details={"revoked_sessions": revoked_sessions},
+    )
     db.commit()
     return _public_user(user)
 

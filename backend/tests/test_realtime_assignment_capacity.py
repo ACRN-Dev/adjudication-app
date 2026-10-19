@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from api.realtime import assign
 from conftest import TestingSession
 from models.auth import PortalUser
-from models.longitudinal import LongitudinalParticipant, RTImportBatch, ReviewerAssignment
+from models.longitudinal import LongitudinalParticipant, RTImportBatch, ReviewerAssignment, VisitInstance
 
 
 def test_assignment_rejects_over_capacity_reviewer(monkeypatch):
@@ -58,6 +58,16 @@ def test_assignment_rejects_over_capacity_reviewer(monkeypatch):
         workflow_status="QC_APPROVED",
     )
     db.add(new_participant)
+    db.flush()
+    db.add(VisitInstance(
+        participant_id=new_participant.id,
+        source_batch_id=batch.id,
+        form_title="Visit 1",
+        scheduled_visit_code="V01",
+        visit_sequence=1,
+        reconstruction_method="TEST",
+        reconstruction_confidence="HIGH",
+    ))
     db.commit()
 
     try:

@@ -14,16 +14,26 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'off',
-    // Demo headers for monitor-level requests
-    extraHTTPHeaders: {
-      'X-Demo-User': 'monitor@test.acrn',
-      'X-Demo-Role': 'ADJUDICATION_COORDINATOR',
-    },
   },
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+    },
+  ],
+  webServer: [
+    {
+      command: 'node scripts/run-e2e-api.mjs',
+      url: 'http://127.0.0.1:8000/health/ready',
+      timeout: 120 * 1000,
+      reuseExistingServer: false,
+    },
+    {
+      command: 'npm run test:serve -- --host 127.0.0.1 --port 5173',
+      url: 'http://127.0.0.1:5173',
+      timeout: 120 * 1000,
+      reuseExistingServer: false,
+      env: { VITE_ENABLE_DEMO_UI: 'true' },
     },
   ],
   // webServer is optional — start dev server manually before running:

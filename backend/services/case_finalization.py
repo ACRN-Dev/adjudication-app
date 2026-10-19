@@ -1,9 +1,10 @@
 """Idempotent signed-case PDF generation and controlled filing."""
 import hashlib
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from models.canonical import SignedCaseArtifact
+from models.canonical import AuditEvent, SignedCaseArtifact
 from models.admin import AdjudicationActivityLedger
 from services.etmf_adapter import get_etmf_adapter
 from services.pdf_generator import generate_adjudication_pdf
@@ -34,7 +35,7 @@ def record_determination_activity(db, participant, visit, determination):
 
 def finalize_case_pdf(db: Session, participant, visit, determination) -> SignedCaseArtifact:
     existing = db.query(SignedCaseArtifact).filter_by(visit_id=visit.id).first()
-    if existing:
+    if existing and existing.filing_status == "FILED":
         return existing
 
     case_reference = participant.case_number or f"CASE-{participant.id}"
@@ -65,24 +66,27 @@ def finalize_case_pdf(db: Session, participant, visit, determination) -> SignedC
     }
     pdf_bytes = generate_adjudication_pdf(case_data)
     digest = hashlib.sha256(pdf_bytes).hexdigest()
-    artifact = SignedCaseArtifact(
+    artifact = existing or SignedCaseArtifact(
         participant_id=participant.id,
         visit_id=visit.id,
         determination_record_id=determination.id,
         pdf_sha256=digest,
-        # Older local SQLite demo databases created these fields as NOT NULL.
-        # Keep neutral placeholders until the eTMF adapter confirms filing; the
-        # explicit filing_status remains the source of truth for filed vs retry.
         storage_provider="PENDING",
         storage_reference="UNFILED",
-        filed_at=determination.signed_at,
         filing_status="PENDING",
     )
-    db.add(artifact)
-    db.flush()
-    adapter = get_etmf_adapter()
+    if existing and existing.pdf_sha256 != digest:
+        artifact.filing_status = "FAILED_BLOCKED"
+        artifact.filing_error = "Regenerated signed artifact does not match the immutable stored checksum"
+        visit.filing_status = artifact.filing_status
+        visit.filing_error = artifact.filing_error
+        return artifact
+    if not existing:
+        db.add(artifact)
+        db.flush()
     artifact.filing_attempts += 1
     try:
+        adapter = get_etmf_adapter()
         destination = adapter.write(
             subject_id=participant.subject_id,
             blinded_id=case_reference,
@@ -91,12 +95,37 @@ def finalize_case_pdf(db: Session, participant, visit, determination) -> SignedC
             pdf_bytes=pdf_bytes,
             timestamp=determination.signed_at,
         )
+        receipt = adapter.verify(destination, digest)
         artifact.storage_provider = adapter.__class__.__name__
-        artifact.storage_reference = destination
+        artifact.storage_reference = receipt.destination
+        artifact.manifest_sha256 = receipt.manifest_sha256
+        artifact.filing_verified_at = receipt.verified_at
+        artifact.filing_receipt = {
+            "receipt_id": receipt.receipt_id,
+            "destination": receipt.destination,
+            "content_sha256": receipt.content_sha256,
+            "manifest_sha256": receipt.manifest_sha256,
+            "verified_at": receipt.verified_at.isoformat(),
+        }
         artifact.filing_status = "FILED"
-        artifact.filed_at = determination.signed_at
+        artifact.filed_at = receipt.verified_at
+        artifact.filing_error = None
         visit.filing_status = "FILED"
         visit.filing_error = None
+        db.add(AuditEvent(
+            event_type="SIGNED_ARTIFACT_FILED",
+            participant_id=participant.id,
+            actor_upn="SYSTEM",
+            actor_name="Qualified filing service",
+            actor_role="SYSTEM",
+            description=f"Signed artifact filed and checksum verified for visit {visit.visit_code}",
+            event_metadata={
+                "visit_id": str(visit.id), "artifact_id": str(artifact.id),
+                "receipt_id": receipt.receipt_id, "pdf_sha256": digest,
+                "storage_provider": artifact.storage_provider,
+            },
+            timestamp=datetime.utcnow(),
+        ))
     except Exception as exc:
         # The signed determination remains durable. A monitor can retry filing
         # without asking the adjudicator to sign the clinical decision again.
@@ -104,4 +133,14 @@ def finalize_case_pdf(db: Session, participant, visit, determination) -> SignedC
         artifact.filing_error = str(exc)[:1000]
         visit.filing_status = "FAILED_RETRYABLE"
         visit.filing_error = artifact.filing_error
+        db.add(AuditEvent(
+            event_type="SIGNED_ARTIFACT_FILING_FAILED",
+            participant_id=participant.id,
+            actor_upn="SYSTEM",
+            actor_name="Qualified filing service",
+            actor_role="SYSTEM",
+            description=f"Signed artifact filing or verification failed for visit {visit.visit_code}",
+            event_metadata={"visit_id": str(visit.id), "artifact_id": str(artifact.id), "error": artifact.filing_error},
+            timestamp=datetime.utcnow(),
+        ))
     return artifact

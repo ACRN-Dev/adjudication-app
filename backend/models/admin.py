@@ -275,4 +275,46 @@ class AccessReview(Base):
     name = Column(String(160), nullable=False); scope_type = Column(String(30)); scope_value = Column(String(80))
     reviewer_upn = Column(String(255)); status = Column(String(30), default="Open")
     due_at = Column(DateTime); completed_at = Column(DateTime); locked = Column(Boolean, default=False)
-    decisions = Column(JSON, default=list); is_demo = Column(Boolean, default=False)
+    decisions = Column(JSON, default=list); snapshot = Column(JSON, default=list)
+    snapshot_hash = Column(String(64)); completed_by = Column(String(255)); certification = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    is_demo = Column(Boolean, default=False)
+
+
+class RetentionPolicy(Base):
+    """Versioned retention rule. Active rules cannot be edited in place."""
+    __tablename__ = "admin_retention_policies"
+    id = Column(String(36), primary_key=True, default=uid)
+    record_type = Column(String(80), nullable=False, index=True)
+    version = Column(Integer, nullable=False, default=1)
+    retention_days = Column(Integer, nullable=False)
+    trigger_event = Column(String(80), nullable=False, default="RECORD_CREATED")
+    legal_basis = Column(Text, nullable=False); status = Column(String(30), nullable=False, default="DRAFT")
+    created_by = Column(String(255), nullable=False); approved_by = Column(String(255)); approved_at = Column(DateTime)
+    reason = Column(Text, nullable=False); created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
+    __table_args__ = (UniqueConstraint("record_type", "version", "is_demo", name="uq_retention_policy_version"),)
+
+
+class LegalHold(Base):
+    __tablename__ = "admin_legal_holds"
+    id = Column(String(36), primary_key=True, default=uid)
+    name = Column(String(160), nullable=False); scope_type = Column(String(40), nullable=False)
+    scope_value = Column(String(160), nullable=False, index=True); status = Column(String(30), nullable=False, default="ACTIVE")
+    reason = Column(Text, nullable=False); created_by = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    released_by = Column(String(255)); released_at = Column(DateTime); release_reason = Column(Text)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
+
+
+class DispositionRequest(Base):
+    """Dual-controlled evidence ledger for destruction or archival actions."""
+    __tablename__ = "admin_disposition_requests"
+    id = Column(String(36), primary_key=True, default=uid)
+    record_type = Column(String(80), nullable=False, index=True); record_reference = Column(String(160), nullable=False)
+    scope_value = Column(String(160), nullable=False, index=True); policy_id = Column(String(36), ForeignKey("admin_retention_policies.id"), nullable=False)
+    eligible_at = Column(DateTime, nullable=False); status = Column(String(30), nullable=False, default="PENDING_APPROVAL")
+    requested_by = Column(String(255), nullable=False); requested_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    approved_by = Column(String(255)); approved_at = Column(DateTime); executed_by = Column(String(255)); executed_at = Column(DateTime)
+    reason = Column(Text, nullable=False); evidence = Column(JSON, default=dict)
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)

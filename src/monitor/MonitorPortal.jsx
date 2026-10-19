@@ -1,7 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import * as I from 'lucide-react';
+import { Activity, ArrowLeft, CheckCheck, CheckCircle2, ChevronDown, Circle, Download, EyeOff,
+  FileText, Info, LogOut, RotateCcw, Upload, Users, X } from 'lucide-react';
 import '../admin/admin.css';
 import './monitor.css';
+
+const I = { Activity, ArrowLeft, CheckCheck, CheckCircle2, ChevronDown, Circle, Download, EyeOff,
+  FileText, Info, LogOut, RotateCcw, Upload, Users, X };
 import {
   listBatches,
   listPatients,
@@ -195,7 +199,7 @@ function OperationalDashboard({ user, onOpen, readOnly = false }) {
           <div className="monitor-toolbar" style={{ marginBottom: '16px' }}>
             <div>
               <strong style={{ display: 'block', fontSize: '13px' }}>Final study release</strong>
-              <span style={{ color: '#64748b', fontSize: '11px' }}>Authorised finalised adjudications with original subject numbers.</span>
+              <span style={{ color: '#526176', fontSize: '11px' }}>Authorised finalised adjudications with original subject numbers.</span>
             </div>
             <select className="chair-input" value={releaseStudy} onChange={(e) => setReleaseStudy(e.target.value)} aria-label="Final release study">
               {(data?.filters?.studies || ['PROTECT-Africa', 'LOPE-Nigeria']).map((study) => <option key={study} value={study}>{study}</option>)}
@@ -1345,6 +1349,7 @@ export default function MonitorPortal({ user, onLogout, isEmbedded, readOnly = f
 
   return (
     <div className="admin-app">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <header className="a-header">
         <div className="a-brand">
           <span>
@@ -1383,7 +1388,7 @@ export default function MonitorPortal({ user, onLogout, isEmbedded, readOnly = f
             })}
           </section>
         </aside>
-        <main className="a-main">
+        <main id="main-content" className="a-main" tabIndex="-1">
           <ErrorBoundary>{content}</ErrorBoundary>
         </main>
       </div>

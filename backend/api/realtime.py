@@ -1,23 +1,28 @@
 """Secure RealTime import, Monitor database, and assigned-case API."""
-import os, re, uuid
+import hashlib, json, os, re, uuid
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter,UploadFile,File,BackgroundTasks,Depends,HTTPException,Header,Query,Request,Body
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session,selectinload
 from database import get_db
-from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInstance,ImportIssue,ReviewerAssignment,LongitudinalCaseDerivation,LabReferenceRange,CanonicalObservation,RestrictedIdentityCrosswalk
+from models.longitudinal import RTImportBatch,LongitudinalParticipant,VisitInstance,VisitDerivation,ImportIssue,ReviewerAssignment,ReviewerRecusal,ClinicalDataQuery,ObservationCorrection,LongitudinalCaseDerivation,LabReferenceRange,CanonicalObservation,RestrictedIdentityCrosswalk
 from models.history import PatientHistoryField, PatientRiskSummary, PatientHistory
-from services.realtime_pipeline import checksum_file,process_batch,audit
+from services.realtime_pipeline import checksum_file,audit
+from services.import_jobs import enqueue_import_job, execute_import_job
 from services.auth_service import current_user, audit_auth
 from services.lab_reference import evaluate_participant_labs, LAB_ANALYTES
 from services.import_readiness import participant_import_readiness
 from services.realtime_mapping import parse_datetime
+from services.realtime_mapping import parse_numeric, parse_coded
+from services.longitudinal_derivation import derive_participant
 from models.auth import PortalUser
 from models.admin import AdjudicatorStudyContract
 from models.canonical import AdjudicationRecord, AdjudicationVisit, Participant
+from services.clinical_derivation import RULE_VERSION
 router = APIRouter()
 MONITOR = {"ADJUDICATION_COORDINATOR", "MONITOR_QC_REVIEWER", "QA_REVIEWER", "RELEASE_OPERATOR", "MONITOR", "ADMIN"}
+ADJUDICATOR_ROLES = {"ADJUDICATOR", "REVIEWER_A", "REVIEWER_B", "REVIEWER_C"}
 COMPLETED_VISIT_STATUSES = {"COMPLETED", "FINALIZED", "LOCKED", "CLOSED", "CONCORDANT", "DISCORDANT", "THREE_WAY_DIVERGENT", "RESOLVED_BY_MAJORITY"}
 
 
@@ -31,10 +36,9 @@ def _demo_contract_bypass_enabled() -> bool:
 def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role: str | None = Header(None), db: Session = Depends(get_db)):
     token = request.cookies.get("acrn_demo_session")
     if token:
-        from services.auth_service import _hash_token
-        from models.auth import AuthSession
+        from services.auth_service import resolve_session
         from services.monitor_security import ROLES as MONITOR_PORTAL_ROLES
-        s = db.query(AuthSession).filter_by(token_hash=_hash_token(token), revoked_at=None).first()
+        s = resolve_session(db, token)
         if s is None:
             # Cookie present but no matching session — likely the container restarted
             # and the SQLite/Postgres session table was reset, or the token was revoked.
@@ -58,12 +62,12 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
         if u.role == "MONITOR":
             pr = u.portal_role
             if not pr or pr not in MONITOR_PORTAL_ROLES:
-                return u.email, "MONITOR", False
-            return u.email, pr, True
+                return u.email, "MONITOR", False, _study_scope(u.study_scope)
+            return u.email, pr, True, _study_scope(u.study_scope)
         if u.role in {"ADMIN", "OWNER"}:
-            return u.email, u.role, True
+            return u.email, u.role, True, _study_scope(u.study_scope)
         if u.role in {"ADJUDICATOR", "CHAIRPERSON"}:
-            return u.email, u.role, False
+            return u.email, u.role, False, _study_scope(u.study_scope)
         raise HTTPException(403, f"Monitor/QC authority required. Current role: {u.role}")
     # No cookie at all — fall back to demo headers only when demo mode is enabled,
     # and only after verifying the claimed user actually exists with that role.
@@ -84,27 +88,56 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
                 "adjudicatorc@acrnhealth.com": "ADJUDICATOR",
             }
             if not demo_user and known_demo.get(claimed_email) == claimed_role:
-                return claimed_email, claimed_role, claimed_role in MONITOR
+                return claimed_email, claimed_role, claimed_role in MONITOR, {"*"}
             if not demo_user or not demo_user.is_demo_account:
                 raise HTTPException(401, detail={"message": "Unrecognized demo identity.", "reason": "no_session"})
             if demo_user.must_change_password:
                 raise HTTPException(403, detail={"code": "PASSWORD_CHANGE_REQUIRED", "message": "You must set a new password before continuing."})
-            if demo_user.role != claimed_role and not (demo_user.role == "ADJUDICATOR" and claimed_role in {"REVIEWER_A", "REVIEWER_B"}):
+            allowed_claimed_roles = {demo_user.role}
+            if demo_user.role == "MONITOR" and demo_user.portal_role:
+                allowed_claimed_roles.add(demo_user.portal_role)
+            if demo_user.role == "ADJUDICATOR":
+                allowed_claimed_roles.update({"REVIEWER_A", "REVIEWER_B", "REVIEWER_C"})
+            if claimed_role not in allowed_claimed_roles:
                 raise HTTPException(403, detail={"message": "Role mismatch for demo identity.", "reason": "role_mismatch"})
             is_qc = claimed_role in MONITOR or demo_user.role in {"MONITOR", "ADMIN", "OWNER"}
-            return demo_user.email, claimed_role, is_qc
+            return demo_user.email, claimed_role, is_qc, _study_scope(demo_user.study_scope)
     raise HTTPException(401, detail={"message": "Authentication required. Please sign in.", "reason": "no_session"})
 
 
-def authenticated(i = Depends(actor)):
-    """The RealTime batch import and the reconstructed-participant views are open to every
-    authenticated account, whatever its role. QC decisions still go through monitor()."""
-    return i
+def _study_scope(value: str | None) -> set[str]:
+    studies = {item.strip() for item in (value or "*").split(",") if item.strip()}
+    return studies or {"*"}
+
+
+def _identity_studies(identity) -> set[str]:
+    # Direct service-level tests and internal callers created before scoped identities
+    # use the original three-field tuple. Treat those trusted calls as wildcard-scoped;
+    # every HTTP identity produced by actor() carries an explicit fourth field.
+    return identity[3] if len(identity) > 3 else {"*"}
+
+
+def _scope_participant_query(query, identity):
+    studies = _identity_studies(identity)
+    return query if "*" in studies else query.filter(LongitudinalParticipant.study.in_(studies))
+
+
+def _require_participant_scope(participant: LongitudinalParticipant, identity) -> None:
+    studies = _identity_studies(identity)
+    if "*" not in studies and participant.study not in studies:
+        # Do not reveal that an out-of-scope participant exists.
+        raise HTTPException(404, "Participant not found")
 
 
 def monitor(i = Depends(actor)):
     if not i[2]:
         raise HTTPException(403, "Monitor/QC authority required — portal role not provisioned. Contact your administrator.")
+    return i
+
+
+def adjudicator(i = Depends(actor)):
+    if i[1] not in ADJUDICATOR_ROLES:
+        raise HTTPException(403, "Adjudicator role required")
     return i
 
 
@@ -141,7 +174,7 @@ def bjson(b, db=None):
             report["participants"].append({"subject_id": participant.blinded_subject_id, **readiness})
     return {"id":str(b.id),"filename":b.filename,"checksum":b.checksum,"file_size":b.file_size,"uploaded_at":b.uploaded_at,"rows":b.row_count,"rows_processed":b.rows_processed,"participants":b.participant_count,"visits":b.visit_count,"mapping_version":b.mapping_version,"status":b.status,"progress_pct":_progress_pct(b),"validation_result":b.validation_result,"blinding_result":b.blinding_result,"errors":b.error_count,"warnings":b.warning_count,"prohibited_excluded":b.prohibited_count,"finished_at":b.processing_finished_at,"error_summary":b.error_summary,"import_report":report}
 @router.post("/batches",status_code=202)
-async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(authenticated),db:Session=Depends(get_db)):
+async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(monitor),db:Session=Depends(get_db)):
     if not (file.filename or "").lower().endswith(".csv"): raise HTTPException(415,"RealTime import requires CSV")
     staging=os.path.join(os.path.dirname(os.path.dirname(__file__)),".rt-staging"); os.makedirs(staging,exist_ok=True)
     path=os.path.join(staging,f"{uuid.uuid4()}.csv"); size=0
@@ -150,7 +183,7 @@ async def upload(background:BackgroundTasks,file:UploadFile=File(...),i=Depends(
     checksum=checksum_file(path); existing=db.query(RTImportBatch).filter_by(checksum=checksum).first()
     if existing: os.remove(path); raise HTTPException(409,{"message":"Exact duplicate file","batch_id":str(existing.id)})
     b=RTImportBatch(filename=os.path.basename(file.filename),checksum=checksum,file_size=size,uploaded_by=i[0],source_path=path,status="CHECKSUM_CALCULATED")
-    db.add(b); db.flush(); audit(db,i[0],i[1],"BATCH_UPLOADED","IMPORT_BATCH",b.id,{"filename":b.filename,"size":size,"checksum":checksum}); db.commit(); background.add_task(process_batch,b.id); return bjson(b, db)
+    db.add(b); db.flush(); audit(db,i[0],i[1],"BATCH_UPLOADED","IMPORT_BATCH",b.id,{"filename":b.filename,"size":size,"checksum":checksum}); job=enqueue_import_job(db,b.id); db.commit(); background.add_task(execute_import_job,job.id); return bjson(b, db)
 @router.post("/batches/bulk",status_code=202)
 async def upload_bulk(background:BackgroundTasks,files:list[UploadFile]=File(...),i=Depends(monitor),db:Session=Depends(get_db)):
     """Accept multiple RealTime CSV snapshots in one request; each is queued and processed independently
@@ -169,27 +202,27 @@ async def upload_bulk(background:BackgroundTasks,files:list[UploadFile]=File(...
             if existing:
                 os.remove(path); entry.update(status="DUPLICATE",batch_id=str(existing.id)); results.append(entry); continue
             b=RTImportBatch(filename=os.path.basename(file.filename),checksum=checksum,file_size=size,uploaded_by=i[0],source_path=path,status="CHECKSUM_CALCULATED")
-            db.add(b); db.flush(); audit(db,i[0],i[1],"BATCH_UPLOADED","IMPORT_BATCH",b.id,{"filename":b.filename,"size":size,"checksum":checksum,"bulk":True}); db.commit()
-            background.add_task(process_batch,b.id)
+            db.add(b); db.flush(); audit(db,i[0],i[1],"BATCH_UPLOADED","IMPORT_BATCH",b.id,{"filename":b.filename,"size":size,"checksum":checksum,"bulk":True}); job=enqueue_import_job(db,b.id); db.commit()
+            background.add_task(execute_import_job,job.id)
             entry.update(status="QUEUED",batch=bjson(b, db)); results.append(entry)
         except Exception as exc:
             db.rollback(); entry.update(status="ERROR",error=str(exc)); results.append(entry)
     return {"total":len(files),"accepted":sum(1 for r in results if r["status"]=="QUEUED"),"items":results}
 @router.get("/batches")
-def batches(i=Depends(authenticated),db:Session=Depends(get_db)): return [bjson(x, db) for x in db.query(RTImportBatch).order_by(RTImportBatch.uploaded_at.desc()).all()]
+def batches(i=Depends(monitor),db:Session=Depends(get_db)): return [bjson(x, db) for x in db.query(RTImportBatch).order_by(RTImportBatch.uploaded_at.desc()).all()]
 @router.get("/batches/{batch_id}")
-def batch(batch_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends(get_db)):
+def batch(batch_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
     b=db.get(RTImportBatch,batch_id)
     if not b: raise HTTPException(404,"Batch not found")
     return bjson(b, db)
 @router.post("/batches/{batch_id}/cancel")
-def cancel(batch_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends(get_db)):
+def cancel(batch_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
     b=db.get(RTImportBatch,batch_id)
     if not b or b.status in {"PUBLISHED","SUPERSEDED"}: raise HTTPException(409,"Batch cannot be cancelled")
     b.cancel_requested=True; audit(db,i[0],i[1],"IMPORT_CANCEL_REQUESTED","IMPORT_BATCH",b.id); db.commit(); return {"status":"CANCEL_REQUESTED"}
 @router.post("/batches/{batch_id}/reprocess")
 @router.post("/batches/{batch_id}/retry")
-def reprocess_batch_endpoint(batch_id:uuid.UUID,background:BackgroundTasks,i=Depends(authenticated),db:Session=Depends(get_db)):
+def reprocess_batch_endpoint(batch_id:uuid.UUID,background:BackgroundTasks,i=Depends(monitor),db:Session=Depends(get_db)):
     b=db.get(RTImportBatch,batch_id)
     if not b: raise HTTPException(404,"Batch not found")
     if b.status in {"PUBLISHED","SUPERSEDED"}: raise HTTPException(409,"Published or superseded batch cannot be reprocessed")
@@ -200,8 +233,9 @@ def reprocess_batch_endpoint(batch_id:uuid.UUID,background:BackgroundTasks,i=Dep
     b.error_summary=None
     b.cancel_requested=False
     audit(db,i[0],i[1],"BATCH_REPROCESS_REQUESTED","IMPORT_BATCH",b.id)
+    job=enqueue_import_job(db,b.id,reset=True)
     db.commit()
-    background.add_task(process_batch,b.id,True)
+    background.add_task(execute_import_job,job.id)
     return {"status":"QUEUED","batch":bjson(b)}
 @router.delete("/batches/{batch_id}")
 def delete_batch(batch_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
@@ -258,7 +292,7 @@ def completion_state(db, p):
     return completed, len(visits)
 
 
-def pjson(p, db=None):
+def pjson(p, db=None, include_assignments=True):
     assignments = []
     try:
         if hasattr(p, "reviewer_assignments") and p.reviewer_assignments:
@@ -292,7 +326,7 @@ def pjson(p, db=None):
             except: res = {}
         return (res or {}).get("reconciliation", {})
 
-    return {
+    payload = {
         "id":str(p.id),
         "subject_id":p.blinded_subject_id,
         "age": age_val,
@@ -309,18 +343,20 @@ def pjson(p, db=None):
         "open_issues":p.open_data_issues or 0,
         "qc_status":p.workflow_status,
         "source_batch_id":str(p.source_batch_id) if p.source_batch_id else None,
-        "assignments": assignments,
         "is_completed": is_completed,
         "case_status": "COMPLETED" if is_completed else p.workflow_status,
         "canonical_visit_count": canonical_visit_count,
         "import_readiness": readiness,
         "reconciliation": _get_recon(p, db),
     }
+    if include_assignments:
+        payload["assignments"] = assignments
+    return payload
 @router.get("/patients")
-def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",view:str="all",include_rejected:bool=False,i=Depends(authenticated),db:Session=Depends(get_db)):
+def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",view:str="all",include_rejected:bool=False,i=Depends(monitor),db:Session=Depends(get_db)):
     page_val = int(page.default if hasattr(page, 'default') else page)
     size_val = int(page_size.default if hasattr(page_size, 'default') else page_size)
-    q=db.query(LongitudinalParticipant)
+    q=_scope_participant_query(db.query(LongitudinalParticipant), i)
     if search:q=q.filter(LongitudinalParticipant.blinded_subject_id.ilike(f"%{search}%"))
     if qc_status:q=q.filter_by(workflow_status=qc_status)
     all_rows=q.order_by(LongitudinalParticipant.blinded_subject_id, LongitudinalParticipant.created_at.desc()).all()
@@ -395,6 +431,8 @@ def _participant_approved_edd(participant):
     dated = []
     for visit in participant.visits:
         for observation in visit.observations:
+            if observation.superseded:
+                continue
             if str(observation.canonical_variable or "").lower() != "edd":
                 continue
             parsed = (
@@ -448,7 +486,7 @@ def _resolved_visit_ga(visit, resolved_date, approved_edd, conflicting_edds=None
     return None, "UNAVAILABLE", discrepancy
 
 
-def timeline(p,db, reviewer_upn=None):
+def timeline(p,db, reviewer_upn=None, include_assignments=True):
     canonical_participant = db.query(Participant).filter(
         (Participant.case_number == p.blinded_subject_id)
         | (Participant.subject_id == p.blinded_subject_id)
@@ -470,6 +508,10 @@ def timeline(p,db, reviewer_upn=None):
                 ).all()
             }
     visits=[]
+    persisted_derivations = db.query(VisitDerivation).filter_by(participant_id=p.id).all()
+    derivations_by_visit = {}
+    for derivation in persisted_derivations:
+        derivations_by_visit.setdefault(derivation.visit_id, {})[derivation.dv_identifier] = derivation
     approved_edd, source_edds = _participant_approved_edd(p)
     ordered_visits = sorted(
         [visit for visit in p.visits if re.fullmatch(r"V0[1-6]", str(visit.scheduled_visit_code or ""), re.IGNORECASE)],
@@ -479,7 +521,7 @@ def timeline(p,db, reviewer_upn=None):
         visit_number = _timeline_visit_number(v, visit_index)
         evidence={}
         for o in v.observations:
-            if o.prohibited_flag or o.canonical_variable.startswith("RECORDED_PE_"): continue
+            if o.prohibited_flag or o.superseded or o.canonical_variable.startswith("RECORDED_PE_"): continue
             evidence.setdefault(o.canonical_variable,[]).append({
                 "value": o.numeric_value if o.numeric_value is not None else o.raw_source_value or o.parsed_text_value or o.coded_value,
                 "numeric_value": o.numeric_value,
@@ -490,11 +532,13 @@ def timeline(p,db, reviewer_upn=None):
                 "observed_at": o.observation_datetime,
                 "date_confidence": o.date_confidence,
                 "provenance": o.provenance_type,
+                "observation_id": str(o.id),
+                "supersedes_observation_id": str(o.supersedes_observation_id) if o.supersedes_observation_id else None,
                 "source": {"form": o.source_form, "page": o.source_page, "field": o.source_field_label, "row": o.source_row_number},
             })
         canonical_visit = canonical_visits.get(visit_number)
         reviewer_record = reviewer_records.get(visit_number)
-        obs_dts = [o.observation_datetime for o in v.observations if o.observation_datetime]
+        obs_dts = [o.observation_datetime for o in v.observations if not o.superseded and o.observation_datetime]
         resolved_date = v.visit_datetime or (min(obs_dts) if obs_dts else None)
         resolved_ga_days, ga_provenance, ga_discrepancy = _resolved_visit_ga(
             v,
@@ -510,12 +554,29 @@ def timeline(p,db, reviewer_upn=None):
 
         not_performed_reason = None
         for o in v.observations:
+            if o.superseded: continue
             fld = (o.source_field_label or "").lower()
             val = str(o.raw_source_value or o.parsed_text_value or "").strip()
             if "not performing" in fld or "not performed" in fld or "missed" in fld or val.lower() in {"delivered", "missed visit", "withdrew", "lost to follow-up"}:
                 not_performed_reason = val
                 break
 
+        visit_derivations = derivations_by_visit.get(v.id, {})
+        versions = {item.rule_version for item in visit_derivations.values()}
+        authoritative = bool(visit_derivations) and versions == {RULE_VERSION}
+        dv_results = {key: item.result for key, item in visit_derivations.items()} if authoritative else {}
+        completeness = dv_results.get("DV-26", {}).get("inputs", {}).get("score")
+        interpretation = {
+            "authoritative": authoritative,
+            "engine_version": RULE_VERSION if authoritative else None,
+            "derived_at": max((item.derived_at for item in visit_derivations.values()), default=None),
+            "completeness": round(completeness * 100) if completeness is not None else None,
+            "missing": dv_results.get("DV-26", {}).get("inputs", {}).get("missing", []),
+            "certainty_gate": dv_results.get("DV-27") if authoritative else None,
+            "trigger": dv_results.get("DV-30") if authoritative else None,
+            "dv_results": dv_results,
+            "failure_reason": None if authoritative else "Authoritative server derivation unavailable or rule versions do not match",
+        }
         visits.append({
             "id":str(v.id),"name":v.scheduled_visit_code,"visit_number":visit_number,"occurrence":v.visit_occurrence,
             "date":resolved_date,"ga_days":resolved_ga_days,"source_ga_days":v.gestational_age_days,
@@ -528,10 +589,11 @@ def timeline(p,db, reviewer_upn=None):
             "evidence":evidence,
             "reconciliation":{
                 "displayed_clinical_results": sum(len(items or []) for items in evidence.values()),
-                "mapped_clinical_rows": sum(1 for o in v.observations if not o.prohibited_flag and o.canonical_variable),
+                "mapped_clinical_rows": sum(1 for o in v.observations if not o.prohibited_flag and not o.superseded and o.canonical_variable),
                 "prohibited_blinded_rows": sum(1 for o in v.observations if o.prohibited_flag),
-                "conflicting_rows": sum(1 for o in v.observations if (o.quality_status or "").upper() == "CONFLICTING"),
+                "conflicting_rows": sum(1 for o in v.observations if not o.superseded and (o.quality_status or "").upper() == "CONFLICTING"),
             },
+            "interpretation": interpretation,
             "signed": bool(reviewer_record),
             "status": canonical_visit.status if canonical_visit else None,
             "resolution_status": canonical_visit.status if canonical_visit else None,
@@ -563,14 +625,13 @@ def timeline(p,db, reviewer_upn=None):
     rs = db.query(PatientRiskSummary).filter_by(participant_id=p.id).first()
     parsed_age = int(age_from_fields) if (age_from_fields and str(age_from_fields).isdigit()) else age_from_fields
     risk_summary = {"age": parsed_age, "chips": rs.chips if rs else [], "parity_summary": rs.parity_summary if rs else "", "gravidity": rs.gravidity if rs else 0, "parity": rs.parity if rs else 0, "miscarriages": rs.miscarriages if rs else 0, "stillbirths": rs.stillbirths if rs else 0, "vaginal_deliveries": rs.vaginal_deliveries if rs else 0, "c_sections": rs.c_sections if rs else 0, "chronic_htn": rs.chronic_htn if rs else False, "pregestational_diabetes": rs.pregestational_diabetes if rs else False}
-    return {**pjson(p, db),"age":parsed_age,"visits":visits,"longitudinal":long,"history":history,"risk_summary":risk_summary}
+    return {**pjson(p, db, include_assignments=include_assignments),"age":parsed_age,"visits":visits,"longitudinal":long,"history":history,"risk_summary":risk_summary}
 @router.get("/patients/{participant_id}")
-def patient(participant_id:uuid.UUID,i=Depends(authenticated),db:Session=Depends(get_db)):
+def patient(participant_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
     p=loaded(db,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
-    # Record the caller's actual authority, not a hardcoded portal: this view is reachable
-    # by every role now, so a fixed "MONITOR" would misattribute the access.
-    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"MONITOR" if i[2] else "NON_QC","role":i[1]}); db.commit(); return {**timeline(p,db,i[0]),"lab_issues":evaluate_participant_labs(db,p)}
+    _require_participant_scope(p, i)
+    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"MONITOR","role":i[1]}); db.commit(); return {**timeline(p,db,i[0]),"lab_issues":evaluate_participant_labs(db,p)}
 class MonitorApprovalRequest(BaseModel):
     reason: Optional[str] = None
 
@@ -579,6 +640,7 @@ class MonitorApprovalRequest(BaseModel):
 def approve(participant_id:uuid.UUID, req: MonitorApprovalRequest | None = Body(default=None), i=Depends(monitor),db:Session=Depends(get_db)):
     p=db.get(LongitudinalParticipant,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
+    _require_participant_scope(p, i)
     approved_edd, source_edds = _participant_approved_edd(p)
     if len(source_edds) > 1:
         raise HTTPException(409,"Monitor/QC review is required to resolve conflicting source EDDs.")
@@ -606,6 +668,7 @@ def approve(participant_id:uuid.UUID, req: MonitorApprovalRequest | None = Body(
 def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends(monitor),db:Session=Depends(get_db)):
     p=db.get(LongitudinalParticipant,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
+    _require_participant_scope(p, i)
     if completion_state(db, p)[0]: raise HTTPException(409,"This case is already completed and cannot be assigned")
     readiness = participant_import_readiness(p)
     if readiness["status"] == "REJECTED":
@@ -644,20 +707,28 @@ def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends
     else: db.add(ReviewerAssignment(participant_id=p.id,reviewer_upn=reviewer_upn,reviewer_role=reviewer_role))
     p.workflow_status="ASSIGNED"; audit(db,i[0],i[1],"REVIEWER_ASSIGNED","PARTICIPANT",p.id,{"reviewer_role":reviewer_role,"reviewer_upn":reviewer_upn,"contract_verification":"BYPASSED_DEMO" if demo_contract_bypass else "VERIFIED"}); db.commit(); return {"status":"ASSIGNED","contract_verification":"BYPASSED_DEMO" if demo_contract_bypass else "VERIFIED"}
 @router.get("/assigned")
-def assigned(i=Depends(actor),db:Session=Depends(get_db)):
-    if i[1] not in {"ADJUDICATOR","REVIEWER_A","REVIEWER_B"}: raise HTTPException(403,"Adjudicator role required")
-    rows=db.query(ReviewerAssignment,LongitudinalParticipant).join(LongitudinalParticipant,ReviewerAssignment.participant_id==LongitudinalParticipant.id).filter(ReviewerAssignment.reviewer_upn==i[0],LongitudinalParticipant.workflow_status=="ASSIGNED").all()
-    return [pjson(p, db) for _,p in rows if not completion_state(db, p)[0]]
+def assigned(i=Depends(adjudicator),db:Session=Depends(get_db)):
+    query=db.query(ReviewerAssignment,LongitudinalParticipant).join(LongitudinalParticipant,ReviewerAssignment.participant_id==LongitudinalParticipant.id).filter(ReviewerAssignment.reviewer_upn==i[0],LongitudinalParticipant.workflow_status=="ASSIGNED")
+    studies = _identity_studies(i)
+    if "*" not in studies:
+        query=query.filter(LongitudinalParticipant.study.in_(studies))
+    rows=query.all()
+    return [pjson(p, db, include_assignments=False) for _,p in rows if not completion_state(db, p)[0]]
 
 @router.get("/progress")
 def progress(i=Depends(actor), db:Session=Depends(get_db)):
     """Return case-level resolution progress and identity-scoped reviewer signature progress."""
     query = db.query(LongitudinalParticipant)
-    if not i[2]:
+    if i[2]:
+        query = _scope_participant_query(query, i)
+    elif i[1] in ADJUDICATOR_ROLES:
         assigned_ids = [row.participant_id for row in db.query(ReviewerAssignment).filter_by(
             reviewer_upn=i[0], status="ASSIGNED"
         ).all()]
         query = query.filter(LongitudinalParticipant.id.in_(assigned_ids)) if assigned_ids else query.filter(False)
+        query = _scope_participant_query(query, i)
+    else:
+        raise HTTPException(403, "Monitor/QC or adjudicator role required")
 
     rows = query.order_by(LongitudinalParticipant.blinded_subject_id, LongitudinalParticipant.created_at).all()
     grouped = {}
@@ -760,7 +831,11 @@ def progress(i=Depends(actor), db:Session=Depends(get_db)):
             "visit_statuses": visit_rows,
             "source_batches": sorted({str(participant.source_batch_id) for participant in participants}),
             "duplicate_source_count": max(0, len(participants) - 1),
-            "adjudicators": sorted({assignment.reviewer_upn for assignment in assignments if assignment.reviewer_upn}),
+            "adjudicators": (
+                sorted({assignment.reviewer_upn for assignment in assignments if assignment.reviewer_upn})
+                if i[2]
+                else ([i[0]] if assigned_roles else [])
+            ),
         })
 
     unique_cases = len(items)
@@ -827,13 +902,15 @@ def _strip_bias_fields(response: dict) -> dict:
 
 
 @router.get("/assigned/{participant_id}")
-def assigned_patient(participant_id:uuid.UUID,i=Depends(actor),db:Session=Depends(get_db)):
-    if not db.query(ReviewerAssignment).filter_by(participant_id=participant_id,reviewer_upn=i[0]).first(): raise HTTPException(403,"Participant is not assigned to this reviewer")
+def assigned_patient(participant_id:uuid.UUID,i=Depends(adjudicator),db:Session=Depends(get_db)):
     p=loaded(db,participant_id)
-    if not p or p.workflow_status!="ASSIGNED" or completion_state(db, p)[0]: raise HTTPException(404,"Assigned participant unavailable")
+    if not p: raise HTTPException(404,"Assigned participant unavailable")
+    _require_participant_scope(p, i)
+    if not db.query(ReviewerAssignment).filter_by(participant_id=participant_id,reviewer_upn=i[0]).first(): raise HTTPException(403,"Participant is not assigned to this reviewer")
+    if p.workflow_status!="ASSIGNED" or completion_state(db, p)[0]: raise HTTPException(404,"Assigned participant unavailable")
     audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"ADJUDICATOR"}); db.commit()
-    payload = timeline(p, db, i[0])
-    if i[1] == "ADJUDICATOR":
+    payload = timeline(p, db, i[0], include_assignments=False)
+    if i[1] in ADJUDICATOR_ROLES:
         payload = _strip_bias_fields(payload)
     return payload
 
@@ -843,6 +920,158 @@ def assigned_patient(participant_id:uuid.UUID,i=Depends(actor),db:Session=Depend
 class AutoAssignRequest(BaseModel):
     participant_id: str
     reason: Optional[str] = "Auto-assignment by system"
+
+
+class DataQueryRequest(BaseModel):
+    category: str = Field(min_length=3, max_length=60)
+    query_text: str = Field(min_length=10, max_length=4000)
+    visit_id: Optional[uuid.UUID] = None
+
+
+class QueryResolutionRequest(BaseModel):
+    response_text: str = Field(min_length=3, max_length=4000)
+    closure_reason: str = Field(min_length=3, max_length=1000)
+
+
+class RecusalRequest(BaseModel):
+    reason_code: str = Field(min_length=3, max_length=50)
+    comments: str = Field(min_length=10, max_length=2000)
+
+
+class CorrectionRequest(BaseModel):
+    raw_source_value: str = Field(min_length=1, max_length=4000)
+    unit: Optional[str] = Field(default=None, max_length=40)
+    observation_datetime: Optional[datetime] = None
+    reason: str = Field(min_length=10, max_length=2000)
+
+
+class CorrectionApprovalRequest(BaseModel):
+    reason: str = Field(min_length=10, max_length=2000)
+
+
+def _correction_json(row):
+    return {"id":str(row.id),"participant_id":str(row.participant_id),"original_observation_id":str(row.original_observation_id),"replacement_observation_id":str(row.replacement_observation_id) if row.replacement_observation_id else None,"proposed_values":row.proposed_values,"request_reason":row.request_reason,"requested_by":row.requested_by,"requested_at":row.requested_at,"status":row.status,"approval_reason":row.approval_reason,"approved_by":row.approved_by,"approved_at":row.approved_at}
+
+
+@router.post("/observations/{observation_id}/corrections", status_code=201)
+def request_observation_correction(observation_id: uuid.UUID, req: CorrectionRequest, i=Depends(monitor), db: Session=Depends(get_db)):
+    original=db.get(CanonicalObservation,observation_id)
+    if not original or original.prohibited_flag: raise HTTPException(404,"Observation not found")
+    participant=db.get(LongitudinalParticipant,original.participant_id); _require_participant_scope(participant,i)
+    if original.superseded: raise HTTPException(409,"Superseded observations cannot be corrected again; correct the active replacement")
+    if db.query(ObservationCorrection).filter_by(original_observation_id=original.id,status="PENDING_APPROVAL").first():
+        raise HTTPException(409,"A correction is already pending approval for this observation")
+    proposed={"raw_source_value":req.raw_source_value.strip(),"unit":req.unit,"observation_datetime":req.observation_datetime.isoformat() if req.observation_datetime else None}
+    row=ObservationCorrection(participant_id=participant.id,original_observation_id=original.id,proposed_values=proposed,request_reason=req.reason.strip(),requested_by=i[0])
+    db.add(row); db.flush(); audit(db,i[0],i[1],"OBSERVATION_CORRECTION_REQUESTED","OBSERVATION_CORRECTION",row.id,{"participant_id":str(participant.id),"observation_id":str(original.id),"canonical_variable":original.canonical_variable})
+    db.commit(); return _correction_json(row)
+
+
+@router.get("/corrections")
+def list_observation_corrections(status: Optional[str]=None, i=Depends(monitor), db: Session=Depends(get_db)):
+    query=db.query(ObservationCorrection).join(LongitudinalParticipant,ObservationCorrection.participant_id==LongitudinalParticipant.id)
+    query=_scope_participant_query(query,i)
+    if status: query=query.filter(ObservationCorrection.status==status.upper())
+    return [_correction_json(row) for row in query.order_by(ObservationCorrection.requested_at.desc()).all()]
+
+
+@router.post("/corrections/{correction_id}/approve")
+def approve_observation_correction(correction_id: uuid.UUID, req: CorrectionApprovalRequest, i=Depends(monitor), db: Session=Depends(get_db)):
+    correction=db.get(ObservationCorrection,correction_id)
+    if not correction: raise HTTPException(404,"Correction not found")
+    participant=db.get(LongitudinalParticipant,correction.participant_id); _require_participant_scope(participant,i)
+    if correction.status!="PENDING_APPROVAL": raise HTTPException(409,"Correction is not pending approval")
+    if correction.requested_by.strip().lower()==i[0].strip().lower(): raise HTTPException(409,"Correction approval requires a different authorized reviewer")
+    original=db.get(CanonicalObservation,correction.original_observation_id)
+    if not original or original.superseded: raise HTTPException(409,"Original observation is no longer active")
+    proposed=correction.proposed_values; raw=proposed["raw_source_value"]
+    observed=parse_datetime(proposed.get("observation_datetime")) if proposed.get("observation_datetime") else original.observation_datetime
+    is_date=str(original.canonical_variable or "").lower().endswith(("date","datetime"))
+    replacement=CanonicalObservation(participant_id=original.participant_id,visit_id=original.visit_id,source_batch_id=original.source_batch_id,canonical_variable=original.canonical_variable,raw_source_value=raw,parsed_text_value=raw,numeric_value=parse_numeric(raw),datetime_value=parse_datetime(raw) if is_date else None,coded_value=parse_coded(raw),unit=proposed.get("unit") or original.unit,observation_datetime=observed,date_confidence="EXACT" if observed else original.date_confidence,source_form=original.source_form,source_page=original.source_page,source_field_label=original.source_field_label,source_row_number=original.source_row_number,mapping_version=original.mapping_version,quality_status="VALID",documentation_status="Documented",provenance_type="SOURCE_CORRECTION",prohibited_flag=False,superseded=False,supersedes_observation_id=original.id,correction_id=correction.id,source_fingerprint=hashlib.sha256(json.dumps({"original":str(original.id),"correction":str(correction.id),"values":proposed},sort_keys=True).encode()).hexdigest())
+    db.add(replacement); db.flush(); original.superseded=True
+    correction.replacement_observation_id=replacement.id; correction.status="APPROVED"; correction.approval_reason=req.reason.strip(); correction.approved_by=i[0]; correction.approved_at=datetime.utcnow()
+    visit=db.get(VisitInstance,original.visit_id)
+    if original.canonical_variable in {"VISIT_DATE","visit_date"} and replacement.datetime_value: visit.visit_datetime=replacement.datetime_value
+    db.flush(); derive_participant(db,participant,participant.visits)
+    audit(db,i[0],i[1],"OBSERVATION_CORRECTION_APPROVED","OBSERVATION_CORRECTION",correction.id,{"participant_id":str(participant.id),"original_observation_id":str(original.id),"replacement_observation_id":str(replacement.id),"canonical_variable":original.canonical_variable})
+    db.commit(); return _correction_json(correction)
+
+
+def _reviewer_assignment(db, participant_id, reviewer_upn):
+    return db.query(ReviewerAssignment).filter_by(
+        participant_id=participant_id, reviewer_upn=reviewer_upn, status="ASSIGNED"
+    ).first()
+
+
+@router.post("/assigned/{participant_id}/queries", status_code=201)
+def raise_data_query(participant_id: uuid.UUID, req: DataQueryRequest, i=Depends(adjudicator), db: Session=Depends(get_db)):
+    participant = db.get(LongitudinalParticipant, participant_id)
+    if not participant: raise HTTPException(404, "Assigned participant unavailable")
+    _require_participant_scope(participant, i)
+    assignment = _reviewer_assignment(db, participant_id, i[0])
+    if not assignment: raise HTTPException(403, "Participant is not assigned to this reviewer")
+    if req.visit_id and not db.query(VisitInstance).filter_by(id=req.visit_id, participant_id=participant_id).first():
+        raise HTTPException(422, "visit_id is not part of this participant")
+    row = ClinicalDataQuery(participant_id=participant_id, visit_id=req.visit_id, category=req.category.upper(), query_text=req.query_text.strip(), raised_by=i[0])
+    db.add(row); db.flush()
+    audit(db,i[0],i[1],"CLINICAL_DATA_QUERY_RAISED","DATA_QUERY",row.id,{"participant_id":str(participant_id),"category":row.category,"reviewer_role":assignment.reviewer_role})
+    db.commit()
+    return {"id":str(row.id),"status":row.status,"raised_at":row.raised_at}
+
+
+@router.get("/queries")
+def list_data_queries(status: Optional[str]=None, i=Depends(monitor), db: Session=Depends(get_db)):
+    query = db.query(ClinicalDataQuery).join(LongitudinalParticipant, ClinicalDataQuery.participant_id == LongitudinalParticipant.id)
+    query = _scope_participant_query(query, i)
+    if status: query = query.filter(ClinicalDataQuery.status == status.upper())
+    return [{"id":str(row.id),"participant_id":str(row.participant_id),"visit_id":str(row.visit_id) if row.visit_id else None,"category":row.category,"query_text":row.query_text,"raised_by":row.raised_by,"raised_at":row.raised_at,"status":row.status,"response_text":row.response_text,"responded_by":row.responded_by,"responded_at":row.responded_at,"closure_reason":row.closure_reason} for row in query.order_by(ClinicalDataQuery.raised_at.desc()).all()]
+
+
+@router.post("/queries/{query_id}/resolve")
+def resolve_data_query(query_id: uuid.UUID, req: QueryResolutionRequest, i=Depends(monitor), db: Session=Depends(get_db)):
+    row = db.get(ClinicalDataQuery, query_id)
+    if not row: raise HTTPException(404, "Data query not found")
+    participant = db.get(LongitudinalParticipant, row.participant_id); _require_participant_scope(participant, i)
+    if row.status == "CLOSED": raise HTTPException(409, "Data query is already closed")
+    now=datetime.utcnow(); row.response_text=req.response_text.strip(); row.responded_by=i[0]; row.responded_at=now
+    row.status="CLOSED"; row.closed_by=i[0]; row.closed_at=now; row.closure_reason=req.closure_reason.strip()
+    audit(db,i[0],i[1],"CLINICAL_DATA_QUERY_CLOSED","DATA_QUERY",row.id,{"participant_id":str(row.participant_id),"closure_reason":row.closure_reason})
+    db.commit(); return {"id":str(row.id),"status":row.status,"closed_at":row.closed_at}
+
+
+@router.post("/assigned/{participant_id}/recuse", status_code=201)
+def declare_recusal(participant_id: uuid.UUID, req: RecusalRequest, i=Depends(adjudicator), db: Session=Depends(get_db)):
+    participant = db.get(LongitudinalParticipant, participant_id)
+    if not participant: raise HTTPException(404, "Assigned participant unavailable")
+    _require_participant_scope(participant, i)
+    assignment = _reviewer_assignment(db, participant_id, i[0])
+    if not assignment: raise HTTPException(403, "Participant is not assigned to this reviewer")
+    canonical = db.query(Participant).filter((Participant.case_number==participant.blinded_subject_id)|(Participant.subject_id==participant.blinded_subject_id)).first()
+    if canonical and db.query(AdjudicationRecord).filter_by(participant_id=canonical.id, reviewer_upn=i[0], signed=True).first():
+        raise HTTPException(409, "A reviewer cannot recuse after signing; escalate for a controlled amendment")
+    excluded={a.reviewer_upn for a in db.query(ReviewerAssignment).filter_by(participant_id=participant_id).all()}
+    excluded.update(r.reviewer_upn for r in db.query(ReviewerRecusal).filter_by(participant_id=participant_id).all())
+    from sqlalchemy import func as _func
+    workloads=dict(db.query(ReviewerAssignment.reviewer_upn,_func.count(ReviewerAssignment.id)).filter_by(status="ASSIGNED").group_by(ReviewerAssignment.reviewer_upn).all())
+    candidates=[u.email for u in db.query(PortalUser).filter_by(role="ADJUDICATOR",status="ACTIVE").all() if u.email not in excluded]
+    if not _demo_contract_bypass_enabled():
+        now = datetime.utcnow()
+        contracted = {row[0] for row in db.query(AdjudicatorStudyContract.adjudicator_upn).filter(
+            AdjudicatorStudyContract.study_code == participant.study,
+            AdjudicatorStudyContract.status == "ACTIVE",
+            AdjudicatorStudyContract.effective_from <= now,
+            (AdjudicatorStudyContract.effective_to.is_(None) | (AdjudicatorStudyContract.effective_to > now)),
+        ).all()}
+        candidates = [email for email in candidates if email in contracted]
+    if not candidates: raise HTTPException(409,"No independent replacement adjudicator is available")
+    replacement=min(candidates,key=lambda upn:(workloads.get(upn,0),upn)); now=datetime.utcnow()
+    recusal=ReviewerRecusal(participant_id=participant_id,assignment_id=assignment.id,reviewer_upn=i[0],reviewer_role=assignment.reviewer_role,reason_code=req.reason_code.upper(),comments=req.comments.strip(),replacement_upn=replacement,replacement_assigned_at=now)
+    # The assignment slot is stable and unique per participant/role; recusal is
+    # preserved in its own immutable record before the slot is transferred.
+    assignment.reviewer_upn=replacement; assignment.status="ASSIGNED"; assignment.assigned_at=now
+    db.add(recusal); db.flush()
+    audit(db,i[0],i[1],"REVIEWER_RECUSED","PARTICIPANT",participant_id,{"reviewer_role":assignment.reviewer_role,"reason_code":recusal.reason_code,"replacement_upn":replacement})
+    db.commit(); return {"id":str(recusal.id),"status":"RECUSED","replacement_assigned":True}
 
 
 _AUTO_ASSIGN_CAP = 50
@@ -866,6 +1095,7 @@ def auto_assign(req: AutoAssignRequest, i=Depends(monitor), db: Session=Depends(
     p = db.get(LongitudinalParticipant, participant_id)
     if not p:
         raise HTTPException(404, "Participant not found")
+    _require_participant_scope(p, i)
     if completion_state(db, p)[0]:
         raise HTTPException(409, "This case is already completed and cannot be auto-assigned")
 

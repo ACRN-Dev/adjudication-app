@@ -28,7 +28,9 @@ BP_HTN_SBP = 140           # mmHg
 BP_HTN_DBP = 90            # mmHg
 BP_SEVERE_SBP = 160        # mmHg
 BP_SEVERE_DBP = 110        # mmHg
-BP_MIN_INTERVAL_HOURS = 4  # Hours between confirming readings
+BP_MIN_INTERVAL_HOURS = 6
+BP_MAX_INTERVAL_HOURS = 7 * 24
+ALLOW_UNTIMED_BP_FALLBACKS = False
 
 UPCR_THRESHOLD = 0.3       # g/g
 UPCR_MG_MMOL_THRESHOLD = 30 # mg/mmol equivalent
@@ -41,7 +43,7 @@ CREATININE_BASELINE_MULTIPLIER = 2.0
 
 AST_ULN = 40               # U/L
 ALT_ULN = 35               # U/L
-LDH_ULN = 250              # U/L
+LDH_HELLP_THRESHOLD = 600
 
 GA_EOPE_CUTOFF_WEEKS = 34  # <34+0 = EOPE, ≥34+0 = LOPE
 
@@ -164,12 +166,12 @@ def derive_htn_01(bp_readings: List[dict]) -> CriterionResult:
             for j in range(i + 1, len(timed_sorted)):
                 t1, t2 = timed_sorted[i]["datetime"], timed_sorted[j]["datetime"]
                 interval_hours = (t2 - t1).total_seconds() / 3600
-                if interval_hours >= BP_MIN_INTERVAL_HOURS:
+                if BP_MIN_INTERVAL_HOURS <= interval_hours <= BP_MAX_INTERVAL_HOURS:
                     return CriterionResult(
                         criterion_id="HTN-01",
-                        criterion_name="Qualifying hypertension (≥140/90 mmHg, ≥4h apart)",
+                        criterion_name="Qualifying hypertension (>=140/90 mmHg, 6-168h apart)",
                         met=True,
-                        formula=f"SBP ≥140 OR DBP ≥90 confirmed ≥4h apart ({round(interval_hours, 1)}h)",
+                        formula=f"SBP >=140 OR DBP >=90 confirmed 6-168h apart ({round(interval_hours, 1)}h)",
                         inputs={"reading_1": f"{timed_sorted[i]['sbp']}/{timed_sorted[i]['dbp']}", "reading_2": f"{timed_sorted[j]['sbp']}/{timed_sorted[j]['dbp']}"},
                         source_fields=[timed_sorted[i].get("source", ""), timed_sorted[j].get("source", "")],
                         first_date_met=t1,
@@ -177,7 +179,7 @@ def derive_htn_01(bp_readings: List[dict]) -> CriterionResult:
 
     # Strategy B: Operational Fallback G-01/G-02 — Distinct Visit Dates
     visit_dates = set(r.get("date", str(r.get("datetime", "")))[:10] for r in qualifying)
-    if len(visit_dates) >= 2:
+    if ALLOW_UNTIMED_BP_FALLBACKS and len(visit_dates) >= 2:
         return CriterionResult(
             criterion_id="HTN-01",
             criterion_name="Qualifying hypertension (Operational Fallback: Distinct Visit Dates)",
@@ -190,7 +192,7 @@ def derive_htn_01(bp_readings: List[dict]) -> CriterionResult:
 
     # Strategy C: Severe range BP plus recheck within one visit
     severe_readings = [r for r in qualifying if r["sbp"] >= BP_SEVERE_SBP or r["dbp"] >= BP_SEVERE_DBP]
-    if len(severe_readings) >= 1 and len(qualifying) >= 2:
+    if ALLOW_UNTIMED_BP_FALLBACKS and len(severe_readings) >= 1 and len(qualifying) >= 2:
         return CriterionResult(
             criterion_id="HTN-01",
             criterion_name="Qualifying hypertension (Operational Fallback: Severe Range + Recheck)",
@@ -207,7 +209,12 @@ def derive_htn_01(bp_readings: List[dict]) -> CriterionResult:
         formula="SBP ≥140 OR DBP ≥90 on ≥2 occasions",
         inputs={"qualifying_count": len(qualifying)},
         source_fields=[r.get("source", "") for r in bp_readings],
-        notes="Qualifying readings present but unconfirmed across 4h or distinct visit dates.",
+        missingness_status=NOT_DOCUMENTED if len(timed_readings) < 2 else None,
+        notes=(
+            "Qualifying readings are present but two reliable timestamps are required."
+            if len(timed_readings) < 2
+            else "Qualifying readings are not separated by the approved 6-hour to 1-week interval."
+        ),
     )
 
 
@@ -411,13 +418,13 @@ def derive_hep_01(ast: Optional[float] = None, alt: Optional[float] = None, sour
 # ── HEP-02: LDH elevation ─────────────────────────────────────────────────
 
 def derive_hep_02(ldh: Optional[float] = None, source: str = "LIMS") -> CriterionResult:
-    threshold = 2 * LDH_ULN
+    threshold = LDH_HELLP_THRESHOLD
     if ldh is None:
         return CriterionResult(
             criterion_id="HEP-02",
             criterion_name=f"LDH elevation (>{threshold} U/L)",
             met=False,
-            formula=f"LDH >{threshold} U/L (>2× ULN)",
+            formula=f"LDH >{threshold} U/L",
             inputs={"ldh": None},
             source_fields=[source],
             missingness_status=NOT_DOCUMENTED,
@@ -427,8 +434,8 @@ def derive_hep_02(ldh: Optional[float] = None, source: str = "LIMS") -> Criterio
         criterion_id="HEP-02",
         criterion_name=f"LDH elevation (>{threshold} U/L)",
         met=met,
-        formula=f"LDH >{threshold} U/L (>2× ULN)",
-        inputs={"ldh": ldh, "ldh_x_uln": round(ldh / LDH_ULN, 2)},
+        formula=f"LDH >{threshold} U/L",
+        inputs={"ldh": ldh, "threshold": threshold},
         source_fields=[source],
     )
 
