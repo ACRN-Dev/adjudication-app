@@ -16,6 +16,7 @@ import {
   inferLabInterpretation,
   isReviewerVisitSigned,
   isVisitComplete,
+  isVisitNotPerformed,
   normalizeVisitEvidence,
   pairBpReadings,
   statusLabel,
@@ -106,6 +107,7 @@ export function VisitRibbon({ visits = [], selectedIndex = 0, onSelectVisit, sho
           const vNum = index + 1;
           const isSelected = selectedIndex === index;
           const isPostDelivery = vNum >= 5;
+          const isNotPerformed = isVisitNotPerformed(visit);
           const title = visit.name || visit.visit_code || `Visit ${vNum}`;
 
           return (
@@ -160,23 +162,29 @@ export function VisitRibbon({ visits = [], selectedIndex = 0, onSelectVisit, sho
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)' }}>
-                {formatVisitDate(visit.date || visit.visit_date)}
-              </div>
-              <div style={{ fontSize: '10.5px', fontWeight: 600, color: isPostDelivery ? '#7c3aed' : 'var(--acrn-sky-blue, #4771AD)' }}>
-                {(visit.gestationalLabel && !/unclassifiable|null|undefined/i.test(String(visit.gestationalLabel)))
-                  ? visit.gestationalLabel
-                  : (visit.ga && !/unclassifiable|null|undefined/i.test(String(visit.ga)) ? visit.ga : 'Age not available')}
-              </div>
-              {visit.ga_discrepancy?.is_conflicting ? (
-                <div style={{ fontSize: '9.5px', fontWeight: 700, color: '#b91c1c' }}>
-                  GA CONFLICT - review source
-                </div>
-              ) : visit.ga_provenance === 'DERIVED_FROM_APPROVED_EDD' ? (
-                <div style={{ fontSize: '9.5px', color: '#64748b' }}>
-                  Derived from approved EDD
-                </div>
-              ) : null}
+              {isNotPerformed ? (
+                <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748b' }}>Missed visit</div>
+              ) : (
+                <>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)' }}>
+                    {formatVisitDate(visit.date || visit.visit_date)}
+                  </div>
+                  <div style={{ fontSize: '10.5px', fontWeight: 600, color: isPostDelivery ? '#7c3aed' : 'var(--acrn-sky-blue, #4771AD)' }}>
+                    {(visit.gestationalLabel && !/unclassifiable|null|undefined/i.test(String(visit.gestationalLabel)))
+                      ? visit.gestationalLabel
+                      : (visit.ga && !/unclassifiable|null|undefined/i.test(String(visit.ga)) ? visit.ga : 'Age not available')}
+                  </div>
+                  {visit.ga_discrepancy?.is_conflicting ? (
+                    <div style={{ fontSize: '9.5px', fontWeight: 700, color: '#b91c1c' }}>
+                      GA CONFLICT - review source
+                    </div>
+                  ) : visit.ga_provenance === 'DERIVED_FROM_APPROVED_EDD' ? (
+                    <div style={{ fontSize: '9.5px', color: '#64748b' }}>
+                      Derived from approved EDD
+                    </div>
+                  ) : null}
+                </>
+              )}
               {isReviewerVisitSigned(visit) && (
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '9.5px', fontWeight: 700, color: '#15803d' }}>
                   <I.CheckCircle2 size={11} /> SIGNED BY YOU

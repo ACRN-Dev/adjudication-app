@@ -16,11 +16,14 @@ import {
   deleteBatch,
   resetRealtimeImports,
   assignPatient,
+  autoAssignPatient,
   approvePatient,
   listAdjudicators,
   listReferenceRanges,
   upsertReferenceRange,
-  deactivateReferenceRange
+  deactivateReferenceRange,
+  listDataQueries,
+  resolveDataQuery
 } from '../services/realtimeApi';
 
 const nav = [
@@ -423,7 +426,7 @@ function ProgressBar({ pct, tone = 'info' }) {
   );
 }
 
-function Imports({ user, onNavigate, readOnly }) {
+function Imports({ user, onNavigate, readOnly, medicalOfficer = false }) {
   const [batches, setBatches] = useState([]);
   const [msg, setMsg] = useState('');
   const [roster, setRoster] = useState([]);
@@ -585,9 +588,11 @@ function Imports({ user, onNavigate, readOnly }) {
       desc="Immutable, checksummed source snapshots. Files are streamed and parsed into pseudonymized visit blocks."
     >
       <div className="monitor-toolbar" style={{ marginBottom: '16px', justifyContent: 'flex-end' }}>
-        <button className="a-secondary" onClick={doResetAll} disabled={resetBusy}>
-          <I.RotateCcw size={14} /> {resetBusy ? 'Resetting…' : 'Reset RealTime Imports (Demo only)'}
-        </button>
+        {!medicalOfficer && (
+          <button className="a-secondary" onClick={doResetAll} disabled={resetBusy}>
+            <I.RotateCcw size={14} /> {resetBusy ? 'Resetting…' : 'Reset RealTime Imports (Demo only)'}
+          </button>
+        )}
       </div>
       <div
         className={`rt-upload ${dragging ? 'dragging' : ''}`}
@@ -638,7 +643,7 @@ function Imports({ user, onNavigate, readOnly }) {
             <I.Info size={18} />
             <span>{msg}</span>
           </div>
-          {onNavigate && msgType === 'success' && (
+          {onNavigate && msgType === 'success' && !medicalOfficer && (
             <button
               className="a-primary"
               style={{ fontSize: '11px', padding: '4px 10px' }}
@@ -682,7 +687,7 @@ function Imports({ user, onNavigate, readOnly }) {
             ) : (
               0
             ),
-            b.status === 'FAILED' || b.status === 'CANCELLED' ? (
+            !medicalOfficer && (b.status === 'FAILED' || b.status === 'CANCELLED') ? (
               <div style={{ display: 'flex', gap: '6px' }}>
                 <button className="a-link" disabled={actionBusyId === b.id} onClick={() => doRetry(b)}>Retry</button>
                 <button className="a-link" style={{ color: '#dc2626' }} disabled={actionBusyId === b.id} onClick={() => doDelete(b)}>Delete</button>
@@ -891,28 +896,18 @@ function Assignments({ user, onOpen, readOnly }) {
 
   const autoAssignAll = async () => {
     setBusy(true);
-    setMsg('Assigning demo adjudicators A & B to all subjects…');
+    setMsg('Assigning available adjudicators to all subjects…');
     try {
-      const available = [...roster].map((a) => ({ ...a, active_workload: a.active_workload || 0 }));
-      const eligible = available.filter((a) => a.active_workload < ADJUDICATOR_CAPACITY_LIMIT);
-      if (eligible.length < 2) { setMsg(`At least two adjudicators below the ${ADJUDICATOR_CAPACITY_LIMIT}-case capacity are required.`); return; }
+      let assigned = 0;
       for (const p of data.items) {
-        const ordered = [...eligible].sort((a,b)=>(a.active_workload||0)-(b.active_workload||0)||a.email.localeCompare(b.email));
-        const reviewerA = ordered[0];
-        const reviewerB = ordered[1];
-        if (!reviewerA || !reviewerB) {
-          setMsg(`Unable to assign ${p.subject_id}: no eligible reviewers remain under the capacity cap.`);
-          return;
-        }
-        await assignPatient(p.id, reviewerA.email, 'REVIEWER_A', user);
-        await assignPatient(p.id, reviewerB.email, 'REVIEWER_B', user);
-        reviewerA.active_workload += 1;
-        reviewerB.active_workload += 1;
+        await autoAssignPatient(p.id, user);
+        assigned += 1;
       }
-      setMsg('Auto-assigned Adjudicator A & Adjudicator B to all participants!');
-      load();
+      setMsg(`Auto-assigned available adjudicators as Reviewer A and B to ${assigned} participant${assigned === 1 ? '' : 's'}.`);
+      await load();
     } catch (e) {
-      setMsg(e.message);
+      setMsg(`Assigned ${assigned} participants before stopping: ${e.message}`);
+      await load();
     } finally {
       setBusy(false);
     }
@@ -934,7 +929,7 @@ function Assignments({ user, onOpen, readOnly }) {
         </div>
         {assignmentTab === 'active' && !readOnly && (
           <button className="a-primary" onClick={autoAssignAll} disabled={busy}>
-            <I.Users size={14} /> {busy ? 'Assigning…' : 'Auto-Assign Demo Adjudicators (A & B to All)'}
+            <I.Users size={14} /> {busy ? 'Assigning…' : 'Auto-Assign Available Adjudicators (A & B)'}
           </button>
         )}
       </div>
@@ -1010,7 +1005,7 @@ function Assignments({ user, onOpen, readOnly }) {
   );
 }
 
-function Patients({ user, onOpen }) {
+function Patients({ user, onOpen, medicalOfficer = false }) {
   const [data, setData] = useState({ items: [], total: 0 });
   const [q, setQ] = useState('');
 
@@ -1024,7 +1019,9 @@ function Patients({ user, onOpen }) {
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search blinded subject ID..." />
       </div>
       <Table
-        cols={['Blinded Subject', 'Study', 'Visits', 'First Visit', 'Latest Visit', 'Derived Onset', 'Severity', '% Data', '% History', 'Issues', 'QC']}
+        cols={medicalOfficer
+          ? ['Blinded Subject', 'Study', 'Visits', 'First Visit', 'Latest Visit', '% Data', '% History', 'Issues']
+          : ['Blinded Subject', 'Study', 'Visits', 'First Visit', 'Latest Visit', 'Derived Onset', 'Severity', '% Data', '% History', 'Issues', 'QC']}
         rows={data.items.map((p) => {
           const labStatus = p.lab_issues?.status || 'NO_DATA';
           const abnormalCount = p.lab_issues?.abnormal_count || 0;
@@ -1039,14 +1036,13 @@ function Patients({ user, onOpen }) {
               p.visit_count,
               date(p.first_visit),
               date(p.latest_visit),
-              p.onset_classification,
-              p.maximum_severity,
+              ...(!medicalOfficer ? [p.onset_classification, p.maximum_severity] : []),
               `${Math.round((p.packet_completeness || 0) * 100)}%`,
               `${Math.round((p.history_completeness || 0) * 100)}%`,
               <span title={p.open_issues ? `${p.open_issues} unresolved import issue(s)` : 'No unresolved import issues'} style={{ fontWeight: 700, color: issueColor }}>
                 {issueLabel}
               </span>,
-              <span className={`badge-qc ${p.qc_status === 'ASSIGNED' || p.qc_status === 'QC_APPROVED' ? 'approved' : 'pending'}`}>{p.qc_status}</span>
+              ...(!medicalOfficer ? [<span className="badge-qc pending">{p.import_readiness?.status || 'SOURCE DATA'}</span>] : [])
             ]
           };
         })}
@@ -1056,7 +1052,7 @@ function Patients({ user, onOpen }) {
   );
 }
 
-function Timeline({ patient, user, onClose, readOnly }) {
+function Timeline({ patient, user, onClose, readOnly, medicalOfficer = false }) {
   if (!patient) return null;
   const visits = (patient.visits || [])
     .filter((visit) => /^V0[1-6]$/i.test(String(visit.name || visit.visit_code || '')))
@@ -1069,7 +1065,10 @@ function Timeline({ patient, user, onClose, readOnly }) {
   const [roster, setRoster] = useState([]);
   const [selectedAdjudicator, setSelectedAdjudicator] = useState('');
   const [msg, setMsg] = useState('');
-  useEffect(() => { listAdjudicators(user).then(setRoster).catch(e => setMsg(e.message)); }, [user]);
+  useEffect(() => {
+    if (medicalOfficer) return;
+    listAdjudicators(user).then(setRoster).catch(e => setMsg(e.message));
+  }, [user, medicalOfficer]);
 
   const assign = async () => {
     try {
@@ -1086,7 +1085,7 @@ function Timeline({ patient, user, onClose, readOnly }) {
         <button onClick={onClose}>
           <I.ArrowLeft size={14} /> Back
         </button>
-        {!readOnly && (
+        {!readOnly && !medicalOfficer && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', padding: '4px 8px', borderRadius: '6px' }}>
           <select value={assignRole} onChange={(e) => setAssignRole(e.target.value)} style={{ fontSize: '11px', padding: '4px' }}>
             <option value="REVIEWER_A">Reviewer A</option>
@@ -1114,7 +1113,7 @@ function Timeline({ patient, user, onClose, readOnly }) {
         </div>
       )}
 
-      {patient.longitudinal && (
+      {patient.longitudinal && !medicalOfficer && (
         <div className="a-notice">
           <I.Activity />
           <div>
@@ -1135,7 +1134,7 @@ function Timeline({ patient, user, onClose, readOnly }) {
                 <strong>{visit.name}</strong>
                 <div style={{ fontSize: '11px', color: '#475569', marginTop: '4px' }}>{visit.missing ? 'No visit block' : date(visit.date)}</div>
                 <div style={{ fontSize: '10px', color: visit.missing ? '#94a3b8' : '#0369a1', marginTop: '4px' }}>{visit.missing ? '—' : `${evidenceCount} mapped fields`}</div>
-                <span className={`badge-qc ${String(qcStatus).toLowerCase() === 'qc_approved' ? 'approved' : 'pending'}`} style={{ marginTop: '6px', display: 'inline-block', fontSize: '9px' }}>{qcStatus}</span>
+                {!medicalOfficer && <span className={`badge-qc ${String(qcStatus).toLowerCase() === 'qc_approved' ? 'approved' : 'pending'}`} style={{ marginTop: '6px', display: 'inline-block', fontSize: '9px' }}>{qcStatus}</span>}
               </div>
             );
           })}
@@ -1151,12 +1150,16 @@ function Timeline({ patient, user, onClose, readOnly }) {
               </b>
               <div className="rt-timeline-meta">
                 <span>{date(v.date)}</span>
-                <span className={`badge-reconstruction ${String(v.reconstruction.confidence || '').toLowerCase()}`}>
-                  {v.reconstruction.confidence} Confidence
-                </span>
-                <span className={`badge-qc ${String(v.reconstruction.qc_status || '').toLowerCase() === 'qc_approved' ? 'approved' : 'pending'}`}>
-                  {v.reconstruction.qc_status}
-                </span>
+                {!medicalOfficer && v.reconstruction && (
+                  <>
+                    <span className={`badge-reconstruction ${String(v.reconstruction.confidence || '').toLowerCase()}`}>
+                      {v.reconstruction.confidence} Confidence
+                    </span>
+                    <span className={`badge-qc ${String(v.reconstruction.qc_status || '').toLowerCase() === 'qc_approved' ? 'approved' : 'pending'}`}>
+                      {v.reconstruction.qc_status}
+                    </span>
+                  </>
+                )}
               </div>
             </summary>
             <Table
@@ -1307,9 +1310,80 @@ function ReferenceRanges({ user }) {
   );
 }
 
+function DataQueries({ user }) {
+  const [queries, setQueries] = useState([]);
+  const [responses, setResponses] = useState({});
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+
+  const load = () => listDataQueries(user).then(setQueries).catch((e) => setError(e.message));
+  useEffect(() => { load(); }, [user]);
+
+  const closeQuery = async (query) => {
+    const responseText = (responses[query.id] || '').trim();
+    if (!responseText) return;
+    setBusy(query.id);
+    setError('');
+    try {
+      await resolveDataQuery(query.id, {
+        response_text: responseText,
+        closure_reason: 'Medical Officer response recorded against source data.'
+      }, user);
+      setResponses((current) => ({ ...current, [query.id]: '' }));
+      await load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <Page title="Data Queries" desc="Respond to source-data queries without exposing adjudication decisions or deliberations.">
+      {error && <div className="a-notice a-notice-error">{error}</div>}
+      <Table
+        cols={['Subject', 'Category', 'Query', 'Raised', 'Status', 'Response']}
+        rows={queries.map((query) => ({
+          id: query.id,
+          cells: [
+            query.subject_id || query.participant_id,
+            query.category,
+            query.query_text,
+            date(query.raised_at),
+            query.status,
+            query.status === 'CLOSED' ? (
+              <span>{query.response_text || 'Closed'}</span>
+            ) : (
+              <div style={{ display: 'flex', gap: '6px', minWidth: '280px' }}>
+                <input
+                  value={responses[query.id] || ''}
+                  onChange={(e) => setResponses((current) => ({ ...current, [query.id]: e.target.value }))}
+                  placeholder="Enter source-data response"
+                  aria-label={`Response for query ${query.id}`}
+                />
+                <button className="a-primary" disabled={busy === query.id || !(responses[query.id] || '').trim()} onClick={() => closeQuery(query)}>
+                  {busy === query.id ? 'Saving…' : 'Resolve'}
+                </button>
+              </div>
+            )
+          ]
+        }))}
+      />
+    </Page>
+  );
+}
+
 export default function MonitorPortal({ user, onLogout, isEmbedded, readOnly = false }) {
   const [path, setPath] = useState(location.pathname);
   const [selected, setSelected] = useState(null);
+  const medicalOfficer = user?.roleCode === 'MEDICAL_OFFICER';
+  const visibleNav = medicalOfficer
+    ? [
+        ['/monitor/imports', 'Input Case Data', 'Upload'],
+        ['/monitor/patients', 'Case Data', 'Database'],
+        ['/monitor/queries', 'Data Queries', 'FileText'],
+      ]
+    : nav;
 
   useEffect(() => {
     let pop = () => setPath(location.pathname);
@@ -1322,6 +1396,14 @@ export default function MonitorPortal({ user, onLogout, isEmbedded, readOnly = f
     };
   }, []);
 
+  useEffect(() => {
+    if (medicalOfficer && !visibleNav.some(([route]) => route === path)) {
+      history.replaceState({}, '', '/monitor/patients');
+      setPath('/monitor/patients');
+      setSelected(null);
+    }
+  }, [medicalOfficer, path]);
+
   const go = (p) => {
     history.pushState({}, '', p);
     setPath(p);
@@ -1332,15 +1414,17 @@ export default function MonitorPortal({ user, onLogout, isEmbedded, readOnly = f
   const open = async (r) => setSelected(await getPatient(r.id, user));
 
   let content = selected ? (
-    <Timeline patient={selected} user={user} onClose={() => setSelected(null)} readOnly={readOnly} />
+    <Timeline patient={selected} user={user} onClose={() => setSelected(null)} readOnly={readOnly} medicalOfficer={medicalOfficer} />
   ) : path === '/monitor/imports' ? (
-    <Imports user={user} onNavigate={go} readOnly={readOnly} />
+    <Imports user={user} onNavigate={go} readOnly={readOnly} medicalOfficer={medicalOfficer} />
+  ) : path === '/monitor/queries' && medicalOfficer ? (
+    <DataQueries user={user} />
   ) : path === '/monitor/qc' ? (
     <ReconstructionQC user={user} onOpen={open} readOnly={readOnly} />
   ) : path === '/monitor/assignments' ? (
     <Assignments user={user} onOpen={open} readOnly={readOnly} />
   ) : path === '/monitor/patients' ? (
-    <Patients user={user} onOpen={open} readOnly={readOnly} />
+    <Patients user={user} onOpen={open} medicalOfficer={medicalOfficer} />
   ) : (
     <OperationalDashboard user={user} onOpen={go} readOnly={readOnly} />
   );
@@ -1377,7 +1461,7 @@ export default function MonitorPortal({ user, onLogout, isEmbedded, readOnly = f
         <aside className="a-nav">
           <section>
             <h2>CORE MONITOR</h2>
-            {nav.map(([p, l, n]) => {
+            {visibleNav.map(([p, l, n]) => {
               const Icon = I[n] || I.Circle;
               return (
                 <button className={path === p ? 'active' : ''} onClick={() => go(p)} key={p}>

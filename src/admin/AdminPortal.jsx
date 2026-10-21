@@ -1503,13 +1503,18 @@ function Roles() {
       />
       <Table
         caption="Portal permission matrix"
-        columns={['Capability', 'Technical Admin', 'Clinical Ops', 'QA / Auditor', 'Governance', 'Access Reviewer']}
+        columns={['Capability', 'Technical Admin', 'Clinical Ops', 'QA / Auditor', 'Governance', 'Access Reviewer', 'Medical Officer']}
         rows={[
-          ['Admin Portal Access', 'Manage', 'Manage', 'Read/approve', 'Read', 'Review'],
-          ['Blinded Case Content', 'Denied', 'Denied', 'Denied', 'Denied', 'Denied'],
-          ['User Administration', 'Manage', 'Read', 'Read', 'Read', 'Review'],
-          ['Rules / Mappings / Forms', 'Read', 'Draft/manage', 'Approve', 'Read', 'None'],
-          ['Clinical Decisions', 'Denied', 'Denied', 'Denied', 'Denied', 'Denied']
+          ['Admin Portal Access', 'Manage', 'Manage', 'Read/approve', 'Read', 'Review', 'Denied'],
+          ['Case data input', 'Denied', 'Denied', 'Denied', 'Denied', 'Denied', 'Allowed'],
+          ['Case data queries', 'Denied', 'Denied', 'Denied', 'Denied', 'Denied', 'Respond/close'],
+          ['Data completeness status', 'Denied', 'Denied', 'Denied', 'Denied', 'Denied', 'View'],
+          ['Blinded Case Content', 'Denied', 'Denied', 'Denied', 'Denied', 'Denied', 'Source data only'],
+          ['User Administration', 'Manage', 'Read', 'Read', 'Read', 'Review', 'Denied'],
+          ['Rules / Mappings / Forms', 'Read', 'Draft/manage', 'Approve', 'Read', 'None', 'Denied'],
+          ['Adjudication results / decisions', 'Denied', 'Denied', 'Denied', 'Denied', 'Denied', 'Denied'],
+          ['Chairperson deliberations', 'Denied', 'Denied', 'Denied', 'Denied', 'Denied', 'Denied'],
+          ['Clinical Decisions', 'Denied', 'Denied', 'Denied', 'Denied', 'Denied', 'Denied']
         ]}
       />
     </Page>

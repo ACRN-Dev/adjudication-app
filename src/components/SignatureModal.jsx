@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
-import { Lock, ShieldCheck, Key, AlertCircle, CheckCircle } from 'lucide-react';
-import { DEMO_UI_BUILD_ENABLED } from '../config/featureFlags';
+import { Lock, ShieldCheck, AlertCircle } from 'lucide-react';
 
 export default function SignatureModal({ caseData, user, submission, onSignConfirm, onClose }) {
   const [password, setPassword] = useState('');
-  const [mfaCode, setMfaCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -47,10 +45,8 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
         reviewer_upn: user?.email,
         reviewer_name: submission?.reviewerName || user?.display_name || user?.email,
         reviewer_password: password,
-        mfa_code: mfaCode,
         visit_number: submission?.visitNumber || 1,
         visit_code: submission?.visitCode,
-        visit_date: submission?.visitDate,
         meets_criteria: submission?.meetsCriteria !== false,
         diagnosis,
         date_of_diagnosis: submission?.dateOfDiagnosis || submission?.firstPeDate || (submission?.meetsCriteria !== false ? (submission?.visitDate || new Date().toISOString().slice(0, 10)) : null),
@@ -169,20 +165,6 @@ export default function SignatureModal({ caseData, user, submission, onSignConfi
               />
             </div>
 
-            {DEMO_UI_BUILD_ENABLED && <div className="form-group">
-              <label>Demo signature passcode</label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={mfaCode}
-                  onChange={(e) => setMfaCode(e.target.value)}
-                />
-                <button type="button" className="btn-secondary" style={{ whiteSpace: 'nowrap' }} onClick={() => alert('Request a new demo passcode from the demo administrator.')}>
-                  Resend OTP
-                </button>
-              </div>
-            </div>}
           </div>
 
           <div className="modal-footer">

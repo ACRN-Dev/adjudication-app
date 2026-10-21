@@ -21,7 +21,8 @@ from models.admin import AdjudicatorStudyContract
 from models.canonical import AdjudicationRecord, AdjudicationVisit, Participant
 from services.clinical_derivation import RULE_VERSION
 router = APIRouter()
-MONITOR = {"ADJUDICATION_COORDINATOR", "MONITOR_QC_REVIEWER", "QA_REVIEWER", "RELEASE_OPERATOR", "MONITOR", "ADMIN"}
+MONITOR = {"ADJUDICATION_COORDINATOR", "MONITOR_QC_REVIEWER", "QA_REVIEWER", "RELEASE_OPERATOR", "MONITOR", "ADMIN", "MEDICAL_OFFICER", "MEDICAL_MONITOR"}
+MEDICAL_OFFICER = "MEDICAL_OFFICER"
 ADJUDICATOR_ROLES = {"ADJUDICATOR", "REVIEWER_A", "REVIEWER_B", "REVIEWER_C"}
 COMPLETED_VISIT_STATUSES = {"COMPLETED", "FINALIZED", "LOCKED", "CLOSED", "CONCORDANT", "DISCORDANT", "THREE_WAY_DIVERGENT", "RESOLVED_BY_MAJORITY"}
 
@@ -59,7 +60,7 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
             )
         if u.must_change_password:
             raise HTTPException(403, detail={"code": "PASSWORD_CHANGE_REQUIRED", "message": "You must set a new password before continuing."})
-        if u.role == "MONITOR":
+        if u.role in {"MONITOR", "MEDICAL_OFFICER", "MEDICAL_MONITOR"}:
             pr = u.portal_role
             if not pr or pr not in MONITOR_PORTAL_ROLES:
                 return u.email, "MONITOR", False, _study_scope(u.study_scope)
@@ -94,13 +95,13 @@ def actor(request: Request, x_demo_user: str | None = Header(None), x_demo_role:
             if demo_user.must_change_password:
                 raise HTTPException(403, detail={"code": "PASSWORD_CHANGE_REQUIRED", "message": "You must set a new password before continuing."})
             allowed_claimed_roles = {demo_user.role}
-            if demo_user.role == "MONITOR" and demo_user.portal_role:
+            if demo_user.role in {"MONITOR", "MEDICAL_OFFICER", "MEDICAL_MONITOR"} and demo_user.portal_role:
                 allowed_claimed_roles.add(demo_user.portal_role)
             if demo_user.role == "ADJUDICATOR":
                 allowed_claimed_roles.update({"REVIEWER_A", "REVIEWER_B", "REVIEWER_C"})
             if claimed_role not in allowed_claimed_roles:
                 raise HTTPException(403, detail={"message": "Role mismatch for demo identity.", "reason": "role_mismatch"})
-            is_qc = claimed_role in MONITOR or demo_user.role in {"MONITOR", "ADMIN", "OWNER"}
+            is_qc = claimed_role in MONITOR or demo_user.role in {"MONITOR", "MEDICAL_OFFICER", "MEDICAL_MONITOR", "ADMIN", "OWNER"}
             return demo_user.email, claimed_role, is_qc, _study_scope(demo_user.study_scope)
     raise HTTPException(401, detail={"message": "Authentication required. Please sign in.", "reason": "no_session"})
 
@@ -132,6 +133,16 @@ def _require_participant_scope(participant: LongitudinalParticipant, identity) -
 def monitor(i = Depends(actor)):
     if not i[2]:
         raise HTTPException(403, "Monitor/QC authority required — portal role not provisioned. Contact your administrator.")
+    return i
+
+
+def is_medical_officer(i) -> bool:
+    return i[1] == MEDICAL_OFFICER
+
+
+def require_qc_monitor(i):
+    if is_medical_officer(i):
+        raise HTTPException(403, "Medical Officer access is limited to case data, data queries, and completeness status.")
     return i
 
 
@@ -217,12 +228,14 @@ def batch(batch_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
     return bjson(b, db)
 @router.post("/batches/{batch_id}/cancel")
 def cancel(batch_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
+    require_qc_monitor(i)
     b=db.get(RTImportBatch,batch_id)
     if not b or b.status in {"PUBLISHED","SUPERSEDED"}: raise HTTPException(409,"Batch cannot be cancelled")
     b.cancel_requested=True; audit(db,i[0],i[1],"IMPORT_CANCEL_REQUESTED","IMPORT_BATCH",b.id); db.commit(); return {"status":"CANCEL_REQUESTED"}
 @router.post("/batches/{batch_id}/reprocess")
 @router.post("/batches/{batch_id}/retry")
 def reprocess_batch_endpoint(batch_id:uuid.UUID,background:BackgroundTasks,i=Depends(monitor),db:Session=Depends(get_db)):
+    require_qc_monitor(i)
     b=db.get(RTImportBatch,batch_id)
     if not b: raise HTTPException(404,"Batch not found")
     if b.status in {"PUBLISHED","SUPERSEDED"}: raise HTTPException(409,"Published or superseded batch cannot be reprocessed")
@@ -239,6 +252,7 @@ def reprocess_batch_endpoint(batch_id:uuid.UUID,background:BackgroundTasks,i=Dep
     return {"status":"QUEUED","batch":bjson(b)}
 @router.delete("/batches/{batch_id}")
 def delete_batch(batch_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
+    require_qc_monitor(i)
     """Demo-only: remove one batch and everything it staged, so a corrected file can be
     re-uploaded cleanly. Gated to demo/offline environments — production import history
     must never be silently deleted."""
@@ -267,6 +281,7 @@ def delete_batch(batch_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db
     return {"status":"DELETED"}
 @router.post("/batches/reset-demo")
 def reset_realtime_batches(i=Depends(monitor),db:Session=Depends(get_db)):
+    require_qc_monitor(i)
     """Demo-only: wipe every RealTime batch and its derived longitudinal data so the
     Imports page can start completely fresh. Never touches canonical adjudication
     records, users, or admin fixtures."""
@@ -290,6 +305,24 @@ def completion_state(db, p):
         (visit.status or "").upper() in COMPLETED_VISIT_STATUSES for visit in visits
     )
     return completed, len(visits)
+
+
+ADJUDICATOR_CAPACITY_LIMIT = 6
+
+
+def active_assignment_workloads(db, exclude_participant_id=None):
+    """Return active workload counts, excluding canonical completed cases."""
+    workloads = {}
+    assignments = db.query(ReviewerAssignment).filter_by(status="ASSIGNED").all()
+    for assignment in assignments:
+        if exclude_participant_id is not None and assignment.participant_id == exclude_participant_id:
+            continue
+        participant = assignment.participant
+        if participant is not None and completion_state(db, participant)[0]:
+            continue
+        reviewer_upn = (assignment.reviewer_upn or "").strip().lower()
+        workloads[reviewer_upn] = workloads.get(reviewer_upn, 0) + 1
+    return workloads
 
 
 def pjson(p, db=None, include_assignments=True):
@@ -352,6 +385,52 @@ def pjson(p, db=None, include_assignments=True):
     if include_assignments:
         payload["assignments"] = assignments
     return payload
+
+
+def medical_pjson(p, db):
+    payload = pjson(p, db, include_assignments=False)
+    return {
+        "id": payload["id"],
+        "subject_id": payload["subject_id"],
+        "age": payload["age"],
+        "study": payload["study"],
+        "visit_count": payload["visit_count"],
+        "first_visit": payload["first_visit"],
+        "latest_visit": payload["latest_visit"],
+        "pregnancy_status": payload["pregnancy_status"],
+        "packet_completeness": payload["packet_completeness"],
+        "history_completeness": payload["history_completeness"],
+        "open_issues": payload["open_issues"],
+        "import_readiness": payload["import_readiness"],
+    }
+
+
+def medical_timeline(p, db):
+    payload = timeline(p, db, include_assignments=False)
+    safe_visits = []
+    for visit in payload.get("visits", []):
+        interpretation = visit.get("interpretation", {})
+        safe_visits.append({
+            "id": visit["id"],
+            "name": visit["name"],
+            "visit_number": visit["visit_number"],
+            "occurrence": visit["occurrence"],
+            "date": visit["date"],
+            "form": visit["form"],
+            "form_version": visit["form_version"],
+            "not_performed_reason": visit["not_performed_reason"],
+            "evidence": visit["evidence"],
+            "completeness": interpretation.get("completeness"),
+            "missing": interpretation.get("missing", []),
+        })
+    return {
+        **medical_pjson(p, db),
+        "visits": safe_visits,
+        "history": payload.get("history", {}),
+        "risk_summary": payload.get("risk_summary", {}),
+    }
+
+
 @router.get("/patients")
 def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",view:str="all",include_rejected:bool=False,i=Depends(monitor),db:Session=Depends(get_db)):
     page_val = int(page.default if hasattr(page, 'default') else page)
@@ -369,7 +448,7 @@ def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",view:st
         history_by_subject.setdefault(row.blinded_subject_id, []).append(row)
     projected=[]
     for row in latest_by_subject.values():
-        payload=pjson(row, db)
+        payload=medical_pjson(row, db) if is_medical_officer(i) else pjson(row, db)
         if not include_rejected and not payload["import_readiness"]["accepted"]:
             continue
         historical_assignments=[]
@@ -380,7 +459,7 @@ def patients(page:int=1,page_size:int=100,search:str="",qc_status:str="",view:st
                 if key not in seen_assignments:
                     seen_assignments.add(key)
                     historical_assignments.append({"reviewer_upn": assignment.reviewer_upn, "reviewer_role": assignment.reviewer_role})
-        if historical_assignments:
+        if historical_assignments and not is_medical_officer(i):
             payload["assignments"] = historical_assignments
         if view.lower() == "completed" and not payload["is_completed"]: continue
         if view.lower() == "active" and payload["is_completed"]: continue
@@ -631,13 +710,17 @@ def patient(participant_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_d
     p=loaded(db,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
     _require_participant_scope(p, i)
-    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"MONITOR","role":i[1]}); db.commit(); return {**timeline(p,db,i[0]),"lab_issues":evaluate_participant_labs(db,p)}
+    audit(db,i[0],i[1],"PATIENT_DATA_ACCESSED","PARTICIPANT",p.id,{"portal":"MONITOR","role":i[1]}); db.commit()
+    if is_medical_officer(i):
+        return {**medical_timeline(p, db), "lab_issues": evaluate_participant_labs(db, p)}
+    return {**timeline(p,db,i[0]),"lab_issues":evaluate_participant_labs(db,p)}
 class MonitorApprovalRequest(BaseModel):
     reason: Optional[str] = None
 
 
 @router.post("/patients/{participant_id}/approve")
 def approve(participant_id:uuid.UUID, req: MonitorApprovalRequest | None = Body(default=None), i=Depends(monitor),db:Session=Depends(get_db)):
+    require_qc_monitor(i)
     p=db.get(LongitudinalParticipant,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
     _require_participant_scope(p, i)
@@ -666,6 +749,7 @@ def approve(participant_id:uuid.UUID, req: MonitorApprovalRequest | None = Body(
     db.commit(); return {"status":p.workflow_status,"readiness":readiness}
 @router.post("/patients/{participant_id}/assign")
 def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends(monitor),db:Session=Depends(get_db)):
+    require_qc_monitor(i)
     p=db.get(LongitudinalParticipant,participant_id)
     if not p: raise HTTPException(404,"Participant not found")
     _require_participant_scope(p, i)
@@ -682,12 +766,8 @@ def assign(participant_id:uuid.UUID,reviewer_upn:str,reviewer_role:str,i=Depends
     reviewer=db.query(PortalUser).filter_by(email=reviewer_upn,role="ADJUDICATOR",status="ACTIVE").first()
     if not reviewer: raise HTTPException(422,f"Reviewer '{reviewer_upn}' must be an active adjudicator account")
 
-    max_cases = 6
-    active_cases = (
-        db.query(ReviewerAssignment)
-        .filter_by(reviewer_upn=reviewer_upn, status="ASSIGNED")
-        .count()
-    )
+    max_cases = ADJUDICATOR_CAPACITY_LIMIT
+    active_cases = active_assignment_workloads(db, exclude_participant_id=p.id).get(reviewer_upn, 0)
     if active_cases >= max_cases:
         raise HTTPException(409, f"Reviewer capacity reached: {reviewer_upn} already has {active_cases}/{max_cases} active assignments. Rebalance the roster before assigning another case.")
 
@@ -718,6 +798,8 @@ def assigned(i=Depends(adjudicator),db:Session=Depends(get_db)):
 @router.get("/progress")
 def progress(i=Depends(actor), db:Session=Depends(get_db)):
     """Return case-level resolution progress and identity-scoped reviewer signature progress."""
+    if is_medical_officer(i):
+        raise HTTPException(403, "Medical Officer access is limited to case data, data queries, and completeness status.")
     query = db.query(LongitudinalParticipant)
     if i[2]:
         query = _scope_participant_query(query, i)
@@ -868,11 +950,12 @@ def progress(i=Depends(actor), db:Session=Depends(get_db)):
 
 @router.get("/adjudicators")
 def adjudicators(i=Depends(monitor), db:Session=Depends(get_db)):
+    require_qc_monitor(i)
     """Active roster; A/B are positional slots, never fixed identities."""
     rows = db.query(PortalUser).filter_by(role="ADJUDICATOR", status="ACTIVE").order_by(PortalUser.display_name).all()
-    workloads=dict(db.query(ReviewerAssignment.reviewer_upn, __import__('sqlalchemy').func.count(ReviewerAssignment.id)).filter_by(status="ASSIGNED").group_by(ReviewerAssignment.reviewer_upn).all())
+    workloads = active_assignment_workloads(db)
     return [{"email": u.email, "display_name": u.display_name, "portal_role": u.portal_role,
-             "active_workload": workloads.get(u.email,0)} for u in rows]
+             "active_workload": workloads.get(u.email.strip().lower(),0)} for u in rows]
 _CLINICIAN_BIAS_FIELDS = {
     "pe_status",
     "recorded_pe_status",
@@ -977,6 +1060,7 @@ def list_observation_corrections(status: Optional[str]=None, i=Depends(monitor),
 
 @router.post("/corrections/{correction_id}/approve")
 def approve_observation_correction(correction_id: uuid.UUID, req: CorrectionApprovalRequest, i=Depends(monitor), db: Session=Depends(get_db)):
+    require_qc_monitor(i)
     correction=db.get(ObservationCorrection,correction_id)
     if not correction: raise HTTPException(404,"Correction not found")
     participant=db.get(LongitudinalParticipant,correction.participant_id); _require_participant_scope(participant,i)
@@ -1024,7 +1108,9 @@ def list_data_queries(status: Optional[str]=None, i=Depends(monitor), db: Sessio
     query = db.query(ClinicalDataQuery).join(LongitudinalParticipant, ClinicalDataQuery.participant_id == LongitudinalParticipant.id)
     query = _scope_participant_query(query, i)
     if status: query = query.filter(ClinicalDataQuery.status == status.upper())
-    return [{"id":str(row.id),"participant_id":str(row.participant_id),"visit_id":str(row.visit_id) if row.visit_id else None,"category":row.category,"query_text":row.query_text,"raised_by":row.raised_by,"raised_at":row.raised_at,"status":row.status,"response_text":row.response_text,"responded_by":row.responded_by,"responded_at":row.responded_at,"closure_reason":row.closure_reason} for row in query.order_by(ClinicalDataQuery.raised_at.desc()).all()]
+    rows = query.order_by(ClinicalDataQuery.raised_at.desc()).all()
+    participants = {p.id: p.blinded_subject_id for p in db.query(LongitudinalParticipant).filter(LongitudinalParticipant.id.in_([row.participant_id for row in rows])).all()} if rows else {}
+    return [{"id":str(row.id),"participant_id":str(row.participant_id),"subject_id":participants.get(row.participant_id),"visit_id":str(row.visit_id) if row.visit_id else None,"category":row.category,"query_text":row.query_text,"raised_by":row.raised_by,"raised_at":row.raised_at,"status":row.status,"response_text":row.response_text,"responded_by":row.responded_by,"responded_at":row.responded_at,"closure_reason":row.closure_reason} for row in rows]
 
 
 @router.post("/queries/{query_id}/resolve")
@@ -1074,11 +1160,12 @@ def declare_recusal(participant_id: uuid.UUID, req: RecusalRequest, i=Depends(ad
     db.commit(); return {"id":str(recusal.id),"status":"RECUSED","replacement_assigned":True}
 
 
-_AUTO_ASSIGN_CAP = 50
+_AUTO_ASSIGN_CAP = ADJUDICATOR_CAPACITY_LIMIT
 
 
 @router.post("/auto-assign", status_code=201)
 def auto_assign(req: AutoAssignRequest, i=Depends(monitor), db: Session=Depends(get_db)):
+    require_qc_monitor(i)
     """Assign the two least-loaded active adjudicators as REVIEWER_A and REVIEWER_B.
 
     Rules:
@@ -1099,14 +1186,9 @@ def auto_assign(req: AutoAssignRequest, i=Depends(monitor), db: Session=Depends(
     if completion_state(db, p)[0]:
         raise HTTPException(409, "This case is already completed and cannot be auto-assigned")
 
-    # Count active assignments per adjudicator
-    from sqlalchemy import func as _func
-    workloads = dict(
-        db.query(ReviewerAssignment.reviewer_upn, _func.count(ReviewerAssignment.id))
-        .filter_by(status="ASSIGNED")
-        .group_by(ReviewerAssignment.reviewer_upn)
-        .all()
-    )
+    # Completed cases no longer consume capacity. Exclude this participant so
+    # re-running auto-assignment can safely repair its existing slots.
+    workloads = active_assignment_workloads(db, exclude_participant_id=p.id)
 
     adjudicators = (
         db.query(PortalUser)
@@ -1117,10 +1199,10 @@ def auto_assign(req: AutoAssignRequest, i=Depends(monitor), db: Session=Depends(
 
     eligible = [
         u for u in adjudicators
-        if workloads.get(u.email, 0) < _AUTO_ASSIGN_CAP
+        if workloads.get(u.email.strip().lower(), 0) < _AUTO_ASSIGN_CAP
     ]
     # Sort ascending by current workload so the least-loaded reviewers are picked first
-    eligible.sort(key=lambda u: workloads.get(u.email, 0))
+    eligible.sort(key=lambda u: (workloads.get(u.email.strip().lower(), 0), u.email))
 
     if len(eligible) < 2:
         raise HTTPException(
@@ -1138,6 +1220,8 @@ def auto_assign(req: AutoAssignRequest, i=Depends(monitor), db: Session=Depends(
         ).first()
         if existing:
             existing.reviewer_upn = upn
+            existing.status = "ASSIGNED"
+            existing.assigned_at = datetime.utcnow()
         else:
             db.add(ReviewerAssignment(participant_id=p.id, reviewer_upn=upn, reviewer_role=role))
 
@@ -1187,6 +1271,7 @@ def list_reference_ranges(i=Depends(monitor),db:Session=Depends(get_db)):
 
 @router.post("/reference-ranges",status_code=201)
 def upsert_reference_range(req:ReferenceRangeRequest,i=Depends(monitor),db:Session=Depends(get_db)):
+    require_qc_monitor(i)
     analyte=req.analyte.strip().upper()
     if analyte not in LAB_ANALYTES:
         raise HTTPException(422,f"Unsupported analyte. Must be one of: {', '.join(sorted(LAB_ANALYTES))}")
@@ -1206,6 +1291,7 @@ def upsert_reference_range(req:ReferenceRangeRequest,i=Depends(monitor),db:Sessi
 
 @router.post("/reference-ranges/{range_id}/deactivate")
 def deactivate_reference_range(range_id:uuid.UUID,i=Depends(monitor),db:Session=Depends(get_db)):
+    require_qc_monitor(i)
     row=db.get(LabReferenceRange,range_id)
     if not row: raise HTTPException(404,"Reference range not found")
     row.is_active=False

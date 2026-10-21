@@ -38,10 +38,13 @@ export const approvePatient=(id,user,reason='')=>request(`/patients/${id}/approv
   body:JSON.stringify({reason})
 });
 export const assignPatient=(id,email,role,user)=>request(`/patients/${id}/assign?${new URLSearchParams({reviewer_upn:email,reviewer_role:role})}`,user,{method:'POST'});
+export const autoAssignPatient=(id,user,reason='Auto-assignment by system')=>request('/auto-assign',user,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({participant_id:id,reason})});
 export const listAssigned=(user)=>request('/assigned',user);
 export const listAdjudicators=(user)=>request('/adjudicators',user);
 export const getAssigned=(id,user)=>request(`/assigned/${id}`,user);
 export const raiseDataQuery=(id,payload,user)=>request(`/assigned/${id}/queries`,user,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+export const listDataQueries=(user,status='')=>request(`/queries${status?`?status=${encodeURIComponent(status)}`:''}`,user);
+export const resolveDataQuery=(id,payload,user)=>request(`/queries/${id}/resolve`,user,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
 export const declareRecusal=(id,payload,user)=>request(`/assigned/${id}/recuse`,user,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
 
 // XHR (not fetch) so we get real upload progress events for the progress bar.

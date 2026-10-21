@@ -49,6 +49,20 @@ test('Monitor login reaches monitor portal or adjudication workbench', async ({ 
   await expect(page.locator('text=/Monitor/i').first()).toBeVisible({ timeout: 10000 });
 });
 
+test('Medical Officer sees only case-data and query workspace', async ({ page }) => {
+  await loginAs(page, 'medical.officer@acrnhealth.com');
+  await expect(page.getByRole('button', { name: 'Input Case Data' })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole('button', { name: 'Case Data', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Data Queries' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Assignments' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Reconstruction QC' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Monitor Overview' })).toHaveCount(0);
+
+  await page.goto(BASE + '/monitor/assignments');
+  await expect(page.getByText('Longitudinal Patient Database')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('Adjudicator Assignments')).toHaveCount(0);
+});
+
 // ── 2. Admin login ────────────────────────────────────────────────────────────
 test('Admin login renders admin portal', async ({ page }) => {
   await loginAs(page, 'admin@acrnhealth.com');

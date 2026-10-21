@@ -29,6 +29,8 @@ def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get
     if demo_enabled and x_demo_user and x_demo_role:
         if x_demo_role.upper() not in ROLES:
             raise HTTPException(403,"Monitor Portal access denied")
+        if x_demo_role.upper() == "MEDICAL_OFFICER":
+            raise HTTPException(403,"Medical Officer access is limited to the case-data workspace.")
         return MonitorIdentity(x_demo_user,x_demo_role.upper(),tuple(filter(None,(x_study_scope or "").split(","))))
     if acrn_demo_session:
         from services.auth_service import resolve_session
@@ -36,6 +38,8 @@ def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get
         if session:
             user=db.get(PortalUser,session.user_id)
             if user and user.status=="ACTIVE":
+                if user.role == "MEDICAL_OFFICER":
+                    raise HTTPException(403,"Medical Officer access is limited to the case-data workspace.")
                 if user.role in {"MONITOR", "MEDICAL_OFFICER", "MEDICAL_MONITOR"}:
                     pr = user.portal_role
                     if pr not in ROLES:
@@ -53,6 +57,7 @@ def identity(acrn_demo_session:Optional[str]=Cookie(None),db:Session=Depends(get
     if not demo_enabled: raise HTTPException(401,"Authentication required")
     if not x_demo_user or not x_demo_role: raise HTTPException(401,"Authentication required")
     if x_demo_role.upper() not in ROLES: raise HTTPException(403,"Monitor Portal access denied")
+    if x_demo_role.upper() == "MEDICAL_OFFICER": raise HTTPException(403,"Medical Officer access is limited to the case-data workspace.")
     return MonitorIdentity(x_demo_user,x_demo_role.upper(),tuple(filter(None,(x_study_scope or "").split(","))))
 def scope(i,study):
     if i.studies and "*" not in i.studies and study not in i.studies: raise HTTPException(403,"Study outside delegated scope")

@@ -135,9 +135,10 @@ export default function App() {
       || visit.final_record
       || visit.finalized
     );
+    const currentReviewerSigned = visit => isReviewerVisitSigned(visit, activeCase?.reviewerRole);
     const allReviewerVisitsSigned = updatedActiveVisits.length > 0
-      && updatedActiveVisits.every(isReviewerVisitSigned);
-    const firstUnsignedVisitIndex = updatedActiveVisits.findIndex(visit => !isReviewerVisitSigned(visit));
+      && updatedActiveVisits.every(currentReviewerSigned);
+    const firstUnsignedVisitIndex = updatedActiveVisits.findIndex(visit => !currentReviewerSigned(visit));
     const nextVisitIndex = firstUnsignedVisitIndex === -1 ? updatedActiveVisits.length : firstUnsignedVisitIndex;
     const latestResult = results[results.length - 1] || sigData;
     const caseSignature = latestResult.signature_hash ? {

@@ -4,7 +4,7 @@ import { OverallSummary, VisitEvidencePanel, VisitRibbon } from './VisitEvidence
 import { generateNarrative, generateSummary, AI_ENGINE_MODEL } from '../services/demoNarrative';
 import { generateVisitNarrative, generateOverallNarrative } from '../services/clinicalNarrative';
 import { downloadPdfReport } from '../services/api';
-import { isReviewerVisitSigned, isVisitComplete, normalizeVisitEvidence } from '../services/visitEvidence';
+import { isReviewerVisitSigned, isVisitComplete, isVisitNotPerformed, normalizeVisitEvidence } from '../services/visitEvidence';
 
 const DEFAULT_VISIT_CODES = ['V01', 'V02', 'V03', 'V04', 'V05', 'V06'];
 
@@ -177,6 +177,7 @@ export default function AdjudicatorWorkbench({
   const [caseProgressError, setCaseProgressError] = useState('');
   const isSigned = activeCase?.status?.includes('Finalized');
   const isReviewerC = activeCase?.reviewerRole === 'REVIEWER_C';
+  const isCurrentReviewerVisitSigned = (visit) => isReviewerVisitSigned(visit, activeCase?.reviewerRole);
 
   const updateCurrentDecision = (patch) => {
     setVisitDecisions(prev => {
@@ -194,12 +195,30 @@ export default function AdjudicatorWorkbench({
   const evidenceVisits = normalizeVisitEvidence({ ...(activeCase || {}), visits: pages }).slice(0, 6);
   const selectedVisit = pages[selectedVisitIndex] || pages[0] || null;
   const selectedEvidenceVisit = evidenceVisits[Math.min(selectedVisitIndex, evidenceVisits.length - 1)] || null;
-  const isSelectedVisitSigned = Boolean(selectedVisit && isReviewerVisitSigned(selectedVisit));
-  const isVisitLocked = isSigned || isSelectedVisitSigned;
+  const isSelectedVisitSigned = Boolean(selectedVisit && isCurrentReviewerVisitSigned(selectedVisit));
+  const isScheduledVisitNotPerformed = isVisitNotPerformed(selectedEvidenceVisit);
+  const isVisitLocked = isSigned || isSelectedVisitSigned || isScheduledVisitNotPerformed;
   const isVisitFive = /V05|visit\s*5/i.test(selectedVisit?.name || selectedVisit?.visit_code || '') || selectedVisit?.visit_number === 5;
-  const firstUnsignedVisitIndex = pages.findIndex((visit) => !isReviewerVisitSigned(visit));
+  const firstUnsignedVisitIndex = pages.findIndex((visit) => !isCurrentReviewerVisitSigned(visit));
   const allReviewerVisitsSigned = pages.length > 0 && firstUnsignedVisitIndex === -1;
   const allVisitsFinalized = pages.length > 0 && pages.every(isVisitComplete);
+
+  useEffect(() => {
+    if (!isScheduledVisitNotPerformed) return;
+    setSelectedDiagnosis('Not PE');
+    setMeetsCriteria(false);
+    setSelectedSeverity('Without severe features');
+    setSelectedOnset('Onset not yet classifiable');
+    setSelectedCertainty('Not PE');
+    setDifferentialDiagnosis((current) => current || 'Scheduled study visit not performed; no clinical evidence was available for adjudication.');
+    updateCurrentDecision({
+      selectedDiagnosis: 'Not PE',
+      meetsCriteria: false,
+      selectedSeverity: 'Without severe features',
+      selectedOnset: 'Onset not yet classifiable',
+      selectedCertainty: 'Not PE',
+    });
+  }, [selectedEvidenceVisit?.id, isScheduledVisitNotPerformed]);
 
   const detectedFirstPe = (() => {
     for (let i = 0; i < evidenceVisits.length; i++) {
@@ -294,6 +313,8 @@ export default function AdjudicatorWorkbench({
         return nextState;
       });
     }
+    const nextVisit = evidenceVisits[nextIndex] || pages[nextIndex];
+    const nextVisitNotPerformed = isVisitNotPerformed(nextVisit);
     const saved = visitDecisions[nextIndex] || (pages[nextIndex]?.id ? visitDecisions[pages[nextIndex]?.id] : null);
     if (saved) {
       setSelectedDiagnosis(saved.selectedDiagnosis);
@@ -312,7 +333,6 @@ export default function AdjudicatorWorkbench({
         setFetalProvenance(saved.fetalProvenance || {});
       }
     } else if (nextIndex < pages.length) {
-      const nextVisit = evidenceVisits[nextIndex] || pages[nextIndex];
       const autoOnset = deriveOnsetFromVisit(nextVisit, activeCase);
       setSelectedDiagnosis('PE');
       setMeetsCriteria(true);
@@ -328,6 +348,14 @@ export default function AdjudicatorWorkbench({
         setGestationalAgeAtDelivery('');
         setPregnancyOutcome('Normal baby');
       }
+    }
+    if (nextVisitNotPerformed) {
+      setSelectedDiagnosis('Not PE');
+      setMeetsCriteria(false);
+      setSelectedSeverity('Without severe features');
+      setSelectedOnset('Onset not yet classifiable');
+      setSelectedCertainty('Not PE');
+      setDifferentialDiagnosis('Scheduled study visit not performed; no clinical evidence was available for adjudication.');
     }
     setSelectedVisitIndex(nextIndex);
   };
@@ -599,7 +627,7 @@ export default function AdjudicatorWorkbench({
                   {cases.map(c => {
                     const isSelected = activeCase && c.id === activeCase.id;
                     const isCaseSigned = c.status?.includes('Finalized');
-                    const signedVisitCount = (c.visits || []).filter(isReviewerVisitSigned).length;
+                    const signedVisitCount = (c.visits || []).filter((visit) => isReviewerVisitSigned(visit, c.reviewerRole)).length;
                     const allReviewerVisitsSigned = (c.visits || []).length > 0
                       && signedVisitCount === c.visits.length;
 
@@ -718,6 +746,12 @@ export default function AdjudicatorWorkbench({
               This visit is already signed by you and is immutable. It cannot be edited or signed again.
             </div>
           )}
+          {isScheduledVisitNotPerformed && !isSelectedVisitSigned && (
+            <div role="status" style={{ marginBottom: '16px', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#f8fafc', color: '#475569', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Lock size={14} />
+              Scheduled Study Visit Not Performed — diagnosis is locked to Not PE because there is no clinical evidence to adjudicate.
+            </div>
+          )}
 
           {/* Active Visit Clinical Evidence or Overall Case Summary */}
           {selectedVisitIndex === evidenceVisits.length ? (
@@ -753,7 +787,7 @@ export default function AdjudicatorWorkbench({
 
                         const hasDecision = Boolean(dec);
                         const isMet = hasDecision ? (dec.meetsCriteria !== false && dec.selectedDiagnosis !== 'Not PE') : false;
-                        const isVisitSigned = isReviewerVisitSigned(v);
+                      const isVisitSigned = isCurrentReviewerVisitSigned(v);
                         const diag = hasDecision ? (dec.selectedDiagnosis || (isMet ? 'PE' : 'Not PE')) : (isVisitSigned ? 'Signed' : (isSigned ? 'Completed' : 'Pending review'));
                         const sev = isMet ? (dec.selectedSeverity || 'Without severe features') : '🔒 Locked (Not PE)';
                         const onset = isMet ? (dec.selectedOnset || defaultOnset) : '—';
@@ -958,7 +992,7 @@ export default function AdjudicatorWorkbench({
                   <ArrowLeft size={16} /> Back to Queue
                 </button>
                 <button className="btn-large btn-next" disabled={allReviewerVisitsSigned || isSigned} onClick={() => {
-                  const perVisitOnset = evidenceVisits.filter(v => !isReviewerVisitSigned(v)).map((v) => {
+                  const perVisitOnset = evidenceVisits.filter(v => !isCurrentReviewerVisitSigned(v)).map((v) => {
                     const idx = evidenceVisits.indexOf(v);
                     const dec = visitDecisions[idx] || (v.id ? visitDecisions[v.id] : null);
                     const isMet = dec ? (dec.meetsCriteria !== false && dec.selectedDiagnosis !== 'Not PE') : (meetsCriteria && idx === 0);
@@ -1004,16 +1038,18 @@ export default function AdjudicatorWorkbench({
             </div>
           ) : selectedEvidenceVisit && (
             <>
-              <VisitEvidencePanel
-                visit={selectedEvidenceVisit}
-                selectedIndex={selectedVisitIndex}
-                visitCount={evidenceVisits.length}
-                onSelectVisit={handleVisitSelect}
-                caseData={activeCase}
-                narrativeText={narrativeText}
-              />
+              {!isScheduledVisitNotPerformed && (
+                <VisitEvidencePanel
+                  visit={selectedEvidenceVisit}
+                  selectedIndex={selectedVisitIndex}
+                  visitCount={evidenceVisits.length}
+                  onSelectVisit={handleVisitSelect}
+                  caseData={activeCase}
+                  narrativeText={narrativeText}
+                />
+              )}
 
-              <div style={{ marginTop: '16px' }}>
+              {!isScheduledVisitNotPerformed && <div style={{ marginTop: '16px' }}>
                 <DropdownSection title="Final Adjudication Controls" icon={<ShieldCheck size={16} />} defaultOpen>
                   <div className="summary-card-grid" style={{ marginBottom: '16px' }}>
                     <div className="form-group">
@@ -1230,10 +1266,10 @@ export default function AdjudicatorWorkbench({
                     </div>
                   </div>
                 </DropdownSection>
-              </div>
+              </div>}
 
               {/* Special Visit 5 Closed-Ended Outcome Endpoints Adjudication */}
-              {(selectedEvidenceVisit.visit_number === 5 || selectedEvidenceVisit.visit_code === 'V05' || selectedEvidenceVisit.name?.includes('Visit 5')) && (
+              {false && !isScheduledVisitNotPerformed && (selectedEvidenceVisit.visit_number === 5 || selectedEvidenceVisit.visit_code === 'V05' || selectedEvidenceVisit.name?.includes('Visit 5')) && (
                 <div style={{ marginTop: '16px' }}>
                   <DropdownSection title="Adjudicate Visit 5 Fetal &amp; Neonatal Outcome Endpoints" icon={<Baby size={16} />} defaultOpen>
                     {(() => {
@@ -1349,7 +1385,7 @@ export default function AdjudicatorWorkbench({
           )}
 
           {/* Clean Wizard Navigation Footer */}
-          {selectedVisitIndex !== evidenceVisits.length && (
+          {selectedVisitIndex !== evidenceVisits.length && !isScheduledVisitNotPerformed && (
             <div className="wizard-footer" style={{ marginTop: '24px' }}>
               <button className="btn-large btn-back" onClick={() => setCurrentStep(1)}>
                 <ArrowLeft size={16} /> Back to Queue
@@ -1391,7 +1427,7 @@ export default function AdjudicatorWorkbench({
               <CheckCircle2 size={24}/>
               <div>
                 <strong>Submitted for concordance checking</strong>
-                <p>Your {(activeCase.visits || []).filter(isReviewerVisitSigned).length} of {(activeCase.visits || []).length} visit records are locked. Matching reviewer decisions can finalize automatically; discordant decisions are routed to Reviewer C and the Chairperson workflow.</p>
+              <p>Your {(activeCase.visits || []).filter(isCurrentReviewerVisitSigned).length} of {(activeCase.visits || []).length} visit records are locked. Matching reviewer decisions can finalize automatically; discordant decisions are routed to Reviewer C and the Chairperson workflow.</p>
               </div>
             </div>
           )}

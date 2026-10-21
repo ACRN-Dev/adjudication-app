@@ -282,6 +282,23 @@ export function visitLabel(visit, index) {
   return visit?.name || visit?.visit_code || visit?.visitCode || `V${String(index + 1).padStart(2, '0')}`;
 }
 
+export function isVisitNotPerformed(visit) {
+  if (!visit) return false;
+  if (visit.is_not_performed === true) return true;
+  if (String(visit.not_performed_reason || '').trim()) return true;
+  const sourceText = [
+    visit.name,
+    visit.visit_code,
+    visit.label,
+    visit.packet_status,
+    ...Object.values(visit.evidence || {}).flat().map((row) => [
+      row?.key, row?.label, row?.source_field_label, row?.raw_source_value,
+      row?.parsed_text_value, row?.coded_value, row?.value
+    ].join(' '))
+  ].filter(Boolean).join(' ');
+  return /scheduled\s+study\s+visit\s+not\s+performed|visit\s+not\s+performed|not\s+performing|missed\s+visit|lost\s+to\s+follow[- ]?up|withdrew/i.test(sourceText);
+}
+
 export function isVisitComplete(visit) {
   const state = String(visit?.resolution_status || visit?.final_status || visit?.status || visit?.packet_status || '').toUpperCase();
   if (['CONCORDANT', 'RESOLVED_BY_MAJORITY', 'FINALIZED', 'CLOSED'].includes(state)) return true;
@@ -289,10 +306,11 @@ export function isVisitComplete(visit) {
   return false;
 }
 
-export function isReviewerVisitSigned(visit) {
+export function isReviewerVisitSigned(visit, reviewerRole = null) {
   if (visit?.signed || visit?.is_signed) return true;
   const status = visit?.adjudication_status;
-  return status && typeof status === 'object' ? Object.values(status).some(Boolean) : false;
+  if (!status || typeof status !== 'object') return false;
+  return reviewerRole ? Boolean(status[reviewerRole]) : Object.values(status).some(Boolean);
 }
 
 function toNumber(value) {

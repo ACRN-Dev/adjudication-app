@@ -129,6 +129,26 @@ def test_realtime_monitor_session_invalid_portal_role_definitive_even_when_demo_
     assert r.status_code == 403
 
 
+def test_medical_officer_can_access_case_data_but_not_adjudication_operations(monkeypatch):
+    monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
+    db = TestingSession()
+    db.add(PortalUser(
+        email="sso.medical.officer@acrnhealth.com", display_name="SSO Medical Officer",
+        password_hash=hash_password("Whatever123!"), role="MEDICAL_OFFICER", portal_role="MEDICAL_OFFICER", status=ACTIVE,
+    ))
+    db.commit()
+    db.close()
+    login = client.post("/api/auth/login", json={"email": "sso.medical.officer@acrnhealth.com", "password": "Whatever123!"})
+    assert login.status_code == 200
+    cookies = {"acrn_demo_session": login.cookies["acrn_demo_session"]}
+
+    assert client.get("/api/realtime/batches", cookies=cookies).status_code == 200
+    assert client.get("/api/realtime/patients", cookies=cookies).status_code == 200
+    assert client.get("/api/realtime/queries", cookies=cookies).status_code == 200
+    assert client.get("/api/realtime/adjudicators", cookies=cookies).status_code == 403
+    assert client.post(QC_DECISION, cookies=cookies).status_code == 403
+
+
 def test_realtime_session_monitor_can_upload_batch(monkeypatch):
     import io, uuid
     monkeypatch.setenv("ENABLE_DEMO_ACCOUNTS", "false")
