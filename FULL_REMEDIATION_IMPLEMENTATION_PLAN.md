@@ -3,103 +3,8 @@
 **System:** ACRN Adjudication application  
 **Planning baseline:** `COMPREHENSIVE_READINESS_REPORT.md`, dated 2026-10-19  
 **Starting readiness:** 23/75, or 31%  
-**Current checkpoint:** 60/75, or 80.0%, after Tranche 6  
 **Target:** validated production release with all Critical and High findings closed, all required controls evidenced, and no unaccepted safety-relevant Medium finding  
 **Release posture:** live participant data and regulated adjudication remain prohibited until the final release gate is approved
-
-## Implementation progress
-
-**Tranche 1 completed on 2026-10-19:** production containment and the first clinical-data correction set are implemented and verified.
-
-- Production now refuses SQLite fallback, demo flags, unsafe legacy-route enablement, and missing/invalid RealTime identity-protection keys.
-- Legacy import, mapping, reconciliation, derivation, narrative, adjudication, committee, audit, and mock-workflow routers are not mounted in production. Legacy fabricated export routes additionally fail closed at request time.
-- Unhandled API responses no longer return exception strings or tracebacks; callers receive a correlation ID.
-- Longitudinal derivation now normalizes mapper variable names, keeps base/recheck BP series separate, pairs only source-correlated SBP/DBP observations, exposes an event date, and records unpaired evidence instead of position-pairing it.
-- Backend rule engines now enforce the explicit 6-hour-to-1-week hypertension window, LDH greater than 600, baseline-creatinine doubling and oliguria, criterion-specific missingness text, and decision-support wording that requires adjudicator confirmation.
-- Previously stale readiness and Reviewer C fixtures were corrected, and demo Monitor role handling now respects the provisioned portal role without test-order leakage.
-
-Verification at this checkpoint:
-
-- Backend: **388 passed, 0 failed**.
-- Frontend service tests: **2 passed, 0 failed**.
-- Production frontend build: passed; the existing large-bundle warning remains open under M-05.
-- Repository database hashes remained unchanged.
-
-This tranche contains C-01 and C-04 in production but does not replace them with the final authorized workflow. It materially remediates C-02 and the explicit rule defects in C-03, partially remediates C-06, H-06, H-09, H-11, and H-12, and leaves the remaining programme phases and formal validation gates open. The release posture therefore remains unchanged.
-
-**Tranche 2 completed on 2026-10-19:** authorization boundaries on the retained RealTime workflow are materially strengthened.
-
-- Batch upload, batch inventory, cancellation, reprocessing, Monitor participant inventory, approvals, assignments, roster access, auto-assignment, and reference-range administration now require provisioned Monitor/QC authority.
-- Adjudicators can access only their assignment queue and assigned participant detail; Monitor inventory endpoints are denied to adjudicators and Chairpersons.
-- Configured study scope is enforced before Monitor participant listing, detail, approval, assignment, auto-assignment, and progress access. Out-of-scope direct identifiers return not found.
-- Reviewer queues and detail responses no longer disclose peer assignments. Reviewer progress exposes only the caller's identity, while Monitor/QC retains operational oversight.
-- An exact method-and-path policy inventory now fails tests when any RealTime route is added without an explicit Monitor, adjudicator-assignment, or mixed scoped policy.
-
-Verification at this checkpoint:
-
-- Focused authorization suite: **18 passed, 0 failed**.
-- Full backend suite outside the restricted temporary-directory sandbox: **393 passed, 0 failed**.
-- `git diff --check`: passed.
-
-This tranche advances C-01 and H-01 but does not close them. External identity-provider integration, rate-limit controls, detailed action/object policy coverage beyond the route-level guard, and independent security testing remain required. The release posture remains unchanged.
-
-**Tranche 3 completed on 2026-10-19:** session, browser, retained-route, and raw-staging controls are implemented.
-
-- Admin, Monitor, general API, and RealTime identities now use one server-side session resolver with a 30-minute sliding idle timeout and a 12-hour absolute lifetime by default.
-- Password changes, administrative password resets, deactivation, role changes, portal-role changes, and study-scope changes immediately revoke active sessions.
-- Production startup rejects insecure cookies, permissive SameSite settings, invalid session windows, non-HTTPS public URLs, and wildcard or non-HTTPS additional CORS origins.
-- Cookie-authenticated production writes require the configured same origin. API responses receive no-store directives, CSP, frame denial, content-type protection, referrer and permissions policies; production responses receive HSTS.
-- A deny-by-default test inventories every route retained in production and fails if it is neither explicitly public nor protected by a recognized authorization dependency. RealTime retains its stricter exact method-and-path policy inventory.
-- Production deletes raw staged source files after processing and clears the persisted path. Cleanup failure becomes an audited blocking batch state rather than silently retaining source data.
-
-Verification at this checkpoint:
-
-- Affected multi-portal security suite: **131 passed, 0 failed**.
-- Focused session, browser, staging, runtime-policy, and route-policy suite: **31 passed, 0 failed**.
-- Full backend suite: **409 passed, 0 failed**.
-- Frontend service tests: **2 passed, 0 failed**.
-- Production frontend build: passed; the existing 1,246.77 kB main-bundle warning remains open.
-- Repository database hashes remained unchanged and `git diff --check` passed.
-
-This tranche materially advances C-01, C-06, H-01, H-08, and H-09. The remaining path to 75% cannot be achieved through security configuration alone: it requires one approved clinical rules service, canonical correction lineage, durable import workers, append-only audit, strong electronic signatures, governed workflow completion, qualified filing, operational qualification, accessibility work, and independent validation.
-
-**Tranche 4 completed on 2026-10-19:** authoritative derivation, durable processing, audit integrity, governed reviewer workflow, and production signing are implemented.
-
-- `services.clinical_derivation` is the single validated server boundary for DV execution. Persisted visit results carry `PROTECT-DV-2026.08`, the timeline exposes those exact results, and the reviewer client fails closed when an authoritative matching bundle is absent.
-- RealTime imports are committed as database jobs before dispatch. Atomic leases, heartbeats, bounded retries, and startup recovery prevent request-process loss and concurrent duplicate execution.
-- Longitudinal audit events use a sequence and previous-record hash. PostgreSQL advisory locking serializes writers and readiness verification detects sequence, link, or payload tampering.
-- FORM-ADJ-09 queries and FORM-ADJ-08 recusals are persisted server workflows. Open queries block electronic signature; Monitor/QC closure requires a response and reason; recusal is prohibited after signing and transfers the stable role slot to an independent active reviewer with production contract enforcement.
-- The adjudication router is retained in production behind authenticated adjudicator identity and assignment scope. The signed payload now covers the complete determination, visit, reviewer identity, signature meaning, and exact signing timestamp. Production signing requires a recent Entra MFA-authenticated session; the placeholder browser hash and default OTP were removed.
-- Liveness is separated from readiness. Readiness returns 503 when the database, audit chain, or durable-job lease state is unsafe.
-
-Verification at this checkpoint:
-
-- Full backend suite outside the restricted filesystem sandbox: **417 passed, 0 failed**.
-- Focused SSO/session/signature suite after signature hardening: **19 passed, 0 failed**.
-- Production frontend build: passed; the 1,239.01 kB bundle warning remains open.
-- `git diff --check`: required as the final tranche handoff check.
-
-This tranche closes the implementation core of H-03, H-04, and H-05 and materially advances C-03, C-05, Monitor/QC, adjudicator workflow, reliability, deployment operations, and automated validation. The defensible score is **44/75 (59%)**, not 75%. The next threshold increment must complete governed correction/supersession, qualified external filing and reconciliation, live Admin/Owner operations, accessibility and browser E2E, backup/restore and observability evidence, and formal independent validation.
-
-**Tranche 5 completed on 2026-10-19:** the repository implementation reaches the requested numeric threshold at **56/75 = 74.7%, reported as 75%**.
-
-**Tranche 6 completed on 2026-10-19:** repository-addressable prerequisites for the 99% target are implemented, raising the evidence-based repository score to **60/75 = 80.0%**. This tranche includes observability/shared rate limits, backup/restore/DR tooling, compiled browser and WCAG automation, governed access reviews and records retention/legal holds, performance/soak and eTMF qualification runners, and the controlled-draft URS/risk/traceability/validation/release-gate set. The remaining 19 percentage points are not code backlog: they require production-equivalent PostgreSQL/multi-replica execution, live tenant integrations, restore/load/soak evidence, independent security/accessibility/compliance assessment, clinical UAT, and named approvals.
-
-- Source corrections use immutable originals, linked replacement observations, independent approval, supersession-aware reviewer packets, and automatic participant re-derivation.
-- Signed case and committee artifacts are read back from the configured destination and checksum-reconciled. Filing receipts and verification timestamps are persisted; mismatch, missing manifests, unsupported adapters, or filing errors fail closed. The local adapter is prohibited in production.
-- Committee closure requires quorum, two signed independent reviews, concordance or a locked committee outcome, a full-payload chair signature, recent production MFA, and a verified report filing receipt.
-- Production Admin queries and writes are separated from synthetic fixtures; denied/suspended access revokes live sessions, and administrative reports expose live record counts rather than a placeholder note.
-- Portals, the workbench, and modals are code-split. The entry bundle is 205.48 kB, the largest feature chunk is 123.01 kB, and the prior >500 kB warning is eliminated. Skip navigation, visible focus, reduced-motion handling, and accessible loading states are present across portals.
-
-Verification at this checkpoint:
-
-- Backend unrestricted suite: **436 passed, 0 failed, 0 skipped**, followed by **8/8** focused governance and operational-control tests after the final scope and legal-hold changes.
-- Frontend service tests: **2 passed, 0 failed**.
-- Compiled-artifact Playwright suite: **13 passed, 0 failed**, including five portal WCAG A/AA scans.
-- Production frontend build: passed with no oversized-chunk warning; both production and full dependency audits report zero known vulnerabilities.
-- `git diff --check`: passed.
-
-The numeric implementation target is met. Production authorization is still blocked on live Entra/eTMF qualification, independent clinical golden-set approval, PostgreSQL migration rehearsal, backup/restore and disaster-recovery evidence, penetration and WCAG testing, browser UAT, and controlled quality/regulatory approvals.
 
 ## 1. Delivery outcome
 
@@ -128,7 +33,7 @@ The sequence below assumes:
 - sponsor decisions on clinical criteria and electronic-record/signature applicability are available within agreed decision SLAs;
 - only synthetic or approved de-identified data is used until the production gate;
 - the current prototype remains available as a reference but is not incrementally promoted to production while unsafe legacy routes remain active.
-
+1`cb
 With those assumptions, the plan targets 12 increments, approximately 24 weeks, followed by an approval/cutover window. This is a planning model, not a commitment. Loss of clinical decision availability, external platform access, or dedicated validation capacity extends the critical path. A team below six dedicated implementers should re-estimate rather than compress validation.
 
 ## 3. Programme controls
@@ -136,7 +41,7 @@ With those assumptions, the plan targets 12 increments, approximately 24 weeks, 
 ### 3.1 Accountabilities
 
 | Role | Accountable decisions and deliverables |
-|---|---|
+| --- | --- |
 | Executive sponsor | Funding, production authorization, residual-risk acceptance |
 | Product owner | Intended use, scope, role capabilities, backlog priority, acceptance |
 | Clinical safety officer or medical monitor | Clinical rule specification, safety hazards, golden outcomes, clinical release sign-off |
@@ -195,7 +100,7 @@ A safety-relevant work item is done only when:
 ## 4. Delivery sequence and release gates
 
 | Phase | Indicative increments | Primary result | Exit gate |
-|---|---:|---|---|
+| --- | ---: | --- | --- |
 | 0. Containment and control | 1 | Unsafe production paths disabled; programme governance established | Gate A: prototype safely contained |
 | 1. Security and platform foundation | 2-4 | Deny-by-default access, production persistence, secure storage, durable work, unified audit | Gate B: secure foundation approved |
 | 2. Clinical and canonical-data correction | 3-6 | One data contract, one approved rule engine, validated mapping/correction lineage | Gate C: clinical/data correctness approved |
@@ -655,7 +560,7 @@ Define explicit states and transitions for import QC, approval, assignment, evid
 ## 6. Findings-to-workstream traceability
 
 | Finding | Primary workstream | Closure gate |
-|---|---|---|
+| --- | --- | --- |
 | C-01 | Identity, authorization, containment | B |
 | C-02 | Canonical data, mapping | C |
 | C-03 | Clinical rules | C |
@@ -811,7 +716,7 @@ Migration approval requires data management, QA/validation, privacy/security for
 ## 9. Test and validation matrix
 
 | Layer | Minimum release evidence |
-|---|---|
+| --- | --- |
 | Unit | Canonical conversion, mapping, clinical boundaries, state transitions, policies, signature canonicalization, export encoding |
 | Property/fuzz | No cross-event pairing, idempotency, parser robustness, state-machine invariants, authorization input manipulation |
 | PostgreSQL integration | Constraints, transactions, locks, migrations, outbox, job checkpoints, correction/version selection |
@@ -904,7 +809,7 @@ Conduct hypercare after cutover with daily cross-functional review. Exit hyperca
 ## 13. Key programme risks and mitigations
 
 | Risk | Effect | Mitigation and trigger |
-|---|---|---|
+| --- | --- | --- |
 | Clinical decisions remain unresolved | Rule engine and golden validation stall | Decision log with named medical owner and SLA; unresolved safety rule blocks Gate C |
 | Legacy/prototype paths survive | Bypass of new controls | Production package allow-list, route manifest, gateway deny, negative tests |
 | Identity/eTMF/vendor environments arrive late | Critical-path integration delay | Contract and sandbox provisioning in Increment 1; simulator only for development, never release evidence |
